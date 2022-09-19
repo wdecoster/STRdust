@@ -180,7 +180,12 @@ fn genotype_repeat(
     Ok("hiyaaa".to_string())
 }
 
-fn make_repeat_compressed_sequence(fasta: &String, chrom: &String, start: u32, end: u32) -> String {
+fn make_repeat_compressed_sequence(
+    fasta: &String,
+    chrom: &String,
+    start: u32,
+    end: u32,
+) -> Vec<u8> {
     let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
     // TODO make sure we cannot try to read past the end of chromosomes
     let fas_left = fas
@@ -189,11 +194,7 @@ fn make_repeat_compressed_sequence(fasta: &String, chrom: &String, start: u32, e
     let fas_right = fas
         .fetch_seq(&chrom, end as usize, (end + 10000) as usize)
         .expect("Failed to extract sequence from fasta");
-    let mut seq = std::str::from_utf8(fas_left)
-        .expect("Failed to extract sequence from fasta")
-        .to_string();
-    seq.push_str(std::str::from_utf8(fas_right).expect("Failed to extract sequence from fasta"));
-    seq
+    (&[fas_left, fas_right].concat()).to_owned()
 }
 
 fn get_phase(record: &bam::Record) -> u8 {
