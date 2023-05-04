@@ -1,25 +1,22 @@
 use bio::io::bed;
-use human_sort::compare as human_compare;
 use log::{error, info};
 use rayon::prelude::*;
-use rust_htslib::bam::ext::BamRecordExtensions;
-use rust_htslib::bam::record::{Aux, Cigar};
+use regex::Regex;
+use rust_htslib::bam::record::Aux;
 use rust_htslib::faidx;
 use rust_htslib::{bam, bam::Read};
-use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::f64::NAN;
-use std::fmt;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Mutex;
+
+use minimap2::*;
 
 pub fn genotype_repeats(
     bamp: PathBuf,
     fasta: PathBuf,
     region: Option<String>,
     region_file: Option<PathBuf>,
-    minlen: u32,
+    minlen: usize,
     support: usize,
     threads: usize,
 ) {
@@ -40,11 +37,12 @@ pub fn genotype_repeats(
             panic!();
         }
         (Some(region), None) => {
-            let (chrom, start, end) = crate::utils::process_region(region).unwrap();
+            let (chrom, start, end) = crate::utils::process_region(region)
+                .expect("Error when processing the region string");
             let bamf = bamp.into_os_string().into_string().unwrap();
             let fastaf = fasta.into_os_string().into_string().unwrap();
             match genotype_repeat(&bamf, &fastaf, chrom, start, end, minlen, support) {
-                Ok(output) => println!("{}", output),
+                Ok(output) => println!("{output}"),
                 Err(chrom) => error!("Contig {chrom} not found in bam file"),
             };
         }
@@ -97,7 +95,7 @@ pub fn genotype_repeats(
                 // The final output is sorted by chrom, start and end
                 genotypes_vec.sort_unstable();
                 for g in &mut *genotypes_vec {
-                    println!("{}", g);
+                    println!("{g}");
                 }
             } else {
                 // When running single threaded things become easier and the tool will require less memory
@@ -124,7 +122,7 @@ pub fn genotype_repeats(
                         support,
                     ) {
                         Ok(output) => {
-                            println!("{}", output);
+                            println!("{output}");
                         }
                         Err(chrom) => {
                             // For now the Err is only used for when a chromosome from the bed file does not appear in the bam file
@@ -150,33 +148,30 @@ fn genotype_repeat(
     chrom: String,
     start: u32,
     end: u32,
-    _minlen: u32,
+    minlen: usize,
     _support: usize,
 ) -> Result<String, String> {
     let newref = make_repeat_compressed_sequence(fasta, &chrom, start, end);
-    let mut bam = match bam::IndexedReader::from_path(&bamf) {
-        Ok(handle) => handle,
-        Err(e) => {
-            error!("Error opening BAM {}.\n{}", bamf, e);
-            panic!();
-        }
-    };
-    info!("Checks passed, genotyping repeat");
-    if let Some(tid) = bam.header().tid(chrom.as_bytes()) {
-        bam.fetch((tid, start, end)).unwrap();
-        // Per haplotype the read sequences are kept in a dictionary
-        let mut seqs: HashMap<u8, Vec<Vec<u8>>> = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
-
-        // extract sequences spanning the repeat
-        for r in bam.rc_records() {
-            let r = r.expect("Error reading BAM file in region {chrom}:{start}-{end}.");
-            let phase = get_phase(&r);
-            if phase > 0 {
-                let seq = r.seq().as_bytes();
-                seqs.get_mut(&phase).unwrap().push(seq);
+    let seqs = get_overlapping_reads(bamf, chrom.clone(), start, end).expect("Could not get reads");
+    let aligner = Aligner::builder()
+        .map_ont()
+        .with_cigar()
+        .with_seq(&newref)
+        .expect("Unable to build index");
+    // align the reads to the new repeat-compressed reference
+    let mut insertions = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
+    // a regular expression that splits the cs tag ':32*nt*na:10-gga:5+aaa:10' into (':32', '*nt', '*na', ':10', '-gga', ':5', '+aaa', ':10')
+    for (phase, seq) in seqs {
+        for s in seq {
+            let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|_| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
+            for read in mapping {
+                if let Some(s) = parse_cs(read, minlen) {
+                    insertions.get_mut(&phase).unwrap().push(s)
+                }
             }
         }
     }
+    println!("{:?}", insertions);
     Ok("hiyaaa".to_string())
 }
 
@@ -189,12 +184,40 @@ fn make_repeat_compressed_sequence(
     let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
     // TODO make sure we cannot try to read past the end of chromosomes
     let fas_left = fas
-        .fetch_seq(&chrom, (start - 10000) as usize, start as usize)
-        .expect("Failed to extract sequence from fasta");
+        .fetch_seq(chrom, (start - 10002) as usize, start as usize - 2)
+        .expect("Failed to extract fas_left sequence from fasta");
     let fas_right = fas
-        .fetch_seq(&chrom, end as usize, (end + 10000) as usize)
-        .expect("Failed to extract sequence from fasta");
-    (&[fas_left, fas_right].concat()).to_owned()
+        .fetch_seq(chrom, end as usize, (end + 9998) as usize)
+        .expect("Failed to extract fas_right sequence from fasta");
+    [fas_left, fas_right].concat()
+}
+
+fn get_overlapping_reads(
+    bamf: &String,
+    chrom: String,
+    start: u32,
+    end: u32,
+) -> Option<HashMap<u8, Vec<Vec<u8>>>> {
+    let mut bam = bam::IndexedReader::from_path(bamf).expect("Error opening BAM");
+    info!("Checks passed, genotyping repeat");
+    if let Some(tid) = bam.header().tid(chrom.as_bytes()) {
+        bam.fetch((tid, start, end))
+            .expect("Failure to extract reads from bam.");
+        // Per haplotype the read sequences are kept in a dictionary
+        let mut seqs = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
+
+        // extract sequences spanning the repeat locus
+        for r in bam.rc_records() {
+            let r = r.expect("Error reading BAM file in region {chrom}:{start}-{end}.");
+            let phase = get_phase(&r);
+            if phase > 0 {
+                let seq = r.seq().as_bytes();
+                seqs.get_mut(&phase).unwrap().push(seq);
+            }
+        }
+        return Some(seqs);
+    }
+    None
 }
 
 fn get_phase(record: &bam::Record) -> u8 {
@@ -203,9 +226,145 @@ fn get_phase(record: &bam::Record) -> u8 {
             if let Aux::U8(v) = value {
                 v
             } else {
-                panic!("Unexpected type of Aux {:?}", value)
+                panic!("Unexpected type of Aux {value:?}")
             }
         }
         Err(_e) => 0,
+    }
+}
+
+fn parse_cs(read: Mapping, minlen: usize) -> Option<String> {
+    let mut ref_pos = read.target_start;
+    let alignment = read.alignment.expect("Unable to access alignment");
+    let cs = alignment.cs.expect("Unable to get the cs field");
+
+    // split the cs tag using the regular expression
+    let re = Regex::new(r"(:\d+)|(\*\w+)|(\+\w+)|(-\w+)").unwrap();
+
+    let mut insertions = Vec::new();
+
+    for cap in re.captures_iter(&cs) {
+        let op = &cap[0].chars().next().unwrap();
+        match op {
+            ':' => {
+                // match consumes the reference (and the read)
+                ref_pos += cap[0][1..]
+                    .parse::<i32>()
+                    .expect("Unable to parse length from CS':' operation");
+            }
+            '*' => {
+                // mismatch consumes the reference (and the read)
+                // the cs tag is of the form *na, where n is the ref nucleotide and a the read nucleotide
+                // therefore the number of nucleotides to advance is half the length of sequence from this cs operation
+                ref_pos += cap[0][1..].len() as i32 / 2;
+            }
+            '-' => {
+                // deletion consumes the reference
+                // the cs tag is of the form -gga, where gga is the deleted sequence
+                // therefore the number of nucleotides to advance is the length of sequence from this cs operation
+                ref_pos += cap[0][1..].len() as i32;
+            }
+            '+' => {
+                // insertion consumes the read
+                // we only care about insertions that are within +/-10 bases of the repeat locus that was excised from the reference
+                // this is the ref_pos
+                // the cs tag is of the form +aaa, where aaa is the inserted sequence
+                // if the insertion is longer than the minimum length, it is added to the list of insertions
+                if cap[0][1..].len() > minlen && (9990..=10010).contains(&ref_pos) {
+                    insertions.push(cap[0][1..].to_string());
+                }
+            }
+            _ => {
+                // error
+                panic!("Unexpected operation in cs tag: {op}");
+            }
+        }
+    }
+    if !insertions.is_empty() {
+        Some(insertions.join(""))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_make_repeat_compressed_sequence() {
+        let fasta = String::from("test_data/chr7.fa.gz");
+        let chrom = String::from("chr7");
+        let start = 154654404;
+        let end = 154654432;
+        let seq = make_repeat_compressed_sequence(&fasta, &chrom, start, end);
+        // println!("{:?}", std::str::from_utf8(&seq[9990..10010]));
+        // println!("{:?}", std::str::from_utf8(&seq));
+        assert_eq!(seq.len(), 20000);
+    }
+
+    #[test]
+    fn test_get_phase() {
+        let mut bam =
+            bam::Reader::from_path("test_data/small-test-phased.bam").expect("Failed opening bam");
+        let record = bam
+            .records()
+            .next()
+            .expect("Failed to read first record from bam");
+        let phase = get_phase(&record.unwrap());
+        assert_eq!(phase, 2);
+    }
+    #[test]
+    fn test_get_overlapping_reads() {
+        let bam = String::from("test_data/small-test-phased.bam");
+        let chrom = String::from("chr7");
+        let start = 154654404;
+        let end = 154654432;
+        let _reads = get_overlapping_reads(&bam, chrom, start, end);
+    }
+
+    #[test]
+    fn test_parse_cs() {
+        let bam = String::from("test_data/small-test-phased.bam");
+        let fasta = String::from("test_data/chr7.fa.gz");
+        let chrom = String::from("chr7");
+        let start = 154654404;
+        let end = 154654432;
+        let minlen = 5;
+        let _support = 1;
+        let newref = make_repeat_compressed_sequence(&fasta, &chrom, start, end);
+        let binding = get_overlapping_reads(&bam, chrom.clone(), start, end).unwrap();
+        let read = binding
+            .get(&1)
+            .expect("Could not find phase 1")
+            .iter()
+            .next()
+            .expect("No reads found");
+        let aligner = Aligner::builder()
+            .map_ont()
+            .with_cigar()
+            .with_seq(&newref)
+            .expect("Unable to build index");
+        let mapping = aligner.map(read.as_slice(), true, false, None, None).unwrap_or_else(|_| panic!("Unable to align read with seq {read:?} to repeat-compressed reference for {chrom}:{start}-{end}", read=read.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
+
+        let _insertion = parse_cs(
+            mapping
+                .first()
+                .expect("Could not get first mapping")
+                .clone(),
+            minlen,
+        );
+    }
+
+    #[test]
+    fn test_genotype_repeat() {
+        let bam = String::from("test_data/small-test-phased.bam");
+        let fasta = String::from("test_data/chr7.fa.gz");
+        let chrom = String::from("chr7");
+        let start = 154654404;
+        let end = 154654432;
+        let minlen = 5;
+        let support = 1;
+        let genotype = genotype_repeat(&bam, &fasta, chrom, start, end, minlen, support);
+        println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 }

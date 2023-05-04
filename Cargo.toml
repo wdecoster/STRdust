@@ -3,6 +3,7 @@ name = "STRdust"
 version = "0.1.0"
 edition = "2021"
 
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -14,6 +15,9 @@ rayon = "1.5.3"
 rust-htslib = "0.38.2"
 bio = "*"
 human-sort = "0.2.2"
+# minimap2 = "0.1.11"
+minimap2 = { git = "https://github.com/jguhlin/minimap2-rs.git" }
+regex = "1.8.1"
 
 [dev-dependencies]
 ctor = "*"
