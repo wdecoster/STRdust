@@ -8,7 +8,7 @@ use std::path::Path;
 /// Uses the presence of a `.gz` extension to decide
 pub fn reader(filename: &str) -> Box<dyn BufRead> {
     let path = Path::new(filename);
-    let file = match File::open(&path) {
+    let file = match File::open(path) {
         Err(why) => panic!("couldn't open {}: {}", path.display(), why),
         Ok(file) => file,
     };
