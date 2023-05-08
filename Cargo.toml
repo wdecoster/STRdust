@@ -18,6 +18,7 @@ human-sort = "0.2.2"
 # minimap2 = "0.1.11"
 minimap2 = { git = "https://github.com/jguhlin/minimap2-rs.git" }
 regex = "1.8.1"
+rust-spoa = "0.2.4"
 
 [dev-dependencies]
 ctor = "*"
