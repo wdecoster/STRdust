@@ -5,6 +5,7 @@ use log::info;
 use std::path::PathBuf;
 
 pub mod call;
+pub mod consensus;
 pub mod utils;
 
 // The arguments end up in the Cli struct
@@ -32,7 +33,7 @@ struct Cli {
     #[clap(short, long, value_parser, default_value_t = 5)]
     minlen: usize,
 
-    /// minimal number of supporting reads
+    /// minimal number of supporting reads per haplotype
     #[clap(short, long, value_parser, default_value_t = 3)]
     support: usize,
 

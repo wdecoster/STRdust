@@ -2,7 +2,6 @@ use bio::io::bed;
 use log::{error, info};
 use rayon::prelude::*;
 use regex::Regex;
-use rust_htslib::bam::record::Aux;
 use rust_htslib::faidx;
 use rust_htslib::{bam, bam::Read};
 use std::collections::HashMap;
@@ -149,30 +148,51 @@ fn genotype_repeat(
     start: u32,
     end: u32,
     minlen: usize,
-    _support: usize,
+    support: usize,
 ) -> Result<String, String> {
     let newref = make_repeat_compressed_sequence(fasta, &chrom, start, end);
     let seqs = get_overlapping_reads(bamf, chrom.clone(), start, end).expect("Could not get reads");
-    let aligner = Aligner::builder()
+    let aligner = minimap2::Aligner::builder()
         .map_ont()
         .with_cigar()
         .with_seq(&newref)
         .expect("Unable to build index");
     // align the reads to the new repeat-compressed reference
-    let mut insertions = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
     // a regular expression that splits the cs tag ':32*nt*na:10-gga:5+aaa:10' into (':32', '*nt', '*na', ':10', '-gga', ':5', '+aaa', ':10')
-    for (phase, seq) in seqs {
+    let mut consenses = vec![];
+    for phase in [1, 2] {
+        let mut insertions = vec![];
+        let seq = seqs.get(&phase).unwrap();
         for s in seq {
             let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|_| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
             for read in mapping {
                 if let Some(s) = parse_cs(read, minlen) {
-                    insertions.get_mut(&phase).unwrap().push(s)
+                    insertions.push(s)
                 }
             }
         }
+        consenses.push(crate::consensus::consensus(&insertions, support));
     }
-    println!("{:?}", insertions);
-    Ok("hiyaaa".to_string())
+    let (length1, seq1) = match consenses[0] {
+        Some(ref s) => (s.len().to_string(), s.clone()),
+        None => (".".to_string(), ".".to_string()),
+    };
+    let (length2, seq2) = match consenses[1] {
+        Some(ref s) => (s.len().to_string(), s.clone()),
+        None => (".".to_string(), ".".to_string()),
+    };
+
+    // I will have to convert the format below to proper VCF later
+    Ok(format!(
+        "{chrom}\t{start}\t{end}\t{length1}|{length2}\t{consensus1}|{consensus2}",
+        chrom = chrom,
+        start = start,
+        end = end,
+        length1 = length1, // length of the consensus sequence minus the length of the repeat
+        length2 = length2,
+        consensus1 = seq1,
+        consensus2 = seq2,
+    ))
 }
 
 fn make_repeat_compressed_sequence(
@@ -209,7 +229,7 @@ fn get_overlapping_reads(
         // extract sequences spanning the repeat locus
         for r in bam.rc_records() {
             let r = r.expect("Error reading BAM file in region {chrom}:{start}-{end}.");
-            let phase = get_phase(&r);
+            let phase = crate::utils::get_phase(&r);
             if phase > 0 {
                 let seq = r.seq().as_bytes();
                 seqs.get_mut(&phase).unwrap().push(seq);
@@ -218,19 +238,6 @@ fn get_overlapping_reads(
         return Some(seqs);
     }
     None
-}
-
-fn get_phase(record: &bam::Record) -> u8 {
-    match record.aux(b"HP") {
-        Ok(value) => {
-            if let Aux::U8(v) = value {
-                v
-            } else {
-                panic!("Unexpected type of Aux {value:?}")
-            }
-        }
-        Err(_e) => 0,
-    }
 }
 
 fn parse_cs(read: Mapping, minlen: usize) -> Option<String> {
@@ -303,17 +310,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_phase() {
-        let mut bam =
-            bam::Reader::from_path("test_data/small-test-phased.bam").expect("Failed opening bam");
-        let record = bam
-            .records()
-            .next()
-            .expect("Failed to read first record from bam");
-        let phase = get_phase(&record.unwrap());
-        assert_eq!(phase, 2);
-    }
-    #[test]
     fn test_get_overlapping_reads() {
         let bam = String::from("test_data/small-test-phased.bam");
         let chrom = String::from("chr7");
@@ -339,7 +335,7 @@ mod tests {
             .iter()
             .next()
             .expect("No reads found");
-        let aligner = Aligner::builder()
+        let aligner = minimap2::Aligner::builder()
             .map_ont()
             .with_cigar()
             .with_seq(&newref)
