@@ -18,6 +18,7 @@ pub fn genotype_repeats(
     minlen: usize,
     support: usize,
     threads: usize,
+    somatic: bool,
 ) {
     if !bamp.is_file() {
         error!(
@@ -74,6 +75,7 @@ pub fn genotype_repeats(
                         rec.end().try_into().unwrap(),
                         minlen,
                         support,
+                        somatic,
                     ) {
                         Ok(output) => {
                             let mut geno = genotypes.lock().unwrap();
@@ -119,6 +121,7 @@ pub fn genotype_repeats(
                         rec.end().try_into().unwrap(),
                         minlen,
                         support,
+                        somatic,
                     ) {
                         Ok(output) => {
                             println!("{output}");
@@ -149,6 +152,7 @@ fn genotype_repeat(
     end: u32,
     minlen: usize,
     support: usize,
+    somatic: bool,
 ) -> Result<String, String> {
     let newref = make_repeat_compressed_sequence(fasta, &chrom, start, end);
     let seqs = get_overlapping_reads(bamf, chrom.clone(), start, end).expect("Could not get reads");
@@ -160,6 +164,8 @@ fn genotype_repeat(
     // align the reads to the new repeat-compressed reference
     // a regular expression that splits the cs tag ':32*nt*na:10-gga:5+aaa:10' into (':32', '*nt', '*na', ':10', '-gga', ':5', '+aaa', ':10')
     let mut consenses = vec![];
+    let mut all_insertions = vec![]; // only used with `somatic`
+
     for phase in [1, 2] {
         let mut insertions = vec![];
         let seq = seqs.get(&phase).unwrap();
@@ -172,6 +178,9 @@ fn genotype_repeat(
             }
         }
         consenses.push(crate::consensus::consensus(&insertions, support));
+        if somatic {
+            // store all inserted sequences for identifying somatic variation
+            all_insertions.push(insertions.join(","));
     }
     let (length1, seq1) = match consenses[0] {
         Some(ref s) => (s.len().to_string(), s.clone()),
@@ -182,16 +191,14 @@ fn genotype_repeat(
         None => (".".to_string(), ".".to_string()),
     };
 
-    // I will have to convert the format below to proper VCF later
+    let somatic_info_field = if somatic {
+        format!(";SEQS={}", all_insertions.join("|"))
+    } else {
+        "".to_string()
+    };
+
     Ok(format!(
-        "{chrom}\t{start}\t{end}\t{length1}|{length2}\t{consensus1}|{consensus2}",
-        chrom = chrom,
-        start = start,
-        end = end,
-        length1 = length1, // length of the consensus sequence minus the length of the repeat
-        length2 = length2,
-        consensus1 = seq1,
-        consensus2 = seq2,
+        "{chrom}\t{start}\t.\t{ref}\t{alt1},{alt2}\t.\t.\t\
     ))
 }
 

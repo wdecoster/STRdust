@@ -40,6 +40,10 @@ struct Cli {
     /// Number of parallel threads to use
     #[clap(short, long, value_parser, default_value_t = 8)]
     threads: usize,
+
+    /// Print information on somatic variability
+    #[clap(long, value_parser, default_value_t = false)]
+    somatic: bool,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
@@ -63,6 +67,7 @@ fn main() {
         args.minlen,
         args.support,
         args.threads,
+        args.somatic,
     );
 }
 
