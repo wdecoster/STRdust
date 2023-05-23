@@ -156,13 +156,13 @@ fn genotype_repeat(
 ) -> Result<String, String> {
     let (repeat_compressed_reference, repeat_ref_sequence) =
         make_repeat_compressed_sequence(fasta, &chrom, start, end);
-    let seqs = get_overlapping_reads(bamf, chrom.clone(), start, end).expect("Could not get reads");
+    if let Some(seqs) = get_overlapping_reads(bamf, chrom.clone(), start, end) {
     // Create an index for minimap2 alignment
     let aligner = minimap2::Aligner::builder()
         .map_ont()
         .with_cigar()
         .with_seq(&repeat_compressed_reference)
-        .expect("Unable to build index");
+            .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
     let mut consenses = vec![];
     let mut all_insertions = vec![]; // only used with `somatic`
 
@@ -171,7 +171,7 @@ fn genotype_repeat(
         let seq = seqs.get(&phase).unwrap();
         // align the reads to the new repeat-compressed reference
         for s in seq {
-            let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|_| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
+                let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}\n{err}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
             for read in mapping {
                 if let Some(s) = parse_cs(read, minlen) {
                     // slice out inserted sequences from the CS tag
@@ -186,8 +186,10 @@ fn genotype_repeat(
         }
     }
     // since I use .pop() to format the two consensus sequences, the order is reversed
-    let (length2, seq2, support2, std_dev2) = format_lengths(consenses.pop().unwrap(), start, end);
-    let (length1, seq1, support1, std_dev1) = format_lengths(consenses.pop().unwrap(), start, end);
+        let (length2, seq2, support2, std_dev2) =
+            format_lengths(consenses.pop().unwrap(), start, end);
+        let (length1, seq1, support1, std_dev1) =
+            format_lengths(consenses.pop().unwrap(), start, end);
 
     let allele1 = if seq1 == "." {
         "."
@@ -221,6 +223,12 @@ fn genotype_repeat(
         alt1 = seq1,
         alt2 = seq2,
     ))
+    } else {
+        eprintln!("Cannot genotype repeat at {chrom}:{start}-{end} because no phased reads found");
+        Ok(
+            format!("{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.", ref = repeat_ref_sequence,),
+        )
+    }
 }
 
 fn make_repeat_compressed_sequence(
@@ -233,15 +241,15 @@ fn make_repeat_compressed_sequence(
     // TODO make sure we cannot try to read past the end of chromosomes
     let fas_left = fas
         .fetch_seq(chrom, (start - 10002) as usize, start as usize - 2)
-        .expect("Failed to extract fas_left sequence from fasta");
+        .expect("Failed to extract fas_left sequence from fasta for {chrom}:{start}-{end}");
     let fas_right = fas
         .fetch_seq(chrom, end as usize, (end + 9998) as usize)
-        .expect("Failed to extract fas_right sequence from fasta");
+        .expect("Failed to extract fas_right sequence from fasta for {chrom}:{start}-{end}");
     let repeat_ref_sequence = std::str::from_utf8(
         fas.fetch_seq(chrom, start as usize - 1, end as usize)
-            .expect("Failed to extract repeat sequence from fasta"),
+            .expect("Failed to extract repeat sequence from fasta for {chrom}:{start}-{end}"),
     )
-    .expect("Failed to convert repeat sequence to string")
+    .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")
     .to_string();
     ([fas_left, fas_right].concat(), repeat_ref_sequence)
 }
@@ -252,26 +260,40 @@ fn get_overlapping_reads(
     start: u32,
     end: u32,
 ) -> Option<HashMap<u8, Vec<Vec<u8>>>> {
-    let mut bam = bam::IndexedReader::from_path(bamf).expect("Error opening BAM");
+    let mut bam = if bamf.starts_with("s3:") || bamf.starts_with("https://") {
+        bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse s3 URL"))
+            .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
+    } else {
+        bam::IndexedReader::from_path(bamf)
+            .unwrap_or_else(|err| panic!("Error opening local BAM: {err}"))
+    };
     info!("Checks passed, genotyping repeat");
-    if let Some(tid) = bam.header().tid(chrom.as_bytes()) {
-        bam.fetch((tid, start, end))
-            .expect("Failure to extract reads from bam.");
+    let tid = bam
+        .header()
+        .tid(chrom.as_bytes())
+        .unwrap_or_else(|| panic!("Invalid chromosome {}", chrom));
+    bam.fetch((tid, start, end)).unwrap_or_else(|err| {
+        panic!("Failure to extract reads from bam for {chrom}:{start}-{end}:\n{err}")
+    });
         // Per haplotype the read sequences are kept in a dictionary
         let mut seqs = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
 
         // extract sequences spanning the repeat locus
         for r in bam.rc_records() {
-            let r = r.expect("Error reading BAM file in region {chrom}:{start}-{end}.");
+        let r = r.unwrap_or_else(|err| {
+            panic!("Error reading BAM file in region {chrom}:{start}-{end}:\n{err}")
+        });
             let phase = crate::utils::get_phase(&r);
             if phase > 0 {
                 let seq = r.seq().as_bytes();
                 seqs.get_mut(&phase).unwrap().push(seq);
             }
         }
-        return Some(seqs);
-    }
+    if seqs.is_empty() {
     None
+    } else {
+        Some(seqs)
+    }
 }
 
 fn parse_cs(read: Mapping, minlen: usize) -> Option<String> {
