@@ -18,6 +18,7 @@ pub fn genotype_repeats(
     minlen: usize,
     support: usize,
     threads: usize,
+    sample: Option<String>,
     somatic: bool,
 ) {
     if !bamp.is_file() {
@@ -42,7 +43,10 @@ pub fn genotype_repeats(
             let bamf = bamp.into_os_string().into_string().unwrap();
             let fastaf = fasta.into_os_string().into_string().unwrap();
             match genotype_repeat(&bamf, &fastaf, chrom, start, end, minlen, support, somatic) {
-                Ok(output) => println!("{output}"),
+                Ok(output) => {
+                    crate::utils::write_vcf_header(&fastaf, &bamf, sample);
+                    println!("{output}")
+                }
                 Err(chrom) => error!("Contig {chrom} not found in bam file"),
             };
         }
@@ -65,6 +69,7 @@ pub fn genotype_repeats(
                 // genotypes contains the output of the genotyping, a struct instance
                 let genotypes = Mutex::new(Vec::new());
                 // par_bridge does not guarantee that results are returned in order
+                crate::utils::write_vcf_header(&fastaf, &bamf, sample);
                 reader.records().par_bridge().for_each(|record| {
                     let rec = record.expect("Error reading bed record.");
                     match genotype_repeat(

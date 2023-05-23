@@ -41,6 +41,10 @@ struct Cli {
     #[clap(short, long, value_parser, default_value_t = 8)]
     threads: usize,
 
+    /// Sample name to use in VCF header, if not provided, the bam file name is used
+    #[clap(long, value_parser)]
+    sample: Option<String>,
+
     /// Print information on somatic variability
     #[clap(long, value_parser, default_value_t = false)]
     somatic: bool,
@@ -67,6 +71,7 @@ fn main() {
         args.minlen,
         args.support,
         args.threads,
+        args.sample,
         args.somatic,
     );
 }
