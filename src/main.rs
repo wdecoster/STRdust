@@ -13,13 +13,13 @@ pub mod utils;
 #[structopt(global_settings=&[DeriveDisplayOrder])]
 #[clap(author, version, about="Tool to genotype STRs from long reads", long_about = None)]
 struct Cli {
-    /// bam file to call STRs in
-    #[clap(parse(from_os_str), validator=is_file)]
-    bam: PathBuf,
-
     /// reference genome
     #[clap(parse(from_os_str), validator=is_file)]
     fasta: PathBuf,
+
+    /// bam file to call STRs in
+    #[clap(parse(from_os_str), validator=is_file)]
+    bam: PathBuf,
 
     /// region string to genotype expansion in
     #[clap(short, long, value_parser)]
