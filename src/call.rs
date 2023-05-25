@@ -1,5 +1,5 @@
 use bio::io::bed;
-use log::{error, info};
+use log::{debug, error, info};
 use rayon::prelude::*;
 use regex::Regex;
 use rust_htslib::faidx;
@@ -169,7 +169,7 @@ fn genotype_repeat(
         .with_seq(&repeat_compressed_reference)
             .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
     let mut consenses = vec![];
-    let mut all_insertions = vec![]; // only used with `somatic`
+        let mut all_insertions = vec![]; // only used with `--somatic`
 
     for phase in [1, 2] {
         let mut insertions = vec![];
@@ -195,7 +195,7 @@ fn genotype_repeat(
             format_lengths(consenses.pop().unwrap(), start, end);
         let (length1, seq1, support1, std_dev1) =
             format_lengths(consenses.pop().unwrap(), start, end);
-
+        debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {seq1} and {seq2}");
     let allele1 = if seq1 == "." {
         "."
     } else if seq1 == repeat_ref_sequence {
