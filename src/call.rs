@@ -1,4 +1,5 @@
 use bio::io::bed;
+use distance::levenshtein;
 use log::{debug, error, info};
 use rayon::prelude::*;
 use regex::Regex;
@@ -198,7 +199,7 @@ fn genotype_repeat(
         debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {seq1} and {seq2}");
     let allele1 = if seq1 == "." {
         "."
-    } else if seq1 == repeat_ref_sequence {
+        } else if levenshtein(&seq1, &repeat_ref_sequence) < 5 {
         "0"
     } else {
         "1"
@@ -206,7 +207,7 @@ fn genotype_repeat(
 
     let allele2 = if seq2 == "." {
         "."
-    } else if seq2 == repeat_ref_sequence {
+        } else if levenshtein(&seq2, &repeat_ref_sequence) < 5 {
         "0"
     } else if seq2 == seq1 {
         "1"
