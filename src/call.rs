@@ -192,28 +192,35 @@ fn genotype_repeat(
         }
     }
     // since I use .pop() to format the two consensus sequences, the order is reversed
-        let (length2, seq2, support2, std_dev2) =
+        let (length2, alt2, support2, std_dev2) =
             format_lengths(consenses.pop().unwrap(), start, end);
-        let (length1, seq1, support1, std_dev1) =
+        let (length1, alt1, support1, std_dev1) =
             format_lengths(consenses.pop().unwrap(), start, end);
-        debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {seq1} and {seq2}");
-    let allele1 = if seq1 == "." {
+        debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {alt1} and {alt2}");
+        let allele1 = if alt1 == "." {
         "."
-        } else if levenshtein(&seq1, &repeat_ref_sequence) < 5 {
+        } else if levenshtein(&alt1, &repeat_ref_sequence) < 5 {
         "0"
     } else {
         "1"
     };
 
-    let allele2 = if seq2 == "." {
+        let allele2 = if alt2 == "." {
         "."
-        } else if levenshtein(&seq2, &repeat_ref_sequence) < 5 {
+        } else if levenshtein(&alt2, &repeat_ref_sequence) < 5 {
         "0"
-    } else if seq2 == seq1 {
+        } else if alt2 == alt1 {
         "1"
     } else {
         "2"
     };
+
+        let alts = match (allele1, allele2) {
+            ("1", "0") | ("1", ".") | ("1", "1") => alt1, // if both alleles are the same, only report one
+            ("0", "1") | (".", "1") => alt2,
+            ("1", "2") => alt1 + "," + &alt2,
+            _ => ".".to_string(), // includes ./. and 0/0
+        };
 
     let somatic_info_field = if somatic {
         format!(";SEQS={}", all_insertions.join("|"))
@@ -222,12 +229,9 @@ fn genotype_repeat(
     };
 
     Ok(format!(
-        "{chrom}\t{start}\t.\t{ref}\t{alt1},{alt2}\t.\t.\t\
+            "{chrom}\t{start}\t.\t{repeat_ref_sequence}\t{alts}\t.\t.\t\
         END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2}{somatic_info_field}\
         \tGT\t{allele1}|{allele2}",
-        ref = repeat_ref_sequence,
-        alt1 = seq1,
-        alt2 = seq2,
     ))
     } else {
         eprintln!("Cannot genotype repeat at {chrom}:{start}-{end} because no phased reads found");
