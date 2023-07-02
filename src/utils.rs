@@ -60,7 +60,7 @@ pub fn get_phase(record: &bam::Record) -> u8 {
 pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
     println!(r#"##fileformat=VCFv4.2"#);
     // get absolute path to fasta file
-    let path = std::fs::canonicalize(&fasta)
+    let path = std::fs::canonicalize(fasta)
         .unwrap_or_else(|err| panic!("Failed getting absolute path to fasta: {err}"));
     println!(
         r#"##reference={}"#,
@@ -70,13 +70,15 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
     let version = env!("CARGO_PKG_VERSION");
     println!(r#"##source=STRdust v{}"#, version);
     // call faidx to make sure the fasta index exists, we'll need this anyway when genotyping
-    let _ = faidx::Reader::from_path(&fasta)
-        .unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
+    let _ =
+        faidx::Reader::from_path(fasta).unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
 
-    let mut file = std::fs::File::open(format!("{fasta}.fai")).expect("Can't open file");
-    // parse the fasta file
+    let mut fai_file = std::fs::File::open(format!("{fasta}.fai")).expect("Can't open file");
+    // parse the fasta index file
     let mut buf = String::new();
-    file.read_to_string(&mut buf).expect("Can't read fai file");
+    fai_file
+        .read_to_string(&mut buf)
+        .expect("Can't read fai file");
     for contig in buf.lines() {
         let mut contig = contig.split_whitespace();
         let name = contig.next().unwrap();

@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 pub mod call;
 pub mod consensus;
+pub mod repeat_compressed_ref;
 pub mod utils;
+pub mod write_vcf;
 
 // The arguments end up in the Cli struct
 #[derive(Parser, Debug)]

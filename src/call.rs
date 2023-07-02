@@ -1,13 +1,12 @@
 use bio::io::bed;
-use distance::levenshtein;
-use log::{debug, error, info};
+use log::{error, info};
 use rayon::prelude::*;
 use regex::Regex;
-use rust_htslib::faidx;
 use rust_htslib::{bam, bam::Read};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use url::Url;
 
 use minimap2::*;
 
@@ -60,7 +59,7 @@ pub fn genotype_repeats(
                 // TODO: check if bed file is okay
                 let mut reader =
                     bed::Reader::from_file(region_file.into_os_string().into_string().unwrap())
-                        .unwrap();
+                        .expect("Problem reading bed file!");
                 let bamf = bamp.into_os_string().into_string().unwrap();
                 let fastaf = fasta.into_os_string().into_string().unwrap();
                 // chrom_reported and genotypes are vectors that are used by multiple threads to add findings, therefore as a Mutex
@@ -68,7 +67,7 @@ pub fn genotype_repeats(
                 // to avoid reporting the same error multiple times
                 let chrom_reported = Mutex::new(Vec::new());
                 // genotypes contains the output of the genotyping, a struct instance
-                let genotypes = Mutex::new(Vec::new());
+                // let genotypes = Mutex::new(Vec::new());
                 // par_bridge does not guarantee that results are returned in order
                 crate::utils::write_vcf_header(&fastaf, &bamf, sample);
                 reader.records().par_bridge().for_each(|record| {
@@ -84,8 +83,9 @@ pub fn genotype_repeats(
                         somatic,
                     ) {
                         Ok(output) => {
-                            let mut geno = genotypes.lock().unwrap();
-                            geno.push(output);
+                            // let mut geno = genotypes.lock().unwrap();
+                            // geno.push(output);
+                            println!("{output}")
                         }
                         Err(chrom) => {
                             // For now the Err is only used for when a chromosome from the bed file does not appear in the bam file
@@ -98,12 +98,12 @@ pub fn genotype_repeats(
                         }
                     };
                 });
-                let mut genotypes_vec = genotypes.lock().unwrap();
+                // let mut genotypes_vec = genotypes.lock().unwrap();
                 // The final output is sorted by chrom, start and end
-                genotypes_vec.sort_unstable();
-                for g in &mut *genotypes_vec {
-                    println!("{g}");
-                }
+                // genotypes_vec.sort_unstable();
+                // for g in &mut *genotypes_vec {
+                //     println!("{g}");
+                // }
             } else {
                 // When running single threaded things become easier and the tool will require less memory
                 // Output is returned in the same order as the bed, and therefore not sorted before writing to stdout
@@ -160,108 +160,67 @@ fn genotype_repeat(
     support: usize,
     somatic: bool,
 ) -> Result<String, String> {
-    let (repeat_compressed_reference, repeat_ref_sequence) =
-        make_repeat_compressed_sequence(fasta, &chrom, start, end);
-    if let Some(seqs) = get_overlapping_reads(bamf, chrom.clone(), start, end) {
-    // Create an index for minimap2 alignment
-    let aligner = minimap2::Aligner::builder()
-        .map_ont()
-        .with_cigar()
-        .with_seq(&repeat_compressed_reference)
-            .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
-    let mut consenses = vec![];
-        let mut all_insertions = vec![]; // only used with `--somatic`
+    match crate::repeat_compressed_ref::make_repeat_compressed_sequence(fasta, &chrom, start, end) {
+        None => {
+            eprintln!(
+            "Cannot genotype repeat at {chrom}:{start}-{end} because it is out of bounds for the fasta file",
+        );
+            Ok(format!(
+                "{chrom}\t{start}\t.\tN\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.",
+            ))
+        }
+        Some((repeat_compressed_reference, repeat_ref_sequence)) => {
+            match get_overlapping_reads(bamf, chrom.clone(), start, end) {
+                None => {
+                    eprintln!(
+                    "Cannot genotype repeat at {chrom}:{start}-{end} because no phased reads found"
+                );
+                    Ok(
+                        format!("{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.", ref = repeat_ref_sequence,),
+                    )
+                }
+                Some(seqs) => {
+                    // Create an index for minimap2 alignment
+                    let aligner = minimap2::Aligner::builder()
+                        .map_ont()
+                        .with_cigar()
+                        .with_seq(&repeat_compressed_reference)
+                        .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
+                    let mut consenses = vec![];
+                    let mut all_insertions = vec![]; // only used with `--somatic`
 
-    for phase in [1, 2] {
-        let mut insertions = vec![];
-        let seq = seqs.get(&phase).unwrap();
-        // align the reads to the new repeat-compressed reference
-        for s in seq {
-                let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}\n{err}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
-            for read in mapping {
-                if let Some(s) = parse_cs(read, minlen) {
-                    // slice out inserted sequences from the CS tag
-                    insertions.push(s.to_uppercase())
+                    for phase in [1, 2] {
+                        let mut insertions = vec![];
+                        let seq = seqs.get(&phase).unwrap();
+                        // align the reads to the new repeat-compressed reference
+                        for s in seq {
+                            let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}\n{err}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
+                            for read in mapping {
+                                if let Some(s) = parse_cs(read, minlen) {
+                                    // slice out inserted sequences from the CS tag
+                                    insertions.push(s.to_uppercase())
+                                }
+                            }
+                        }
+                        consenses.push(crate::consensus::consensus(&insertions, support));
+                        if somatic {
+                            // store all inserted sequences for identifying somatic variation
+                            all_insertions.push(insertions.join(","));
+                        }
+                    }
+                    Ok(crate::write_vcf::write_vcf(
+                        consenses,
+                        repeat_ref_sequence,
+                        somatic,
+                        all_insertions,
+                        chrom,
+                        start,
+                        end,
+                    ))
                 }
             }
         }
-        consenses.push(crate::consensus::consensus(&insertions, support));
-        if somatic {
-            // store all inserted sequences for identifying somatic variation
-            all_insertions.push(insertions.join(","));
-        }
     }
-    // since I use .pop() to format the two consensus sequences, the order is reversed
-        let (length2, alt2, support2, std_dev2) =
-            format_lengths(consenses.pop().unwrap(), start, end);
-        let (length1, alt1, support1, std_dev1) =
-            format_lengths(consenses.pop().unwrap(), start, end);
-        debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {alt1} and {alt2}");
-        let allele1 = if alt1 == "." {
-        "."
-        } else if levenshtein(&alt1, &repeat_ref_sequence) < 5 {
-        "0"
-    } else {
-        "1"
-    };
-
-        let allele2 = if alt2 == "." {
-        "."
-        } else if levenshtein(&alt2, &repeat_ref_sequence) < 5 {
-        "0"
-        } else if alt2 == alt1 {
-        "1"
-    } else {
-        "2"
-    };
-
-        let alts = match (allele1, allele2) {
-            ("1", "0") | ("1", ".") | ("1", "1") => alt1, // if both alleles are the same, only report one
-            ("0", "1") | (".", "1") => alt2,
-            ("1", "2") => alt1 + "," + &alt2,
-            _ => ".".to_string(), // includes ./. and 0/0
-        };
-
-    let somatic_info_field = if somatic {
-        format!(";SEQS={}", all_insertions.join("|"))
-    } else {
-        "".to_string()
-    };
-
-    Ok(format!(
-            "{chrom}\t{start}\t.\t{repeat_ref_sequence}\t{alts}\t.\t.\t\
-        END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2}{somatic_info_field}\
-        \tGT\t{allele1}|{allele2}",
-    ))
-    } else {
-        eprintln!("Cannot genotype repeat at {chrom}:{start}-{end} because no phased reads found");
-        Ok(
-            format!("{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.", ref = repeat_ref_sequence,),
-        )
-    }
-}
-
-fn make_repeat_compressed_sequence(
-    fasta: &String,
-    chrom: &String,
-    start: u32,
-    end: u32,
-) -> (Vec<u8>, String) {
-    let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
-    // TODO make sure we cannot try to read past the end of chromosomes
-    let fas_left = fas
-        .fetch_seq(chrom, (start - 10002) as usize, start as usize - 2)
-        .expect("Failed to extract fas_left sequence from fasta for {chrom}:{start}-{end}");
-    let fas_right = fas
-        .fetch_seq(chrom, end as usize, (end + 9998) as usize)
-        .expect("Failed to extract fas_right sequence from fasta for {chrom}:{start}-{end}");
-    let repeat_ref_sequence = std::str::from_utf8(
-        fas.fetch_seq(chrom, start as usize - 1, end as usize)
-            .expect("Failed to extract repeat sequence from fasta for {chrom}:{start}-{end}"),
-    )
-    .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")
-    .to_string();
-    ([fas_left, fas_right].concat(), repeat_ref_sequence)
 }
 
 fn get_overlapping_reads(
@@ -270,7 +229,7 @@ fn get_overlapping_reads(
     start: u32,
     end: u32,
 ) -> Option<HashMap<u8, Vec<Vec<u8>>>> {
-    let mut bam = if bamf.starts_with("s3:") || bamf.starts_with("https://") {
+    let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
         bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse s3 URL"))
             .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
     } else {
@@ -285,22 +244,22 @@ fn get_overlapping_reads(
     bam.fetch((tid, start, end)).unwrap_or_else(|err| {
         panic!("Failure to extract reads from bam for {chrom}:{start}-{end}:\n{err}")
     });
-        // Per haplotype the read sequences are kept in a dictionary
-        let mut seqs = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
+    // Per haplotype the read sequences are kept in a dictionary
+    let mut seqs = HashMap::from([(1, Vec::new()), (2, Vec::new())]);
 
-        // extract sequences spanning the repeat locus
-        for r in bam.rc_records() {
+    // extract sequences spanning the repeat locus
+    for r in bam.rc_records() {
         let r = r.unwrap_or_else(|err| {
             panic!("Error reading BAM file in region {chrom}:{start}-{end}:\n{err}")
         });
-            let phase = crate::utils::get_phase(&r);
-            if phase > 0 {
-                let seq = r.seq().as_bytes();
-                seqs.get_mut(&phase).unwrap().push(seq);
-            }
+        let phase = crate::utils::get_phase(&r);
+        if phase > 0 {
+            let seq = r.seq().as_bytes();
+            seqs.get_mut(&phase).unwrap().push(seq);
         }
+    }
     if seqs.is_empty() {
-    None
+        None
     } else {
         Some(seqs)
     }
@@ -361,43 +320,9 @@ fn parse_cs(read: Mapping, minlen: usize) -> Option<String> {
     }
 }
 
-fn format_lengths(
-    consensus: Option<(String, usize, usize)>,
-    start: u32,
-    end: u32,
-) -> (String, String, String, String) {
-    match consensus {
-        Some((ref s, sup, std_dev)) => (
-            // length of the consensus sequence minus the length of the repeat sequence
-            (s.len() - ((end as usize) - (start as usize))).to_string(),
-            s.clone(),
-            sup.to_string(),
-            std_dev.to_string(),
-        ),
-        None => (
-            ".".to_string(),
-            ".".to_string(),
-            ".".to_string(),
-            ".".to_string(),
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_make_repeat_compressed_sequence() {
-        let fasta = String::from("test_data/chr7.fa.gz");
-        let chrom = String::from("chr7");
-        let start = 154654404;
-        let end = 154654432;
-        let seq = make_repeat_compressed_sequence(&fasta, &chrom, start, end);
-        // println!("{:?}", std::str::from_utf8(&seq[9990..10010]));
-        // println!("{:?}", std::str::from_utf8(&seq));
-        assert_eq!(seq.0.len(), 20000);
-    }
-
     #[test]
     fn test_get_overlapping_reads() {
         let bam = String::from("test_data/small-test-phased.bam");
@@ -417,7 +342,10 @@ mod tests {
         let minlen = 5;
         let _support = 1;
         let (repeat_compressed_reference, _) =
-            make_repeat_compressed_sequence(&fasta, &chrom, start, end);
+            crate::repeat_compressed_ref::make_repeat_compressed_sequence(
+                &fasta, &chrom, start, end,
+            )
+            .expect("Unable to make repeat compressed sequence");
         let binding = get_overlapping_reads(&bam, chrom.clone(), start, end).unwrap();
         let read = binding
             .get(&1)
@@ -457,6 +385,22 @@ mod tests {
     #[test]
     fn test_genotype_repeat_somatic() {
         let bam = String::from("test_data/small-test-phased.bam");
+        let fasta = String::from("test_data/chr7.fa.gz");
+        let chrom = String::from("chr7");
+        let start = 154654404;
+        let end = 154654432;
+        let minlen = 5;
+        let support = 1;
+        let somatic = true;
+        let genotype = genotype_repeat(&bam, &fasta, chrom, start, end, minlen, support, somatic);
+        println!("{}", genotype.expect("Unable to genotype repeat"));
+    }
+
+    #[test]
+    fn test_genotype_repeat_s3() {
+        let bam = String::from("s3%3A%2F%2F1000g-ont%2Faligned_data%2FHG00110%2FHG00110.LSK110.R9.guppy632.sup.withMeth.pass.hg38.phased.bam");
+        // let bam = String::from("s3://1000g-ont/aligned_data/HG00110/HG00110.LSK110.R9.guppy632.sup.withMeth.pass.hg38.phased.bam");
+        // let bam = String::from("https://s3.amazonaws.com/1000g-ont/aligned_data/HG00110/HG00110.LSK110.R9.guppy632.sup.withMeth.pass.hg38.phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
         let chrom = String::from("chr7");
         let start = 154654404;
