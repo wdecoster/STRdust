@@ -1,15 +1,47 @@
 use log::debug;
 use rust_spoa::poa_consensus;
+use std::error::Error;
+use std::fmt;
 
-pub fn consensus(seqs: &[String], support: usize) -> Option<(String, usize, usize)> {
+#[derive(Debug)]
+pub struct ConsensusError {
+    pub support: usize,
+}
+
+impl ConsensusError {
+    fn new(support: usize) -> Self {
+        ConsensusError { support }
+    }
+}
+
+impl fmt::Display for ConsensusError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Not enough reads to generate consensus: {}",
+            self.support
+        )
+    }
+}
+
+impl Error for ConsensusError {
+    fn description(&self) -> &str {
+        "Not enough reads to generate consensus"
+    }
+}
+
+pub fn consensus(
+    seqs: &[String],
+    support: usize,
+) -> Result<(String, usize, usize), ConsensusError> {
     if seqs.is_empty() {
-        return None;
+        return Err(ConsensusError::new(0));
     }
     let (seqs, std_dev) = remove_outliers(seqs);
     let num_reads = seqs.len();
     debug!("{} reads after removing outliers", num_reads);
     if num_reads < support {
-        None
+        Err(ConsensusError::new(num_reads))
     } else {
         let consensus_max_length = seqs.iter().map(|x| x.len()).max().unwrap_or(0);
         debug!("{} is the longest read", consensus_max_length);
@@ -29,7 +61,7 @@ pub fn consensus(seqs: &[String], support: usize) -> Option<(String, usize, usiz
             -12, // gap_open,
             -6,  // gap_extend,
         );
-        Some((
+        Ok((
             std::str::from_utf8(&consensus).unwrap().to_string(),
             num_reads,
             std_dev,

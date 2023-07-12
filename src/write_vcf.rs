@@ -1,8 +1,9 @@
+use crate::consensus::ConsensusError;
 use distance::levenshtein;
 use log::debug;
 
 pub fn write_vcf(
-    mut consenses: Vec<Option<(String, usize, usize)>>,
+    mut consenses: Vec<Result<(String, usize, usize), ConsensusError>>,
     repeat_ref_sequence: String,
     somatic: bool,
     all_insertions: Vec<String>,
@@ -53,22 +54,22 @@ pub fn write_vcf(
 }
 
 fn format_lengths(
-    consensus: Option<(String, usize, usize)>,
+    consensus: Result<(String, usize, usize), ConsensusError>,
     start: u32,
     end: u32,
 ) -> (String, String, String, String) {
     match consensus {
-        Some((ref s, sup, std_dev)) => (
+        Ok((ref s, sup, std_dev)) => (
             // length of the consensus sequence minus the length of the repeat sequence
             (s.len() as i32 - ((end - start) as i32)).to_string(),
             s.clone(),
             sup.to_string(),
             std_dev.to_string(),
         ),
-        None => (
+        Err(consensuserror) => (
             ".".to_string(),
             ".".to_string(),
-            ".".to_string(),
+            consensuserror.support.to_string(),
             ".".to_string(),
         ),
     }
