@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 pub mod call;
 pub mod consensus;
+pub mod phase_insertions;
 pub mod repeat_compressed_ref;
 pub mod utils;
 pub mod write_vcf;
@@ -50,6 +51,10 @@ struct Cli {
     /// Print information on somatic variability
     #[clap(long, value_parser, default_value_t = false)]
     somatic: bool,
+
+    /// Reads are not phased
+    #[clap(long, value_parser, default_value_t = false)]
+    unphased: bool,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
@@ -75,6 +80,7 @@ fn main() {
         args.threads,
         args.sample,
         args.somatic,
+        args.unphased,
     );
 }
 
