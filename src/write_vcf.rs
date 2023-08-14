@@ -75,13 +75,12 @@ fn format_lengths(
     }
 }
 
-// pub fn empty_record(
-//     reason: &str,
-//     chrom: String,
-//     start: u32,
-//     end: u32,
-//     repeat_ref_sequence: String,
-// ) -> String {
-//     eprintln!("Cannot genotype repeat at {chrom}:{start}-{end} because {reason}");
-//     format!("{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.", ref = repeat_ref_sequence,)
-// }
+pub fn missing_genotype(chrom: &String, start: u32, end: u32, repeat_ref_seq: &str) -> String {
+    format!(
+        "{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.",
+        chrom = chrom,
+        start = start,
+        end = end,
+        ref = repeat_ref_seq,
+    )
+}
