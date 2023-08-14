@@ -37,9 +37,13 @@ pub fn consensus(
     if seqs.is_empty() {
         return Err(ConsensusError::new(0));
     }
+    let num_reads_ = seqs.len();
     let (seqs, std_dev) = remove_outliers(seqs);
     let num_reads = seqs.len();
-    debug!("{} reads after removing outliers", num_reads);
+    debug!(
+        "Kept {}/{} reads after dropping outliers",
+        num_reads, num_reads_
+    );
     if num_reads < support {
         Err(ConsensusError::new(num_reads))
     } else {
@@ -71,26 +75,30 @@ pub fn consensus(
 
 fn remove_outliers(seqs: &[String]) -> (Vec<&String>, usize) {
     // remove sequences that are shorter or longer than two standard deviations from the mean
+    // except if the stdev is small
     let lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
     debug!("lengths: {:?}", lengths);
     let mean = lengths.iter().sum::<usize>() / lengths.len();
-    debug!("mean: {}", mean);
     let variance = lengths
         .iter()
         .map(|x| (*x as isize - mean as isize).pow(2) as usize)
         .sum::<usize>()
         / lengths.len();
     let std_dev = (variance as f64).sqrt() as usize;
-    debug!("std_dev: {}", std_dev);
+    debug!("mean: {}, std_dev: {}", mean, std_dev);
+    if std_dev < 5 {
+        debug!("std_dev < 5, not removing any outliers");
+        return (seqs.iter().collect::<Vec<&String>>(), std_dev);
+    }
     // avoid underflowing usize
     let min_val = mean.saturating_sub(2 * std_dev);
-    debug!("min_val: {}", min_val);
-    (
-        seqs.iter()
-            .zip(lengths.iter())
-            .filter(|(_, &len)| len > min_val && len < mean + 2 * std_dev)
-            .map(|(seq, _)| seq)
-            .collect::<Vec<&String>>(),
-        std_dev,
-    )
+    let max_val = mean + 2 * std_dev;
+    debug!("Removing outliers outside of [{},{}]", min_val, max_val);
+    let filtered_seqs = seqs
+        .iter()
+        .zip(lengths.iter())
+        .filter(|(_, &len)| len > min_val && len < max_val)
+        .map(|(seq, _)| seq)
+        .collect::<Vec<&String>>();
+    (filtered_seqs, std_dev)
 }
