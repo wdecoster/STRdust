@@ -17,7 +17,12 @@ pub fn write_vcf(
     debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {alt1} and {alt2}");
     let allele1 = if alt1 == "." {
         "."
-    } else if levenshtein(&alt1, &repeat_ref_sequence) < 5 {
+    // if the consensus is very similar to the reference the variant is considered ref
+    // for this I use a threshold of 5% of the length of the repeat sequence in the reference
+    // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
+    // not sure if these numbers require further tuning
+    // note that is an integer division, i.e. floor division
+    } else if levenshtein(&alt1, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
         "0"
     } else {
         "1"
@@ -25,7 +30,7 @@ pub fn write_vcf(
 
     let allele2 = if alt2 == "." {
         "."
-    } else if levenshtein(&alt2, &repeat_ref_sequence) < 5 {
+    } else if levenshtein(&alt2, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
         "0"
     } else if alt2 == alt1 {
         "1"
