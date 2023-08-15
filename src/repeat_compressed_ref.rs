@@ -1,3 +1,6 @@
+use std::io::Write;
+
+use log::error;
 use rust_htslib::faidx;
 
 /// Make a repeat compressed sequence from a fasta file
@@ -12,6 +15,16 @@ pub fn make_repeat_compressed_sequence(
     end: u32,
 ) -> Option<(Vec<u8>, String)> {
     let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
+    let fai = format!("{}.fai", fasta);
+    // check if the chromosome exists in the fai file
+    if !std::fs::read_to_string(fai)
+        .expect("Failed to read fai file")
+        .lines()
+        .any(|line| line.split('\t').collect::<Vec<&str>>()[0] == chrom)
+    {
+        error!("Chromosome {} not found in the fasta file", chrom);
+        panic!();
+    }
     let fas_left = fas
         .fetch_seq(
             chrom,
@@ -30,8 +43,16 @@ pub fn make_repeat_compressed_sequence(
     .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")
     .to_string();
     if repeat_ref_sequence == "N" {
+        eprintln!(
+            "Cannot genotype repeat at {chrom}:{start}-{end} because it is out of bounds for the fasta file",
+        );
         return None;
     }
+    // write the new reference sequence to a file
+    let mut newref_file = std::fs::File::create("newref.fa").expect("Unable to create newref.fa");
+    newref_file
+        .write_all(&[fas_left, fas_right].concat())
+        .expect("Unable to write to newref.fa");
     Some(([fas_left, fas_right].concat(), repeat_ref_sequence))
 }
 
@@ -85,5 +106,16 @@ mod tests {
         // println!("{:?}", std::str::from_utf8(&newref));
         // println!("{}", newref.len());
         assert!(newref.len() < 20000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_make_newref_interval_invalid_chrom() {
+        let fasta = String::from("test_data/chr7.fa.gz");
+        let chrom = String::from("chr27");
+        let start = 159345373;
+        let end = 159345400;
+        let (_, _) = make_repeat_compressed_sequence(&fasta, &chrom, start, end)
+            .expect("Unable to make repeat compressed sequence");
     }
 }
