@@ -42,6 +42,7 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         // where N is the number of observations and i is the index of the step
         // the cluster hashmap is updated with the new label and the clusters it contains
         let label = index + insertions.len();
+        debug!("Traversing the tree, at label {label}");
         cluster_to_subclusters.insert(label, (step.cluster1, step.cluster2));
         clusters_to_size.insert(label, step.size);
         subcluster_to_cluster.insert(step.cluster1, label);
@@ -52,20 +53,10 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
     // sort the clusters by size
     clusters.sort_by_key(|x| x.1);
     clusters.reverse();
-    // figure out which cluster should be considered root(s)
-    let roots = find_roots(
-        clusters[0].0,
-        &cluster_to_subclusters,
-        &clusters_to_size,
-        &min_cluster_size,
-    );
-    debug!("Roots for this tree: {:?}", roots);
 
-    // if a parent cluster has been seen we will ignore all children thereof
-    let mut large_cluster_seen = vec![];
-    for (cluster, size) in clusters.iter() {
-        if log_enabled!(Level::Debug) {
-            // when debugging, the code below can be used to print the tree
+    // when debugging, the code below can be used to print the tree
+    if log_enabled!(Level::Debug) {
+        for (cluster, _size) in clusters.iter() {
             let subclusters = cluster_to_subclusters.get(cluster).unwrap();
 
             let seq1 = if subclusters.0 < insertions.len() {
@@ -84,6 +75,19 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
                 subclusters.0, subclusters.1
             );
         }
+    }
+    // figure out which cluster should be considered root(s)
+    let roots = find_roots(
+        clusters[0].0,
+        &cluster_to_subclusters,
+        &clusters_to_size,
+        &min_cluster_size,
+    );
+    debug!("Roots for this tree: {:?}", roots);
+
+    // if a parent cluster has been seen we will ignore all children thereof
+    let mut large_cluster_seen = vec![];
+    for (cluster, size) in clusters.iter() {
         // have to ignore the biggest cluster - the one with all reads, as well as clusters that are too small
         // in the case of an outlier the next cluster will be the largest and has to be considered the root
         if !roots.contains(cluster) && size > &min_cluster_size {
@@ -138,8 +142,9 @@ fn find_roots(
     // as well as its children nodes that are the sibling of a too small node
     let mut roots = vec![top_root];
     let (child1, child2) = cluster_to_subclusters.get(&top_root).unwrap();
-    let size1 = clusters_to_size.get(child1).unwrap();
-    let size2 = clusters_to_size.get(child2).unwrap();
+    debug!("Children of {} root: {} and {}", top_root, child1, child2);
+    let size1 = clusters_to_size.get(child1).unwrap_or(&0);
+    let size2 = clusters_to_size.get(child2).unwrap_or(&0);
     if size1 > min_cluster_size && size2 > min_cluster_size {
         // if both clusters are sufficiently large we are done finding roots
         roots
