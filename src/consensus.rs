@@ -1,4 +1,5 @@
 use log::debug;
+use rand::seq::SliceRandom;
 use rust_spoa::poa_consensus;
 use std::error::Error;
 use std::fmt;
@@ -47,8 +48,16 @@ pub fn consensus(
     if num_reads < support {
         Err(ConsensusError::new(num_reads))
     } else {
+        let seqs = if num_reads > 20 {
+            debug!("Too many reads, downsampling to 20");
+            seqs.choose_multiple(&mut rand::thread_rng(), 20)
+                .cloned()
+                .collect::<Vec<&String>>()
+        } else {
+            seqs
+        };
         let consensus_max_length = seqs.iter().map(|x| x.len()).max().unwrap_or(0);
-        debug!("{} is the longest read", consensus_max_length);
+        debug!("Max length: {}", consensus_max_length);
         let mut seqs_bytes = vec![];
         for seq in seqs.iter() {
             seqs_bytes.push(format!("{seq}\0").bytes().collect::<Vec<u8>>());
