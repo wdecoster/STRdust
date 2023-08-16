@@ -42,7 +42,6 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         // where N is the number of observations and i is the index of the step
         // the cluster hashmap is updated with the new label and the clusters it contains
         let label = index + insertions.len();
-        debug!("Traversing the tree, at label {label}");
         cluster_to_subclusters.insert(label, (step.cluster1, step.cluster2));
         clusters_to_size.insert(label, step.size);
         subcluster_to_cluster.insert(step.cluster1, label);
@@ -91,7 +90,6 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         // have to ignore the biggest cluster - the one with all reads, as well as clusters that are too small
         // in the case of an outlier the next cluster will be the largest and has to be considered the root
         if !roots.contains(cluster) && size > &min_cluster_size {
-            debug!("Considering cluster {}", cluster);
             // for every cluster, find the parent cluster
             let parent = subcluster_to_cluster
                 .get(cluster)
@@ -142,7 +140,6 @@ fn find_roots(
     // as well as its children nodes that are the sibling of a too small node
     let mut roots = vec![top_root];
     let (child1, child2) = cluster_to_subclusters.get(&top_root).unwrap();
-    debug!("Children of {} root: {} and {}", top_root, child1, child2);
     let size1 = clusters_to_size.get(child1).unwrap_or(&0);
     let size2 = clusters_to_size.get(child2).unwrap_or(&0);
     if size1 > min_cluster_size && size2 > min_cluster_size {
