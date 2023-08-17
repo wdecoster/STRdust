@@ -1,10 +1,11 @@
+use bio::alignment::pairwise::Scoring;
+use bio::alignment::poa::*;
 use log::debug;
 use rand::seq::SliceRandom;
-use rust_spoa::poa_consensus;
 use std::error::Error;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConsensusError {
     pub support: usize,
 }
@@ -57,24 +58,21 @@ pub fn consensus(
         } else {
             seqs
         };
-        let consensus_max_length = seqs.iter().map(|x| x.len()).max().unwrap_or(0);
-        debug!("Max length: {}", consensus_max_length);
         let mut seqs_bytes = vec![];
         for seq in seqs.iter() {
-            seqs_bytes.push(format!("{seq}\0").bytes().collect::<Vec<u8>>());
+            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
         }
+
         // I empirically determined the following parameters to be suitable,
         // but further testing on other repeats would be good
         // mainly have to make sure the consensus does not get longer than the individual insertions
-        let consensus = poa_consensus(
-            &seqs_bytes,
-            consensus_max_length,
-            1,   // 0 = local, 1 = global, 2 = gapped
-            2,   // match_score,
-            -4,  // mismatch_score,
-            -12, // gap_open,
-            -6,  // gap_extend,
-        );
+        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
+        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
+        for seq in seqs_bytes.iter().skip(1) {
+            aligner.global_banded(seq, 20).add_to_graph();
+        }
+        let consensus = aligner.consensus();
+
         Ok((
             std::str::from_utf8(&consensus).unwrap().to_string(),
             num_reads,
