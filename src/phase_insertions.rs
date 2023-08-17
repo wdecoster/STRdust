@@ -3,7 +3,7 @@ use levenshtein::levenshtein;
 use log::{debug, error, log_enabled, Level};
 use std::collections::HashMap;
 
-pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
+pub fn split(insertions: &Vec<String>) -> (Option<Vec<String>>, Option<Vec<String>>) {
     // the insertions are from an unphased experiment
     // and should be split in one (if homozygous) or two haplotypes
     // this is based on the length of the insertion
@@ -26,6 +26,8 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
     let mut cluster_to_subclusters = HashMap::new();
     // create a hashmap to store the size of the clusters
     let mut clusters_to_size = HashMap::new();
+    // create a hashmap to store the dissimilarity of the clusters
+    let mut clusters_to_dissimilarity = HashMap::new();
     // create a hashmaps to store the subclusters and their parent cluster
     let mut subcluster_to_cluster = HashMap::new();
     // create a vector to store the clusters
@@ -44,6 +46,7 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         let label = index + insertions.len();
         cluster_to_subclusters.insert(label, (step.cluster1, step.cluster2));
         clusters_to_size.insert(label, step.size);
+        clusters_to_dissimilarity.insert(label, step.dissimilarity);
         subcluster_to_cluster.insert(step.cluster1, label);
         subcluster_to_cluster.insert(step.cluster2, label);
         // clusters are added to a vector, as a tuple with their size
@@ -69,9 +72,11 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
                 "".to_string()
             };
 
-            println!(
-                "Node {cluster} with children {} [{seq1}] and {} [{seq2}]",
-                subclusters.0, subclusters.1
+            debug!(
+                "Node {cluster} with dissimilarity {} and children {} [{seq1}] and {} [{seq2}]",
+                clusters_to_dissimilarity.get(cluster).unwrap(),
+                subclusters.0,
+                subclusters.1
             );
         }
     }
@@ -80,6 +85,7 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         clusters[0].0,
         &cluster_to_subclusters,
         &clusters_to_size,
+        &clusters_to_dissimilarity,
         &min_cluster_size,
     );
     debug!("Roots for this tree: {:?}", roots);
@@ -91,9 +97,14 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         // in the case of an outlier the next cluster will be the largest and has to be considered the root
         if !roots.contains(cluster) && size > &min_cluster_size {
             // for every cluster, find the parent cluster
-            let parent = subcluster_to_cluster
-                .get(cluster)
-                .unwrap_or_else(|| panic!("Parent cluster not found for {}", cluster));
+            let parent = if !subcluster_to_cluster.contains_key(cluster) {
+                // if the cluster is not in the hashmap, it is a root
+                // and therefore its parent is the cluster itself
+                cluster
+            } else {
+                // otherwise the parent is the cluster in the hashmap
+                subcluster_to_cluster.get(cluster).unwrap()
+            };
             // if the parent cluster has already been seen for this large cluster, we ignore it
             // as such we only get sufficiently large independent clusters
             if !large_cluster_seen.contains(parent) {
@@ -111,15 +122,27 @@ pub fn split(insertions: &Vec<String>) -> (Vec<String>, Vec<String>) {
         1 => {
             debug!("Only one haplotype cluster found");
             (
-                find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions),
-                vec![],
+                Some(find_cluster_members(
+                    &haplotype_clusters[0],
+                    &cluster_to_subclusters,
+                    insertions,
+                )),
+                None,
             )
         }
         2 => {
             debug!("Found two haplotype clusters");
             (
-                find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions),
-                find_cluster_members(&haplotype_clusters[1], &cluster_to_subclusters, insertions),
+                Some(find_cluster_members(
+                    &haplotype_clusters[0],
+                    &cluster_to_subclusters,
+                    insertions,
+                )),
+                Some(find_cluster_members(
+                    &haplotype_clusters[1],
+                    &cluster_to_subclusters,
+                    insertions,
+                )),
             )
         }
         _ => {
@@ -133,20 +156,28 @@ fn find_roots(
     top_root: usize,
     cluster_to_subclusters: &HashMap<usize, (usize, usize)>,
     clusters_to_size: &HashMap<usize, usize>,
+    clusters_to_dissimilarity: &HashMap<usize, f32>,
     min_cluster_size: &usize,
 ) -> Vec<usize> {
     // find nodes that qualify as roots
     // this includes the top most node, for which the size is equal to the number of sequences
     // as well as its children nodes that are the sibling of a too small node
     let mut roots = vec![top_root];
+    // if the cluster is not in the hashmap, then move on
+    if !cluster_to_subclusters.contains_key(&top_root) {
+        return roots;
+    }
     let (child1, child2) = cluster_to_subclusters.get(&top_root).unwrap();
     let size1 = clusters_to_size.get(child1).unwrap_or(&0);
     let size2 = clusters_to_size.get(child2).unwrap_or(&0);
     if size1 > min_cluster_size && size2 > min_cluster_size {
         // if both clusters are sufficiently large we are done finding roots
-        roots
+        return roots;
+    } else if clusters_to_dissimilarity.get(&top_root).unwrap() < &5.0 {
+        // if one node is too small, but the difference is not large enough, there is no root that has to be ignored
+        return vec![];
     } else {
-        // if one of the clusters is too small the other one is a root
+        // if one of the clusters is too small and the dissimilarity is large, the other one is a root
         // in that case we have to recurse to find the roots of the other cluster
         if size1 > min_cluster_size {
             roots.push(*child1);
@@ -154,6 +185,7 @@ fn find_roots(
                 *child1,
                 cluster_to_subclusters,
                 clusters_to_size,
+                clusters_to_dissimilarity,
                 min_cluster_size,
             ));
         } else {
@@ -162,11 +194,12 @@ fn find_roots(
                 *child2,
                 cluster_to_subclusters,
                 clusters_to_size,
+                clusters_to_dissimilarity,
                 min_cluster_size,
             ));
         }
-        roots
     }
+    roots
 }
 
 fn find_cluster_members(
@@ -216,6 +249,8 @@ mod tests {
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
         let (hap1, hap2) = split(&insertions);
+        let hap1 = hap1.unwrap();
+        let hap2 = hap2.unwrap();
         assert!(hap1.len() == hap2.len());
         // check that all sequences in hap1 are the same length
         assert!(hap1.iter().all(|x| x.len() == hap1[0].len()));
@@ -244,7 +279,9 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (mut hap1, mut hap2) = split(&insertions);
+        let (hap1, hap2) = split(&insertions);
+        let mut hap1 = hap1.unwrap();
+        let mut hap2 = hap2.unwrap();
         assert!(hap1.len() == hap2.len());
         // assert that either hap1 or hap2 is equal to the expected_haplotype
         // but first sort the haplotypes, since the order is not guaranteed
@@ -260,7 +297,7 @@ mod tests {
         // using a CAG expansion with some SNV and length noise
         // this will still return two haplotypes, as there will always be a tree with two branches
         // if the sequences are truly similar enough then the consensus will be about the same
-        // or at least within the edit distance cutuff
+        // or at least within the edit distance cutoff
         let mut insertions = vec![
             "CTGCAGCAGCAGCTGCAGCAGCAGCAGCAGCAGCAGTAGCAGCAGCAGCAGCTGCAGCAG".to_string(),
             "CAGCGGCAGCAGCAGCAGCAGCGCAGCAGCAGCGGCAGCAGCAGCAGCAGCAGCAGCAG".to_string(),
@@ -274,7 +311,46 @@ mod tests {
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
         let (hap1, hap2) = split(&insertions);
+        let hap1 = hap1.unwrap();
+        let hap2 = hap2.unwrap();
         assert!(hap1.len() + hap2.len() == insertions.len());
+    }
+
+    #[test]
+    fn test_split_with_homozygous2() {
+        // this is a real example of a homozygous one, where the tree is just one long trail of nodes
+        // where every time a single new sequence joins the tree
+        // this therefore created a problem in find_roots, as every node became a root
+        let mut insertions = vec![
+            "CAGCAGCAGCAGCA".to_string(),
+            "CAACAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+            "CAGCAGCAGCAGCAGCA".to_string(),
+        ];
+        // shuffle the insertions in a random order
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        insertions.shuffle(&mut rng);
+        let (hap1, hap2) = split(&insertions);
+        let hap1 = hap1.unwrap();
+        assert!(hap2.is_none());
+        println!("hap1: {:?}", hap1);
+        assert!(hap1.len() == insertions.len());
     }
 
     #[test]
@@ -303,7 +379,9 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (mut hap1, mut hap2) = split(&insertions);
+        let (hap1, hap2) = split(&insertions);
+        let mut hap1 = hap1.unwrap();
+        let mut hap2 = hap2.unwrap();
         println!("{:?}", hap1);
         println!("{}", hap1.len());
         println!("{:?}", hap2);
@@ -347,7 +425,9 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (mut hap1, mut hap2) = split(&insertions);
+        let (hap1, hap2) = split(&insertions);
+        let mut hap1 = hap1.unwrap();
+        let mut hap2 = hap2.unwrap();
         assert!(hap1.len() == hap2.len());
         // assert that either hap1 or hap2 is equal to the expected_haplotype
         // but first sort the haplotypes, since the order is not guaranteed
