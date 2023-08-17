@@ -31,6 +31,7 @@ pub fn genotype_repeats(
     };
     let bamf = bamp.into_os_string().into_string().unwrap();
     let fastaf = fasta.into_os_string().into_string().unwrap();
+    debug!("Genotyping STRs in {bamf}");
     match (region, region_file) {
         (Some(_region), Some(_region_file)) => {
             error!("ERROR: Specify either a region (-r) or region_file (-R), not both!\n\n");
@@ -203,13 +204,30 @@ fn genotype_repeat(
             }
         }
         debug!("Splitting {} insertions in two phases", insertions.len(),);
-        let (phase1, phase2) = crate::phase_insertions::split(&insertions);
-        consenses.push(crate::consensus::consensus(&phase1, support));
-        consenses.push(crate::consensus::consensus(&phase2, support));
-        if somatic {
-            // store all inserted sequences for identifying somatic variation
-            all_insertions.push(phase1.join(","));
-            all_insertions.push(phase2.join(","));
+        let phased = crate::phase_insertions::split(&insertions);
+        match phased {
+            (Some(phase1), Some(phase2)) => {
+                consenses.push(crate::consensus::consensus(&phase1, support));
+                consenses.push(crate::consensus::consensus(&phase2, support));
+                if somatic {
+                    // store all inserted sequences for identifying somatic variation
+                    all_insertions.push(phase1.join(","));
+                    all_insertions.push(phase2.join(","));
+                }
+            }
+            (Some(phase1), None) => {
+                let consensus = crate::consensus::consensus(&phase1, support);
+                consenses.push(consensus.clone());
+                consenses.push(consensus);
+                if somatic {
+                    // store all inserted sequences for identifying somatic variation
+                    all_insertions.push(phase1.join(","));
+                }
+            }
+            _ => {
+                error!("Unexpected scenario after haplotype splitting");
+                panic!();
+            }
         }
     } else {
         for phase in [1, 2] {
