@@ -120,15 +120,13 @@ pub fn split(insertions: &Vec<String>) -> (Option<Vec<String>>, Option<Vec<Strin
             panic!();
         }
         1 => {
+            // if there is only one haplotype cluster, and the locus is considered homozygous
+            // all insertions are returned as the first haplotype with None as the second haplotype
+            // this ignores roots and outliers, but identifying those is rather problematic in the homozygous case
+            // and the end result is often that we lose too many reads as false-positive roots
+            // I assume the poa consensus will deal with outliers
             debug!("Only one haplotype cluster found");
-            (
-                Some(find_cluster_members(
-                    &haplotype_clusters[0],
-                    &cluster_to_subclusters,
-                    insertions,
-                )),
-                None,
-            )
+            (Some(insertions.clone()), None)
         }
         2 => {
             debug!("Found two haplotype clusters");
