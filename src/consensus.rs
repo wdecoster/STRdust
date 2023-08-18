@@ -1,6 +1,6 @@
 use bio::alignment::pairwise::Scoring;
 use bio::alignment::poa::*;
-use log::debug;
+use log::{debug, log_enabled, Level};
 use rand::seq::SliceRandom;
 use std::error::Error;
 use std::fmt;
@@ -84,8 +84,11 @@ pub fn consensus(
 fn remove_outliers(seqs: &[String]) -> (Vec<&String>, usize) {
     // remove sequences that are shorter or longer than two standard deviations from the mean
     // except if the stdev is small
-    let lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
-    debug!("lengths: {:?}", lengths);
+    let mut lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
+    if log_enabled!(Level::Debug) {
+        lengths.sort();
+        debug!("lengths: {:?}", lengths);
+    }
     let mean = lengths.iter().sum::<usize>() / lengths.len();
     let variance = lengths
         .iter()
