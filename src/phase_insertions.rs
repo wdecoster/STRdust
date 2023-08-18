@@ -180,7 +180,6 @@ fn find_roots(
         // if one of the clusters is too small and the dissimilarity is large, the other one is a root
         // in that case we have to recurse to find the roots of the other cluster
         if size1 > min_cluster_size {
-            roots.push(*child1);
             roots.extend(find_roots(
                 *child1,
                 cluster_to_subclusters,
@@ -189,7 +188,6 @@ fn find_roots(
                 min_cluster_size,
             ));
         } else {
-            roots.push(*child2);
             roots.extend(find_roots(
                 *child2,
                 cluster_to_subclusters,
