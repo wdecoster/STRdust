@@ -203,6 +203,15 @@ fn genotype_repeat(
                 }
             }
         }
+        if insertions.len() < support {
+            // Return a missing genotype if not enough insertions are found
+            return Ok(crate::write_vcf::missing_genotype(
+                &chrom,
+                start,
+                end,
+                &repeat_ref_seq,
+            ));
+        }
         debug!("Splitting {} insertions in two phases", insertions.len(),);
         let phased = crate::phase_insertions::split(&insertions);
         match phased {
