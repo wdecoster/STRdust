@@ -1,9 +1,9 @@
-use crate::consensus::ConsensusError;
+use crate::consensus::Consensus;
 use distance::levenshtein;
 use log::debug;
 
 pub fn write_vcf(
-    mut consenses: Vec<Result<(String, usize, usize), ConsensusError>>,
+    mut consenses: Vec<Consensus>,
     repeat_ref_sequence: String,
     somatic: bool,
     all_insertions: Vec<String>,
@@ -12,8 +12,10 @@ pub fn write_vcf(
     end: u32,
 ) -> String {
     // since I use .pop() to format the two consensus sequences, the order is reversed
-    let (length2, alt2, support2, std_dev2) = format_lengths(consenses.pop().unwrap(), start, end);
-    let (length1, alt1, support1, std_dev1) = format_lengths(consenses.pop().unwrap(), start, end);
+    let (length2, alt2, support2, std_dev2, score2) =
+        consenses.pop().unwrap().format_lengths(start, end);
+    let (length1, alt1, support1, std_dev1, score1) =
+        consenses.pop().unwrap().format_lengths(start, end);
     debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {alt1} and {alt2}");
     let allele1 = if alt1 == "." {
         "."
@@ -53,31 +55,9 @@ pub fn write_vcf(
 
     format!(
             "{chrom}\t{start}\t.\t{repeat_ref_sequence}\t{alts}\t.\t.\t\
-            END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2}{somatic_info_field}\
+            END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2};CONSENSUS_SCORE={score1}|{score2};{somatic_info_field}\
             \tGT\t{allele1}|{allele2}",
         )
-}
-
-fn format_lengths(
-    consensus: Result<(String, usize, usize), ConsensusError>,
-    start: u32,
-    end: u32,
-) -> (String, String, String, String) {
-    match consensus {
-        Ok((ref s, sup, std_dev)) => (
-            // length of the consensus sequence minus the length of the repeat sequence
-            (s.len() as i32 - ((end - start) as i32)).to_string(),
-            s.clone(),
-            sup.to_string(),
-            std_dev.to_string(),
-        ),
-        Err(consensuserror) => (
-            ".".to_string(),
-            ".".to_string(),
-            consensuserror.support.to_string(),
-            ".".to_string(),
-        ),
-    }
 }
 
 pub fn missing_genotype(chrom: &String, start: u32, end: u32, repeat_ref_seq: &str) -> String {

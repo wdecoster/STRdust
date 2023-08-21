@@ -187,8 +187,7 @@ fn genotype_repeat(
         .with_cigar()
         .with_seq(&repeat_compressed_reference)
         .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
-    let mut consenses: Vec<Result<(String, usize, usize), crate::consensus::ConsensusError>> =
-        vec![];
+    let mut consenses: Vec<crate::consensus::Consensus> = vec![];
     let mut all_insertions = vec![]; // only used with `--somatic`
     if unphased {
         let mut insertions = vec![];
@@ -207,6 +206,7 @@ fn genotype_repeat(
         }
         if insertions.len() < support {
             // Return a missing genotype if not enough insertions are found
+            // this is too lenient - the support parameter is meant to be per haplotype
             return Ok(crate::write_vcf::missing_genotype(
                 &chrom,
                 start,

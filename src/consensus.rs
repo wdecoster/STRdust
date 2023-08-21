@@ -1,43 +1,89 @@
+use std::fmt;
+
 use bio::alignment::pairwise::Scoring;
 use bio::alignment::poa::*;
 use log::debug;
 use rand::seq::SliceRandom;
-use std::error::Error;
-use std::fmt;
 
-#[derive(Debug, Clone)]
-pub struct ConsensusError {
+#[derive(Clone)]
+pub struct Consensus {
+    pub seq: Option<String>,
     pub support: usize,
+    pub std_dev: usize,
+    pub score: i32,
 }
 
-impl ConsensusError {
-    fn new(support: usize) -> Self {
-        ConsensusError { support }
+impl Default for Consensus {
+    fn default() -> Consensus {
+        Consensus {
+            seq: None,
+            support: 0,
+            std_dev: 0,
+            score: -1,
+        }
     }
 }
 
-impl fmt::Display for ConsensusError {
+impl Consensus {
+    pub fn format_lengths(&self, start: u32, end: u32) -> (String, String, String, String, String) {
+        match &self.seq {
+            Some(seq) => (
+                // length of the consensus sequence minus the length of the repeat sequence
+                (seq.len() as i32 - ((end - start) as i32)).to_string(),
+                seq.clone(),
+                self.support.to_string(),
+                self.std_dev.to_string(),
+                self.score.to_string(),
+            ),
+            None => (
+                ".".to_string(),
+                ".".to_string(),
+                self.support.to_string(),
+                ".".to_string(),
+                ".".to_string(),
+            ),
+        }
+    }
+}
+//              Some(seq) => {
+//                     // length of the consensus sequence minus the length of the repeat sequence
+//             (
+//                 consensus.seq.len() as i32 - ((end - start) as i32)).to_string(),
+//             consensus.seq.clone(),
+//             consensus.support.to_string(),
+//             consensus.std_dev.to_string()
+//         )
+//              };
+//             None => (
+//                 ".".to_string(),
+//                 ".".to_string(),
+//                 self.support.to_string(),
+//                 ".".to_string(),
+//             ),
+//     }
+// }
+
+impl fmt::Display for Consensus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Not enough reads to generate consensus: {}",
-            self.support
-        )
+        match &self.seq {
+            Some(seq) => write!(
+                f,
+                "seq: {}, support: {}, std_dev: {}, score: {}",
+                seq, self.support, self.std_dev, self.score
+            ),
+            None => write!(f, "seq: None, support: 0, std_dev: 0, score: -1"),
+        }
     }
 }
 
-impl Error for ConsensusError {
-    fn description(&self) -> &str {
-        "Not enough reads to generate consensus"
-    }
-}
-
-pub fn consensus(
-    seqs: &[String],
-    support: usize,
-) -> Result<(String, usize, usize), ConsensusError> {
+pub fn consensus(seqs: &[String], support: usize) -> Consensus {
     if seqs.is_empty() {
-        return Err(ConsensusError::new(0));
+        return Consensus {
+            seq: None,
+            support: 0,
+            std_dev: 0,
+            score: -1,
+        };
     }
     let num_reads_ = seqs.len();
     let (seqs, std_dev) = remove_outliers(seqs);
@@ -47,7 +93,12 @@ pub fn consensus(
         num_reads, num_reads_
     );
     if num_reads < support {
-        Err(ConsensusError::new(num_reads))
+        Consensus {
+            seq: None,
+            support: num_reads,
+            std_dev,
+            score: -1,
+        }
     } else {
         // if there are more than 20 reads, downsample to 20 before taking the consensus
         // for performance and memory reasons
@@ -73,12 +124,14 @@ pub fn consensus(
             aligner.global_banded(seq, 20).add_to_graph();
         }
         let consensus = aligner.consensus();
+        let score = aligner.global_banded(&consensus, 20).alignment().score;
 
-        Ok((
-            std::str::from_utf8(&consensus).unwrap().to_string(),
-            num_reads,
+        Consensus {
+            seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
+            support: num_reads,
             std_dev,
-        ))
+            score,
+        }
     }
 }
 
@@ -145,9 +198,10 @@ mod tests {
             "CAGGCAGGCAGGCAGGCAGGCAGGCAGGCAGACAGGCAGCCAGGCAGGCAGGCAGG".to_string(),
             "CAGGCAGGCAGGCAGGCAGGCAGGCAGGCAGACAGGCAGCCAGGCAGGCAGGCAGG".to_string(),
         ];
-        let (consensus_seq, num_reads, std_dev) = consensus(&seqs, 10).unwrap();
-        println!("Consensus: {}", consensus_seq);
-        println!("Num reads: {}", num_reads);
-        println!("Std dev: {}", std_dev);
+        let cons = consensus(&seqs, 10);
+        println!("Consensus: {}", cons.seq.unwrap());
+        println!("Num reads: {}", cons.support);
+        println!("Std dev: {}", cons.std_dev);
+        println!("Consensus score: {}", cons.score);
     }
 }
