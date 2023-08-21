@@ -9,17 +9,19 @@ pub fn write_vcf(
     repeat_ref_sequence: String,
     somatic: bool,
     all_insertions: Vec<String>,
-    chrom: String,
-    start: u32,
-    end: u32,
+    repeat: crate::utils::RepeatInterval,
     flag: Vec<String>,
 ) -> String {
     // since I use .pop() to format the two consensus sequences, the order is reversed
-    let (length2, alt2, support2, std_dev2, score2) =
-        consenses.pop().unwrap().format_lengths(start, end);
-    let (length1, alt1, support1, std_dev1, score1) =
-        consenses.pop().unwrap().format_lengths(start, end);
-    debug!("Genotyping {chrom}:{start}-{end}:{repeat_ref_sequence} with {alt1} and {alt2}");
+    let (length2, alt2, support2, std_dev2, score2) = consenses
+        .pop()
+        .unwrap()
+        .format_lengths(repeat.start, repeat.end);
+    let (length1, alt1, support1, std_dev1, score1) = consenses
+        .pop()
+        .unwrap()
+        .format_lengths(repeat.start, repeat.end);
+    debug!("Genotyping {repeat}:{repeat_ref_sequence} with {alt1} and {alt2}");
     let allele1 = if alt1 == "." {
         "."
     // if the consensus is very similar to the reference the variant is considered ref
@@ -59,18 +61,18 @@ pub fn write_vcf(
     let flags = flag.join(";");
 
     format!(
-            "{chrom}\t{start}\t.\t{repeat_ref_sequence}\t{alts}\t.\t.\t\
-            {flags};END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2};CONSENSUS_SCORE={score1}|{score2};{somatic_info_field}\
-            \tGT\t{allele1}|{allele2}",
+            "{0}\t{1}\t.\t{repeat_ref_sequence}\t{alts}\t.\t.\t\
+            {flags};END={2};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2};CONSENSUS_SCORE={score1}|{score2};{somatic_info_field}\
+            \tGT\t{allele1}|{allele2}", repeat.chrom, repeat.start, repeat.end
         )
 }
 
-pub fn missing_genotype(chrom: &String, start: u32, end: u32, repeat_ref_seq: &str) -> String {
+pub fn missing_genotype(repeat: &crate::utils::RepeatInterval, repeat_ref_seq: &str) -> String {
     format!(
         "{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.",
-        chrom = chrom,
-        start = start,
-        end = end,
+        chrom = repeat.chrom,
+        start = repeat.start,
+        end = repeat.end,
         ref = repeat_ref_seq,
     )
 }

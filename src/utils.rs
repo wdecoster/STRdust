@@ -2,9 +2,22 @@ use flate2::read;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Aux;
 use std::ffi::OsStr;
+use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+
+pub struct RepeatInterval {
+    pub chrom: String,
+    pub start: u32,
+    pub end: u32,
+}
+
+impl fmt::Display for RepeatInterval {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}-{}", self.chrom, self.start, self.end)
+    }
+}
 
 /// Read normal or compressed files seamlessly
 /// Uses the presence of a `.gz` extension to decide
@@ -26,8 +39,8 @@ pub fn reader(filename: &str) -> Box<dyn BufRead> {
 }
 
 /// parse a region string
-pub fn process_region(reg: String) -> Result<(String, u32, u32), Box<dyn std::error::Error>> {
-    let chrom = reg.split(':').collect::<Vec<&str>>()[0];
+pub fn process_region(reg: String) -> Result<RepeatInterval, Box<dyn std::error::Error>> {
+    let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
     let interval = reg.split(':').collect::<Vec<&str>>()[1];
     let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
         .parse()
@@ -39,7 +52,7 @@ pub fn process_region(reg: String) -> Result<(String, u32, u32), Box<dyn std::er
         end - start > 0,
         r#"Invalid region: begin has to be smaller than end."#
     );
-    Ok((chrom.to_string(), start, end))
+    Ok(RepeatInterval { chrom, start, end })
 }
 
 pub fn get_phase(record: &bam::Record) -> u8 {
