@@ -3,7 +3,13 @@ use levenshtein::levenshtein;
 use log::{debug, error, log_enabled, Level};
 use std::collections::HashMap;
 
-pub fn split(insertions: &Vec<String>) -> (Option<Vec<String>>, Option<Vec<String>>) {
+pub struct SplitSequences {
+    pub hap1: Vec<String>,
+    pub hap2: Option<Vec<String>>,
+    pub flag: Option<String>,
+}
+
+pub fn split(insertions: &Vec<String>) -> SplitSequences {
     // the insertions are from an unphased experiment
     // and should be split in one (if homozygous) or two haplotypes
     // this is based on the length of the insertion
@@ -116,8 +122,12 @@ pub fn split(insertions: &Vec<String>) -> (Option<Vec<String>>, Option<Vec<Strin
     }
     match haplotype_clusters.len() {
         0 => {
-            error!("No haplotype clusters found");
-            panic!();
+            debug!("No haplotype clusters found! Treating this as homozygous, but here could be dragons");
+            SplitSequences {
+                hap1: insertions.clone(),
+                hap2: None,
+                flag: Some("CLUSTERFAILURE".to_string()),
+            }
         }
         1 => {
             // if there is only one haplotype cluster, and the locus is considered homozygous
@@ -126,22 +136,27 @@ pub fn split(insertions: &Vec<String>) -> (Option<Vec<String>>, Option<Vec<Strin
             // and the end result is often that we lose too many reads as false-positive roots
             // I assume the poa consensus will deal with outliers
             debug!("Only one haplotype cluster found");
-            (Some(insertions.clone()), None)
+            SplitSequences {
+                hap1: insertions.clone(),
+                hap2: None,
+                flag: None,
+            }
         }
         2 => {
             debug!("Found two haplotype clusters");
-            (
-                Some(find_cluster_members(
+            SplitSequences {
+                hap1: find_cluster_members(
                     &haplotype_clusters[0],
                     &cluster_to_subclusters,
                     insertions,
-                )),
-                Some(find_cluster_members(
+                ),
+                hap2: Some(find_cluster_members(
                     &haplotype_clusters[1],
                     &cluster_to_subclusters,
                     insertions,
                 )),
-            )
+                flag: None,
+            }
         }
         _ => {
             error!("Found more than two haplotype clusters");
@@ -244,12 +259,13 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (hap1, hap2) = split(&insertions);
-        let hap1 = hap1.unwrap();
-        let hap2 = hap2.unwrap();
-        assert!(hap1.len() == hap2.len());
+        let splitseqs = split(&insertions);
+        assert!(splitseqs.hap1.len() == splitseqs.hap2.unwrap().len());
         // check that all sequences in hap1 are the same length
-        assert!(hap1.iter().all(|x| x.len() == hap1[0].len()));
+        assert!(splitseqs
+            .hap1
+            .iter()
+            .all(|x| x.len() == splitseqs.hap1[0].len()));
     }
 
     #[test]
@@ -275,9 +291,9 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (hap1, hap2) = split(&insertions);
-        let mut hap1 = hap1.unwrap();
-        let mut hap2 = hap2.unwrap();
+        let splitseqs = split(&insertions);
+        let mut hap1 = splitseqs.hap1;
+        let mut hap2 = splitseqs.hap2.unwrap();
         assert!(hap1.len() == hap2.len());
         // assert that either hap1 or hap2 is equal to the expected_haplotype
         // but first sort the haplotypes, since the order is not guaranteed
@@ -306,10 +322,8 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (hap1, hap2) = split(&insertions);
-        let hap1 = hap1.unwrap();
-        let hap2 = hap2.unwrap();
-        assert!(hap1.len() + hap2.len() == insertions.len());
+        let splitseqs = split(&insertions);
+        assert!(splitseqs.hap1.len() + splitseqs.hap2.unwrap().len() == insertions.len());
     }
 
     #[test]
@@ -342,11 +356,10 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (hap1, hap2) = split(&insertions);
-        let hap1 = hap1.unwrap();
-        assert!(hap2.is_none());
-        println!("hap1: {:?}", hap1);
-        assert!(hap1.len() == insertions.len());
+        let splitseqs = split(&insertions);
+        assert!(splitseqs.hap2.is_none());
+        println!("hap1: {:?}", splitseqs.hap1);
+        assert!(splitseqs.hap1.len() == insertions.len());
     }
 
     #[test]
@@ -375,9 +388,9 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (hap1, hap2) = split(&insertions);
-        let mut hap1 = hap1.unwrap();
-        let mut hap2 = hap2.unwrap();
+        let splitseqs = split(&insertions);
+        let mut hap1 = splitseqs.hap1;
+        let mut hap2 = splitseqs.hap2.unwrap();
         println!("{:?}", hap1);
         println!("{}", hap1.len());
         println!("{:?}", hap2);
@@ -421,9 +434,9 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let (hap1, hap2) = split(&insertions);
-        let mut hap1 = hap1.unwrap();
-        let mut hap2 = hap2.unwrap();
+        let splitseqs = split(&insertions);
+        let mut hap1 = splitseqs.hap1;
+        let mut hap2 = splitseqs.hap2.unwrap();
         assert!(hap1.len() == hap2.len());
         // assert that either hap1 or hap2 is equal to the expected_haplotype
         // but first sort the haplotypes, since the order is not guaranteed

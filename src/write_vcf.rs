@@ -1,6 +1,8 @@
 use crate::consensus::Consensus;
 use distance::levenshtein;
 use log::debug;
+use rust_htslib::faidx;
+use std::io::Read;
 
 pub fn write_vcf(
     mut consenses: Vec<Consensus>,
@@ -10,6 +12,7 @@ pub fn write_vcf(
     chrom: String,
     start: u32,
     end: u32,
+    flag: Vec<String>,
 ) -> String {
     // since I use .pop() to format the two consensus sequences, the order is reversed
     let (length2, alt2, support2, std_dev2, score2) =
@@ -53,9 +56,11 @@ pub fn write_vcf(
         "".to_string()
     };
 
+    let flags = flag.join(";");
+
     format!(
             "{chrom}\t{start}\t.\t{repeat_ref_sequence}\t{alts}\t.\t.\t\
-            END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2};CONSENSUS_SCORE={score1}|{score2};{somatic_info_field}\
+            {flags};END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2};CONSENSUS_SCORE={score1}|{score2};{somatic_info_field}\
             \tGT\t{allele1}|{allele2}",
         )
 }
@@ -68,4 +73,83 @@ pub fn missing_genotype(chrom: &String, start: u32, end: u32, repeat_ref_seq: &s
         end = end,
         ref = repeat_ref_seq,
     )
+}
+
+pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
+    println!(r#"##fileformat=VCFv4.2"#);
+    // get absolute path to fasta file
+    let path = std::fs::canonicalize(fasta)
+        .unwrap_or_else(|err| panic!("Failed getting absolute path to fasta: {err}"));
+    println!(
+        r#"##reference={}"#,
+        path.to_str().expect("Failed converting path to string")
+    );
+    // get the version of this crate
+    let version = env!("CARGO_PKG_VERSION");
+    println!(r#"##source=STRdust v{}"#, version);
+    // call faidx to make sure the fasta index exists, we'll need this anyway when genotyping
+    let _ =
+        faidx::Reader::from_path(fasta).unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
+
+    let mut fai_file = std::fs::File::open(format!("{fasta}.fai")).expect("Can't open file");
+    // parse the fasta index file
+    let mut buf = String::new();
+    fai_file
+        .read_to_string(&mut buf)
+        .expect("Can't read fai file");
+    for contig in buf.lines() {
+        let mut contig = contig.split_whitespace();
+        let name = contig.next().unwrap();
+        let length = contig.next().unwrap().parse::<usize>().unwrap();
+        println!(r#"##contig=<ID={},length={}>"#, name, length);
+    }
+    println!(
+        r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the repeat interval">"#
+    );
+    println!(
+        r#"##INFO=<ID=RL,Number=2,Type=Integer,Description="Repeat length of the two alleles">"#
+    );
+    println!(
+        r#"##INFO=<ID=SUPP,Number=2,Type=Integer,Description="Number of reads supporting the two alleles">"#
+    );
+    println!(
+        r#"##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">"#
+    );
+    println!(
+        r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
+    );
+    println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
+    println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
+    let name = match sample {
+        Some(name) => name,
+        None => {
+            // use basename of bam and remove file extension
+            let name = std::path::Path::new(&bam)
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            name.to_string()
+        }
+    };
+    println!("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{name}",);
+}
+
+#[cfg(test)]
+#[test]
+fn test_write_vcf_header_from_bam() {
+    write_vcf_header(
+        "test_data/chr7.fa.gz",
+        "test_data/small-test-phased.bam",
+        None,
+    );
+}
+
+#[test]
+fn test_write_vcf_header_from_name() {
+    write_vcf_header(
+        "test_data/chr7.fa.gz",
+        "test_data/small-test-phased.bam",
+        Some("test_sample".to_string()),
+    );
 }

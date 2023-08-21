@@ -48,7 +48,7 @@ pub fn genotype_repeats(
                 &bamf, &fastaf, chrom, start, end, minlen, support, somatic, unphased,
             ) {
                 Ok(output) => {
-                    crate::utils::write_vcf_header(&fastaf, &bamf, sample);
+                    crate::write_vcf::write_vcf_header(&fastaf, &bamf, sample);
                     println!("{output}")
                 }
                 Err(chrom) => error!("Contig {chrom} not found in bam file"),
@@ -59,7 +59,7 @@ pub fn genotype_repeats(
             let mut reader =
                 bed::Reader::from_file(region_file.into_os_string().into_string().unwrap())
                     .expect("Problem reading bed file!");
-            crate::utils::write_vcf_header(&fastaf, &bamf, sample);
+            crate::write_vcf::write_vcf_header(&fastaf, &bamf, sample);
             if threads > 1 {
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(threads)
@@ -160,6 +160,7 @@ fn genotype_repeat(
     unphased: bool,
 ) -> Result<String, String> {
     let flanking = 2000;
+    let mut flags = vec![];
     let newref = crate::repeat_compressed_ref::make_repeat_compressed_sequence(
         fasta, &chrom, start, end, flanking,
     );
@@ -216,28 +217,28 @@ fn genotype_repeat(
         }
         debug!("Splitting {} insertions in two phases", insertions.len(),);
         let phased = crate::phase_insertions::split(&insertions);
-        match phased {
-            (Some(phase1), Some(phase2)) => {
-                consenses.push(crate::consensus::consensus(&phase1, support));
+        match phased.hap2 {
+            Some(phase2) => {
+                consenses.push(crate::consensus::consensus(&phased.hap1, support));
                 consenses.push(crate::consensus::consensus(&phase2, support));
                 if somatic {
                     // store all inserted sequences for identifying somatic variation
-                    all_insertions.push(phase1.join(","));
+                    all_insertions.push(phased.hap1.join(","));
                     all_insertions.push(phase2.join(","));
                 }
             }
-            (Some(phase1), None) => {
-                let consensus = crate::consensus::consensus(&phase1, support);
+            None => {
+                // there was only one haplotype, homozygous, so this gets duplicated for reporting
+                let consensus = crate::consensus::consensus(&phased.hap1, support);
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
                 if somatic {
                     // store all inserted sequences for identifying somatic variation
-                    all_insertions.push(phase1.join(","));
+                    all_insertions.push(phased.hap1.join(","));
                 }
-            }
-            _ => {
-                error!("Unexpected scenario after haplotype splitting");
-                panic!();
+                if let Some(splitflag) = phased.flag {
+                    flags.push(splitflag);
+                }
             }
         }
     } else {
@@ -277,6 +278,7 @@ fn genotype_repeat(
         chrom,
         start,
         end,
+        flags,
     ))
 }
 
