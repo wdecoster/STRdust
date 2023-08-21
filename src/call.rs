@@ -159,8 +159,10 @@ fn genotype_repeat(
     somatic: bool,
     unphased: bool,
 ) -> Result<String, String> {
-    let newref =
-        crate::repeat_compressed_ref::make_repeat_compressed_sequence(fasta, &chrom, start, end);
+    let flanking = 2000;
+    let newref = crate::repeat_compressed_ref::make_repeat_compressed_sequence(
+        fasta, &chrom, start, end, flanking,
+    );
     if newref.is_none() {
         // Return a missing genotype if the repeat is not found in the fasta file
         return Ok(crate::write_vcf::missing_genotype(&chrom, start, end, "N"));
@@ -197,7 +199,7 @@ fn genotype_repeat(
         for s in seq {
             let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}\n{err}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
             for read in mapping {
-                if let Some(s) = parse_cs(read, minlen) {
+                if let Some(s) = parse_cs(read, minlen, flanking) {
                     // slice out inserted sequences from the CS tag
                     insertions.push(s.to_uppercase())
                 }
@@ -248,7 +250,7 @@ fn genotype_repeat(
             for s in seq {
                 let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {chrom}:{start}-{end}\n{err}", s=s.to_ascii_uppercase(), chrom=chrom, start=start, end=end));
                 for read in mapping {
-                    if let Some(s) = parse_cs(read, minlen) {
+                    if let Some(s) = parse_cs(read, minlen, flanking) {
                         // slice out inserted sequences from the CS tag
                         insertions.push(s.to_uppercase())
                     }
@@ -334,7 +336,10 @@ fn get_overlapping_reads(
     }
 }
 
-fn parse_cs(read: Mapping, minlen: usize) -> Option<String> {
+fn parse_cs(read: Mapping, minlen: usize, flanking: u32) -> Option<String> {
+    // parses the CS tag of a <read> and returns the inserted sequence if it is longer than <minlen>
+    // the reads are aligned to the repeat compressed reference genome,
+    // which was constructed with <flanking> number of bases up and downstream of the repeat
     let mut ref_pos = read.target_start;
     let alignment = read.alignment.expect("Unable to access alignment");
     let cs = alignment.cs.expect("Unable to get the cs field");
@@ -372,7 +377,9 @@ fn parse_cs(read: Mapping, minlen: usize) -> Option<String> {
                 // this is the ref_pos
                 // the cs tag is of the form +aaa, where aaa is the inserted sequence
                 // if the insertion is longer than the minimum length, it is added to the list of insertions
-                if cap[0][1..].len() > minlen && (9990..=10010).contains(&ref_pos) {
+                if cap[0][1..].len() > minlen
+                    && (flanking as i32 - 10..=flanking as i32 + 10).contains(&ref_pos)
+                {
                     insertions.push(cap[0][1..].to_string());
                 } else if cap[0][1..].len() > minlen {
                     debug!(
@@ -416,12 +423,13 @@ mod tests {
         let chrom = String::from("chr7");
         let start = 154654404;
         let end = 154654432;
+        let flanking = 2000;
         let minlen = 5;
         let _support = 1;
         let unphased = false;
         let (repeat_compressed_reference, _) =
             crate::repeat_compressed_ref::make_repeat_compressed_sequence(
-                &fasta, &chrom, start, end,
+                &fasta, &chrom, start, end, flanking,
             )
             .expect("Unable to make repeat compressed sequence");
         let binding = get_overlapping_reads(&bam, chrom.clone(), start, end, unphased).unwrap();
@@ -444,6 +452,7 @@ mod tests {
                 .expect("Could not get first mapping")
                 .clone(),
             minlen,
+            flanking,
         );
     }
 
@@ -499,6 +508,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_genotype_repeat_s3() {
         // let bam = String::from("https://s3.amazonaws.com/1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
         let bam = String::from("s3://1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
