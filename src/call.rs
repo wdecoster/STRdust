@@ -398,7 +398,6 @@ fn parse_cs(read: Mapping, minlen: usize, flanking: u32) -> Option<String> {
     if !insertions.is_empty() {
         Some(insertions.join(""))
     } else {
-        debug!("No insertions found in CS tag {}", cs);
         None
     }
 }

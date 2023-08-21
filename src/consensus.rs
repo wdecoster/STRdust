@@ -1,6 +1,6 @@
 use bio::alignment::pairwise::Scoring;
 use bio::alignment::poa::*;
-use log::{debug, log_enabled, Level};
+use log::debug;
 use rand::seq::SliceRandom;
 use std::error::Error;
 use std::fmt;
@@ -94,6 +94,9 @@ fn remove_outliers(seqs: &[String]) -> (Vec<&String>, usize) {
         .map(|x| (*x as isize - mean as isize).pow(2) as usize)
         .sum::<usize>()
         / lengths.len();
+    // note that the casting to usize will floor the std_dev to the integer below, rather than properly rounding it to the nearest integer
+    // so this keeps the std_dev smaller than it really is, but not by a lot
+    // the places where this matter are probably negligible
     let std_dev = (variance as f64).sqrt() as usize;
     debug!("mean: {}, std_dev: {}", mean, std_dev);
     if std_dev < 5 {
