@@ -50,6 +50,7 @@ pub fn consensus(
         Err(ConsensusError::new(num_reads))
     } else {
         // if there are more than 20 reads, downsample to 20 before taking the consensus
+        // for performance and memory reasons
         let seqs = if num_reads > 20 {
             debug!("Too many reads, downsampling to 20");
             seqs.choose_multiple(&mut rand::thread_rng(), 20)
@@ -84,11 +85,9 @@ pub fn consensus(
 fn remove_outliers(seqs: &[String]) -> (Vec<&String>, usize) {
     // remove sequences that are shorter or longer than two standard deviations from the mean
     // except if the stdev is small
-    let mut lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
-    if log_enabled!(Level::Debug) {
-        lengths.sort();
-        debug!("lengths: {:?}", lengths);
-    }
+    let lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
+    debug!("lengths: {:?}", lengths);
+
     let mean = lengths.iter().sum::<usize>() / lengths.len();
     let variance = lengths
         .iter()
@@ -99,19 +98,20 @@ fn remove_outliers(seqs: &[String]) -> (Vec<&String>, usize) {
     debug!("mean: {}, std_dev: {}", mean, std_dev);
     if std_dev < 5 {
         debug!("std_dev < 5, not removing any outliers");
-        return (seqs.iter().collect::<Vec<&String>>(), std_dev);
+        (seqs.iter().collect::<Vec<&String>>(), std_dev)
+    } else {
+        // avoid underflowing usize
+        let min_val = mean.saturating_sub(2 * std_dev);
+        let max_val = mean + 2 * std_dev;
+        debug!("Removing outliers outside of [{},{}]", min_val, max_val);
+        let filtered_seqs = seqs
+            .iter()
+            .zip(lengths.iter())
+            .filter(|(_, &len)| len > min_val && len < max_val)
+            .map(|(seq, _)| seq)
+            .collect::<Vec<&String>>();
+        (filtered_seqs, std_dev)
     }
-    // avoid underflowing usize
-    let min_val = mean.saturating_sub(2 * std_dev);
-    let max_val = mean + 2 * std_dev;
-    debug!("Removing outliers outside of [{},{}]", min_val, max_val);
-    let filtered_seqs = seqs
-        .iter()
-        .zip(lengths.iter())
-        .filter(|(_, &len)| len > min_val && len < max_val)
-        .map(|(seq, _)| seq)
-        .collect::<Vec<&String>>();
-    (filtered_seqs, std_dev)
 }
 
 #[cfg(test)]
