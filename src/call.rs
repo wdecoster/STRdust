@@ -42,8 +42,8 @@ pub fn genotype_repeats(
             panic!();
         }
         (Some(region), None) => {
-            let repeat =
-                crate::utils::process_region(region).expect("Error when parsing the region string");
+            let repeat = crate::repeats::process_region(region)
+                .expect("Error when parsing the region string");
             match genotype_repeat(&bamf, &fastaf, repeat, minlen, support, somatic, unphased) {
                 Ok(output) => {
                     crate::write_vcf::write_vcf_header(&fastaf, &bamf, sample);
@@ -75,7 +75,7 @@ pub fn genotype_repeats(
                     match genotype_repeat(
                         &bamf,
                         &fastaf,
-                        crate::utils::RepeatInterval {
+                        crate::repeats::RepeatInterval {
                             chrom: rec.chrom().to_string(),
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
@@ -119,7 +119,7 @@ pub fn genotype_repeats(
                     match genotype_repeat(
                         &bamf,
                         &fastaf,
-                        crate::utils::RepeatInterval {
+                        crate::repeats::RepeatInterval {
                             chrom: rec.chrom().to_string(),
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
@@ -153,7 +153,7 @@ pub fn genotype_repeats(
 fn genotype_repeat(
     bamf: &String,
     fasta: &String,
-    repeat: crate::utils::RepeatInterval,
+    repeat: crate::repeats::RepeatInterval,
     minlen: usize,
     support: usize,
     somatic: bool,
@@ -161,13 +161,13 @@ fn genotype_repeat(
 ) -> Result<String, String> {
     let flanking = 2000;
     let mut flags = vec![];
-    let newref =
-        crate::repeat_compressed_ref::make_repeat_compressed_sequence(fasta, &repeat, flanking);
-    if newref.is_none() {
+    let repeat_ref_seq = match repeat.reference_repeat_sequence(fasta) {
+        Some(seq) => seq,
         // Return a missing genotype if the repeat is not found in the fasta file
-        return Ok(crate::write_vcf::missing_genotype(&repeat, "N"));
-    }
-    let (repeat_compressed_reference, repeat_ref_seq) = newref.unwrap();
+        None => return Ok(crate::write_vcf::missing_genotype(&repeat, "N")),
+    };
+
+    let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(fasta, flanking);
 
     let reads = get_overlapping_reads(bamf, &repeat, unphased);
     if reads.is_none() {
@@ -271,7 +271,7 @@ fn genotype_repeat(
 
 fn get_overlapping_reads(
     bamf: &String,
-    repeat: &crate::utils::RepeatInterval,
+    repeat: &crate::repeats::RepeatInterval,
     unphased: bool,
 ) -> Option<HashMap<u8, Vec<Vec<u8>>>> {
     let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn test_get_overlapping_reads() {
         let bam = String::from("test_data/small-test-phased.bam");
-        let repeat = crate::utils::RepeatInterval {
+        let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
@@ -405,7 +405,7 @@ mod tests {
     fn test_parse_cs() {
         let bam = String::from("test_data/small-test-phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = crate::utils::RepeatInterval {
+        let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
@@ -414,11 +414,7 @@ mod tests {
         let minlen = 5;
         let _support = 1;
         let unphased = false;
-        let (repeat_compressed_reference, _) =
-            crate::repeat_compressed_ref::make_repeat_compressed_sequence(
-                &fasta, &repeat, flanking,
-            )
-            .expect("Unable to make repeat compressed sequence");
+        let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
         let binding = get_overlapping_reads(&bam, &repeat, unphased).unwrap();
         let read = binding
             .get(&1)
@@ -447,7 +443,7 @@ mod tests {
     fn test_genotype_repeat() {
         let bam = String::from("test_data/small-test-phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = crate::utils::RepeatInterval {
+        let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
@@ -464,7 +460,7 @@ mod tests {
     fn test_genotype_repeat_unphased() {
         let bam = String::from("test_data/small-test-phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = crate::utils::RepeatInterval {
+        let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
@@ -481,7 +477,7 @@ mod tests {
     fn test_genotype_repeat_somatic() {
         let bam = String::from("test_data/small-test-phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = crate::utils::RepeatInterval {
+        let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
@@ -500,7 +496,7 @@ mod tests {
         // let bam = String::from("https://s3.amazonaws.com/1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
         let bam = String::from("s3://1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = crate::utils::RepeatInterval {
+        let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,

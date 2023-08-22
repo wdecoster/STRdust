@@ -45,23 +45,6 @@ impl Consensus {
         }
     }
 }
-//              Some(seq) => {
-//                     // length of the consensus sequence minus the length of the repeat sequence
-//             (
-//                 consensus.seq.len() as i32 - ((end - start) as i32)).to_string(),
-//             consensus.seq.clone(),
-//             consensus.support.to_string(),
-//             consensus.std_dev.to_string()
-//         )
-//              };
-//             None => (
-//                 ".".to_string(),
-//                 ".".to_string(),
-//                 self.support.to_string(),
-//                 ".".to_string(),
-//             ),
-//     }
-// }
 
 impl fmt::Display for Consensus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

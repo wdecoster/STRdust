@@ -9,7 +9,7 @@ pub fn write_vcf(
     repeat_ref_sequence: String,
     somatic: bool,
     all_insertions: Vec<String>,
-    repeat: crate::utils::RepeatInterval,
+    repeat: crate::repeats::RepeatInterval,
     flag: Vec<String>,
 ) -> String {
     // since I use .pop() to format the two consensus sequences, the order is reversed
@@ -67,7 +67,7 @@ pub fn write_vcf(
         )
 }
 
-pub fn missing_genotype(repeat: &crate::utils::RepeatInterval, repeat_ref_seq: &str) -> String {
+pub fn missing_genotype(repeat: &crate::repeats::RepeatInterval, repeat_ref_seq: &str) -> String {
     format!(
         "{chrom}\t{start}\t.\t{ref}\t.,.\t.\t.\tEND={end};RL=.|.;SUPP=.|.;STDEV=.|.;\tGT\t.|.",
         chrom = repeat.chrom,

@@ -2,20 +2,20 @@ use flate2::read;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Aux;
 use std::ffi::OsStr;
-use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-pub struct RepeatInterval {
-    pub chrom: String,
-    pub start: u32,
-    pub end: u32,
-}
-
-impl fmt::Display for RepeatInterval {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}-{}", self.chrom, self.start, self.end)
+pub fn get_phase(record: &bam::Record) -> u8 {
+    match record.aux(b"HP") {
+        Ok(value) => {
+            if let Aux::U8(v) = value {
+                v
+            } else {
+                panic!("Unexpected type of Aux {value:?}")
+            }
+        }
+        Err(_e) => 0,
     }
 }
 
@@ -35,36 +35,6 @@ pub fn reader(filename: &str) -> Box<dyn BufRead> {
         ))
     } else {
         Box::new(BufReader::with_capacity(128 * 1024, file))
-    }
-}
-
-/// parse a region string
-pub fn process_region(reg: String) -> Result<RepeatInterval, Box<dyn std::error::Error>> {
-    let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
-    let interval = reg.split(':').collect::<Vec<&str>>()[1];
-    let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
-        .parse()
-        .unwrap();
-    let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
-        .parse()
-        .unwrap();
-    assert!(
-        end - start > 0,
-        r#"Invalid region: begin has to be smaller than end."#
-    );
-    Ok(RepeatInterval { chrom, start, end })
-}
-
-pub fn get_phase(record: &bam::Record) -> u8 {
-    match record.aux(b"HP") {
-        Ok(value) => {
-            if let Aux::U8(v) = value {
-                v
-            } else {
-                panic!("Unexpected type of Aux {value:?}")
-            }
-        }
-        Err(_e) => 0,
     }
 }
 
