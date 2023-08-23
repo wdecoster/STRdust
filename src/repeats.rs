@@ -117,7 +117,6 @@ mod tests {
             start: 1154654404,
             end: 1154654432,
         };
-        let flanking = 2000;
         assert!(repeat.reference_repeat_sequence(&fasta).is_none());
     }
 

@@ -1,5 +1,6 @@
 use bio::io::bed;
 use log::{debug, error, info};
+use minimap2::*;
 use rayon::prelude::*;
 use regex::Regex;
 use rust_htslib::{bam, bam::Read};
@@ -7,8 +8,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use url::Url;
-
-use minimap2::*;
 
 pub fn genotype_repeats(
     bamp: PathBuf,
@@ -46,7 +45,7 @@ pub fn genotype_repeats(
                 .expect("Error when parsing the region string");
             match genotype_repeat(&bamf, &fastaf, repeat, minlen, support, somatic, unphased) {
                 Ok(output) => {
-                    crate::write_vcf::write_vcf_header(&fastaf, &bamf, sample);
+                    crate::vcf::write_vcf_header(&fastaf, &bamf, sample);
                     println!("{output}")
                 }
                 Err(chrom) => error!("Contig {chrom} not found in bam file"),
@@ -57,7 +56,7 @@ pub fn genotype_repeats(
             let mut reader =
                 bed::Reader::from_file(region_file.into_os_string().into_string().unwrap())
                     .expect("Problem reading bed file!");
-            crate::write_vcf::write_vcf_header(&fastaf, &bamf, sample);
+            crate::vcf::write_vcf_header(&fastaf, &bamf, sample);
             if threads > 1 {
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(threads)
@@ -158,23 +157,34 @@ fn genotype_repeat(
     support: usize,
     somatic: bool,
     unphased: bool,
-) -> Result<String, String> {
+) -> Result<crate::vcf::VCFRecord, String> {
     let flanking = 2000;
     let mut flags = vec![];
     let repeat_ref_seq = match repeat.reference_repeat_sequence(fasta) {
         Some(seq) => seq,
         // Return a missing genotype if the repeat is not found in the fasta file
-        None => return Ok(crate::write_vcf::missing_genotype(&repeat, "N")),
+        None => {
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                &repeat,
+                "N",
+                ".".to_string(),
+            ))
+        }
     };
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(fasta, flanking);
 
-    let reads = get_overlapping_reads(bamf, &repeat, unphased);
-    if reads.is_none() {
-        // Return a missing genotype if no (phased) reads overlap the repeat
-        return Ok(crate::write_vcf::missing_genotype(&repeat, &repeat_ref_seq));
-    }
-    let seqs = reads.unwrap();
+    let seqs = match get_overlapping_reads(bamf, &repeat, unphased) {
+        Some(seqs) => seqs,
+        None => {
+            // Return a missing genotype if no (phased) reads overlap the repeat
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                &repeat,
+                &repeat_ref_seq,
+                0.to_string(),
+            ));
+        }
+    };
 
     // Create an index for minimap2 alignment to the artificial reference
     let aligner = minimap2::Aligner::builder()
@@ -188,7 +198,7 @@ fn genotype_repeat(
         let mut insertions = vec![];
         // get the sequences of this phase (or all if unphased)
         let seq = seqs.get(&0).unwrap();
-        debug!("Unphased: Aliging {} reads", seq.len());
+        debug!("{repeat}: Unphased: Aliging {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
         for s in seq {
             let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
@@ -202,9 +212,13 @@ fn genotype_repeat(
         if insertions.len() < support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
-            return Ok(crate::write_vcf::missing_genotype(&repeat, &repeat_ref_seq));
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                &repeat,
+                &repeat_ref_seq,
+                insertions.len().to_string(),
+            ));
         }
-        debug!("Splitting {} insertions in two phases", insertions.len(),);
+        debug!("{repeat}: Phasing {} insertions", insertions.len(),);
         let phased = crate::phase_insertions::split(&insertions);
         match phased.hap2 {
             Some(phase2) => {
@@ -235,7 +249,7 @@ fn genotype_repeat(
             let mut insertions = vec![];
             // get the sequences of this phase (or all if unphased)
             let seq = seqs.get(&phase).unwrap();
-            debug!("Phase {}: Aliging {} reads", phase, seq.len());
+            debug!("{repeat}: Phase {}: Aliging {} reads", phase, seq.len());
             // align the reads to the new repeat-compressed reference
             for s in seq {
                 let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
@@ -247,7 +261,7 @@ fn genotype_repeat(
                 }
             }
             debug!(
-                "Phase {}: Creating consensus from {} insertions",
+                "{repeat}: Phase {}: Creating consensus from {} insertions",
                 phase,
                 insertions.len(),
             );
@@ -259,7 +273,7 @@ fn genotype_repeat(
             }
         }
     }
-    Ok(crate::write_vcf::write_vcf(
+    Ok(crate::vcf::VCFRecord::new(
         consenses,
         repeat_ref_seq,
         somatic,
@@ -275,7 +289,7 @@ fn get_overlapping_reads(
     unphased: bool,
 ) -> Option<HashMap<u8, Vec<Vec<u8>>>> {
     let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
-        bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse s3 URL"))
+        bam::IndexedReader::from_url(&Url::parse(bamf.as_str()).expect("Failed to parse s3 URL"))
             .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
     } else {
         bam::IndexedReader::from_path(bamf)
