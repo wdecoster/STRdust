@@ -9,7 +9,7 @@ pub struct SplitSequences {
     pub flag: Option<String>,
 }
 
-pub fn split(insertions: &Vec<String>) -> SplitSequences {
+pub fn split(insertions: &Vec<String>, repeat: &crate::repeats::RepeatInterval) -> SplitSequences {
     // the insertions are from an unphased experiment
     // and should be split in one (if homozygous) or two haplotypes
     // this is based on the length of the insertion
@@ -42,7 +42,7 @@ pub fn split(insertions: &Vec<String>) -> SplitSequences {
     let mut haplotype_clusters = vec![];
     // clusters have to represent at least 20% of the reads
     let min_cluster_size = (insertions.len() as f32 / 5.0) as usize;
-    debug!("Minimum cluster size: {}", min_cluster_size);
+    debug!("{repeat}: Minimum cluster size: {}", min_cluster_size);
 
     for (index, step) in dend.steps().iter().enumerate() {
         // insert the new label with the clusters it contains
@@ -79,7 +79,7 @@ pub fn split(insertions: &Vec<String>) -> SplitSequences {
             };
 
             debug!(
-                "Node {cluster} with dissimilarity {} and children {} [{seq1}] and {} [{seq2}]",
+                "{repeat}: Node {cluster} with dissimilarity {} and children {} [{seq1}] and {} [{seq2}]",
                 clusters_to_dissimilarity.get(cluster).unwrap(),
                 subclusters.0,
                 subclusters.1
@@ -94,7 +94,7 @@ pub fn split(insertions: &Vec<String>) -> SplitSequences {
         &clusters_to_dissimilarity,
         &min_cluster_size,
     );
-    debug!("Roots for this tree: {:?}", roots);
+    debug!("{repeat}: Roots for this tree: {:?}", roots);
 
     // if a parent cluster has been seen we will ignore all children thereof
     let mut large_cluster_seen = vec![];
@@ -115,14 +115,17 @@ pub fn split(insertions: &Vec<String>) -> SplitSequences {
             // as such we only get sufficiently large independent clusters
             if !large_cluster_seen.contains(parent) {
                 haplotype_clusters.push(*cluster);
-                debug!("Adding cluster {} to candidate haplotype clusters", cluster);
+                debug!(
+                    "{repeat}: Adding cluster {} to candidate haplotype clusters",
+                    cluster
+                );
             }
             large_cluster_seen.push(*cluster);
         }
     }
     match haplotype_clusters.len() {
         0 => {
-            debug!("No haplotype clusters found! Treating this as homozygous, but here could be dragons");
+            debug!("{repeat}: No haplotype clusters found! Treating this as homozygous, but here could be dragons");
             SplitSequences {
                 hap1: insertions.clone(),
                 hap2: None,
@@ -135,7 +138,7 @@ pub fn split(insertions: &Vec<String>) -> SplitSequences {
             // this ignores roots and outliers, but identifying those is rather problematic in the homozygous case
             // and the end result is often that we lose too many reads as false-positive roots
             // I assume the poa consensus will deal with outliers
-            debug!("Only one haplotype cluster found");
+            debug!("{repeat}: Only one haplotype cluster found");
             SplitSequences {
                 hap1: insertions.clone(),
                 hap2: None,
@@ -143,7 +146,7 @@ pub fn split(insertions: &Vec<String>) -> SplitSequences {
             }
         }
         2 => {
-            debug!("Found two haplotype clusters");
+            debug!("{repeat}: Found two haplotype clusters");
             SplitSequences {
                 hap1: find_cluster_members(
                     &haplotype_clusters[0],
@@ -259,7 +262,14 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let splitseqs = split(&insertions);
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr7".to_string(),
+                start: 154654404,
+                end: 154654432,
+            },
+        );
         assert!(splitseqs.hap1.len() == splitseqs.hap2.unwrap().len());
         // check that all sequences in hap1 are the same length
         assert!(splitseqs
@@ -291,7 +301,14 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let splitseqs = split(&insertions);
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr7".to_string(),
+                start: 154654404,
+                end: 154654432,
+            },
+        );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
         assert!(hap1.len() == hap2.len());
@@ -322,7 +339,14 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let splitseqs = split(&insertions);
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr7".to_string(),
+                start: 154654404,
+                end: 154654432,
+            },
+        );
         assert!(splitseqs.hap1.len() + splitseqs.hap2.unwrap().len() == insertions.len());
     }
 
@@ -356,7 +380,14 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let splitseqs = split(&insertions);
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr7".to_string(),
+                start: 154654404,
+                end: 154654432,
+            },
+        );
         assert!(splitseqs.hap2.is_none());
         println!("hap1: {:?}", splitseqs.hap1);
         assert!(splitseqs.hap1.len() == insertions.len());
@@ -388,7 +419,14 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let splitseqs = split(&insertions);
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr7".to_string(),
+                start: 154654404,
+                end: 154654432,
+            },
+        );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
         println!("{:?}", hap1);
@@ -434,7 +472,14 @@ mod tests {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         insertions.shuffle(&mut rng);
-        let splitseqs = split(&insertions);
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr7".to_string(),
+                start: 154654404,
+                end: 154654432,
+            },
+        );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
         assert!(hap1.len() == hap2.len());

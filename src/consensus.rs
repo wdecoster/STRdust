@@ -59,7 +59,11 @@ impl fmt::Display for Consensus {
     }
 }
 
-pub fn consensus(seqs: &[String], support: usize) -> Consensus {
+pub fn consensus(
+    seqs: &[String],
+    support: usize,
+    repeat: &crate::repeats::RepeatInterval,
+) -> Consensus {
     if seqs.is_empty() {
         return Consensus {
             seq: None,
@@ -69,10 +73,10 @@ pub fn consensus(seqs: &[String], support: usize) -> Consensus {
         };
     }
     let num_reads_ = seqs.len();
-    let (seqs, std_dev) = remove_outliers(seqs);
+    let (seqs, std_dev) = remove_outliers(seqs, repeat);
     let num_reads = seqs.len();
     debug!(
-        "Kept {}/{} reads after dropping outliers",
+        "{repeat}: Kept {}/{} reads after dropping outliers",
         num_reads, num_reads_
     );
     if num_reads < support {
@@ -86,7 +90,7 @@ pub fn consensus(seqs: &[String], support: usize) -> Consensus {
         // if there are more than 20 reads, downsample to 20 before taking the consensus
         // for performance and memory reasons
         let seqs = if num_reads > 20 {
-            debug!("Too many reads, downsampling to 20");
+            debug!("{repeat}: Too many reads, downsampling to 20");
             seqs.choose_multiple(&mut rand::thread_rng(), 20)
                 .cloned()
                 .collect::<Vec<&String>>()
@@ -118,11 +122,14 @@ pub fn consensus(seqs: &[String], support: usize) -> Consensus {
     }
 }
 
-fn remove_outliers(seqs: &[String]) -> (Vec<&String>, usize) {
+fn remove_outliers<'a>(
+    seqs: &'a [String],
+    repeat: &crate::repeats::RepeatInterval,
+) -> (Vec<&'a String>, usize) {
     // remove sequences that are shorter or longer than two standard deviations from the mean
     // except if the stdev is small
     let lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
-    debug!("lengths: {:?}", lengths);
+    debug!("{repeat}: lengths: {:?}", lengths);
 
     let mean = lengths.iter().sum::<usize>() / lengths.len();
     let variance = lengths
@@ -181,7 +188,15 @@ mod tests {
             "CAGGCAGGCAGGCAGGCAGGCAGGCAGGCAGACAGGCAGCCAGGCAGGCAGGCAGG".to_string(),
             "CAGGCAGGCAGGCAGGCAGGCAGGCAGGCAGACAGGCAGCCAGGCAGGCAGGCAGG".to_string(),
         ];
-        let cons = consensus(&seqs, 10);
+        let cons = consensus(
+            &seqs,
+            10,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr1".to_string(),
+                start: 1,
+                end: 100,
+            },
+        );
         println!("Consensus: {}", cons.seq.unwrap());
         println!("Num reads: {}", cons.support);
         println!("Std dev: {}", cons.std_dev);

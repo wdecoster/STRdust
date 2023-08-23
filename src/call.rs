@@ -199,7 +199,7 @@ fn genotype_repeat(
         for s in seq {
             let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
             for read in mapping {
-                if let Some(s) = parse_cs(read, minlen, flanking) {
+                if let Some(s) = parse_cs(read, minlen, flanking, &repeat) {
                     // slice out inserted sequences from the CS tag
                     insertions.push(s.to_uppercase())
                 }
@@ -215,11 +215,11 @@ fn genotype_repeat(
             ));
         }
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(&insertions);
+        let phased = crate::phase_insertions::split(&insertions, &repeat);
         match phased.hap2 {
             Some(phase2) => {
-                consenses.push(crate::consensus::consensus(&phased.hap1, support));
-                consenses.push(crate::consensus::consensus(&phase2, support));
+                consenses.push(crate::consensus::consensus(&phased.hap1, support, &repeat));
+                consenses.push(crate::consensus::consensus(&phase2, support, &repeat));
                 if somatic {
                     // store all inserted sequences for identifying somatic variation
                     all_insertions.push(phased.hap1.join(","));
@@ -228,7 +228,7 @@ fn genotype_repeat(
             }
             None => {
                 // there was only one haplotype, homozygous, so this gets duplicated for reporting
-                let consensus = crate::consensus::consensus(&phased.hap1, support);
+                let consensus = crate::consensus::consensus(&phased.hap1, support, &repeat);
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
                 if somatic {
@@ -250,7 +250,7 @@ fn genotype_repeat(
             for s in seq {
                 let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
                 for read in mapping {
-                    if let Some(s) = parse_cs(read, minlen, flanking) {
+                    if let Some(s) = parse_cs(read, minlen, flanking, &repeat) {
                         // slice out inserted sequences from the CS tag
                         insertions.push(s.to_uppercase())
                     }
@@ -261,7 +261,7 @@ fn genotype_repeat(
                 phase,
                 insertions.len(),
             );
-            consenses.push(crate::consensus::consensus(&insertions, support));
+            consenses.push(crate::consensus::consensus(&insertions, support, &repeat));
 
             if somatic {
                 // store all inserted sequences for identifying somatic variation
@@ -291,7 +291,6 @@ fn get_overlapping_reads(
         bam::IndexedReader::from_path(bamf)
             .unwrap_or_else(|err| panic!("Error opening local BAM: {err}"))
     };
-    info!("Checks passed, genotyping repeat");
     let tid = bam
         .header()
         .tid(repeat.chrom.as_bytes())
@@ -330,7 +329,12 @@ fn get_overlapping_reads(
     }
 }
 
-fn parse_cs(read: Mapping, minlen: usize, flanking: u32) -> Option<String> {
+fn parse_cs(
+    read: Mapping,
+    minlen: usize,
+    flanking: u32,
+    repeat: &crate::repeats::RepeatInterval,
+) -> Option<String> {
     // parses the CS tag of a <read> and returns the inserted sequence if it is longer than <minlen>
     // the reads are aligned to the repeat compressed reference genome,
     // which was constructed with <flanking> number of bases up and downstream of the repeat
@@ -343,6 +347,7 @@ fn parse_cs(read: Mapping, minlen: usize, flanking: u32) -> Option<String> {
     let re = Regex::new(r"(:\d+)|(\*\w+)|(\+\w+)|(-\w+)").unwrap();
 
     let mut insertions = Vec::new();
+    let interval_around_junction = flanking as i32 - 10..=flanking as i32 + 10;
 
     for cap in re.captures_iter(&cs) {
         let op = &cap[0].chars().next().unwrap();
@@ -371,13 +376,11 @@ fn parse_cs(read: Mapping, minlen: usize, flanking: u32) -> Option<String> {
                 // this is the ref_pos
                 // the cs tag is of the form +aaa, where aaa is the inserted sequence
                 // if the insertion is longer than the minimum length, it is added to the list of insertions
-                if cap[0][1..].len() > minlen
-                    && (flanking as i32 - 10..=flanking as i32 + 10).contains(&ref_pos)
-                {
+                if cap[0][1..].len() > minlen && interval_around_junction.contains(&ref_pos) {
                     insertions.push(cap[0][1..].to_string());
                 } else if cap[0][1..].len() > minlen {
                     debug!(
-                        "Insertion {} is too far from the repeat locus junction to be considered: {}",
+                        "{repeat}: Insertion {} is too far from the repeat locus junction to be considered: {}",
                         cap[0][1..].to_string(),
                         ref_pos
                     );
@@ -446,6 +449,7 @@ mod tests {
                 .clone(),
             minlen,
             flanking,
+            &repeat,
         );
     }
 
