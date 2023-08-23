@@ -22,10 +22,7 @@ pub fn genotype_repeats(
     unphased: bool,
 ) {
     if !bamp.is_file() {
-        error!(
-            "ERROR: path to bam file {} is not valid!\n\n",
-            bamp.display()
-        );
+        error!("ERROR: invalid path to bam file {}!\n\n", bamp.display());
         panic!();
     };
     let bamf = bamp.into_os_string().into_string().unwrap();
@@ -67,7 +64,7 @@ pub fn genotype_repeats(
                 // to avoid reporting the same error multiple times
                 let chrom_reported = Mutex::new(Vec::new());
                 // genotypes contains the output of the genotyping, a struct instance
-                // let genotypes = Mutex::new(Vec::new());
+                let genotypes = Mutex::new(Vec::new());
                 // par_bridge does not guarantee that results are returned in order
                 reader.records().par_bridge().for_each(|record| {
                     let rec = record.expect("Error reading bed record.");
@@ -85,9 +82,8 @@ pub fn genotype_repeats(
                         unphased,
                     ) {
                         Ok(output) => {
-                            // let mut geno = genotypes.lock().unwrap();
-                            // geno.push(output);
-                            println!("{output}")
+                            let mut geno = genotypes.lock().unwrap();
+                            geno.push(output);
                         }
                         Err(chrom) => {
                             // For now the Err is only used for when a chromosome from the bed file does not appear in the bam file
@@ -100,12 +96,12 @@ pub fn genotype_repeats(
                         }
                     };
                 });
-                // let mut genotypes_vec = genotypes.lock().unwrap();
+                let mut genotypes_vec = genotypes.lock().unwrap();
                 // The final output is sorted by chrom, start and end
-                // genotypes_vec.sort_unstable();
-                // for g in &mut *genotypes_vec {
-                //     println!("{g}");
-                // }
+                genotypes_vec.sort_unstable();
+                for g in &mut *genotypes_vec {
+                    println!("{g}");
+                }
             } else {
                 // When running single threaded things become easier and the tool will require less memory
                 // Output is returned in the same order as the bed, and therefore not sorted before writing to stdout

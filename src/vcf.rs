@@ -1,7 +1,9 @@
 use crate::consensus::Consensus;
 use distance::levenshtein;
+use human_sort::compare as human_compare;
 use log::debug;
 use rust_htslib::faidx;
+use std::cmp::Ordering;
 use std::fmt;
 use std::io::Read;
 
@@ -160,6 +162,26 @@ impl fmt::Display for VCFRecord {
         }
     }
 }
+
+impl Ord for VCFRecord {
+    fn cmp(&self, other: &Self) -> Ordering {
+        human_compare(&self.chrom, &other.chrom).then(self.start.cmp(&other.start))
+    }
+}
+
+impl PartialOrd for VCFRecord {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for VCFRecord {
+    fn eq(&self, other: &Self) -> bool {
+        (self.chrom.clone(), &self.start) == (other.chrom.clone(), &other.start)
+    }
+}
+
+impl Eq for VCFRecord {}
 
 pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
     println!(r#"##fileformat=VCFv4.2"#);
