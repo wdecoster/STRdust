@@ -5,7 +5,6 @@ use rayon::prelude::*;
 use regex::Regex;
 use rust_htslib::{bam, bam::Read};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Mutex;
 use url::Url;
 
@@ -224,8 +223,8 @@ fn genotype_repeat(
                 consenses.push(crate::consensus::consensus(&phase2, support, &repeat));
                 if somatic {
                     // store all inserted sequences for identifying somatic variation
-                    all_insertions.push(phased.hap1.join(","));
-                    all_insertions.push(phase2.join(","));
+                    all_insertions.push(phased.hap1.join(":"));
+                    all_insertions.push(phase2.join(":"));
                 }
             }
             None => {
@@ -235,7 +234,7 @@ fn genotype_repeat(
                 consenses.push(consensus);
                 if somatic {
                     // store all inserted sequences for identifying somatic variation
-                    all_insertions.push(phased.hap1.join(","));
+                    all_insertions.push(phased.hap1.join(":"));
                 }
                 if let Some(splitflag) = phased.flag {
                     flags.push(splitflag);
@@ -267,7 +266,7 @@ fn genotype_repeat(
 
             if somatic {
                 // store all inserted sequences for identifying somatic variation
-                all_insertions.push(insertions.join(","));
+                all_insertions.push(insertions.join(":"));
             }
         }
     }

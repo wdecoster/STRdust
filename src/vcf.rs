@@ -72,12 +72,12 @@ impl VCFRecord {
         };
 
         let somatic_info_field = if somatic {
-            format!(";SEQS={}", all_insertions.join("|"))
+            format!(";SEQS={}", all_insertions.join(","))
         } else {
             "".to_string()
         };
 
-        let flags = flag.join(";");
+        let flags = format!("{};", flag.join(";"));
         VCFRecord {
             chrom: repeat.chrom,
             start: repeat.start,
@@ -121,40 +121,38 @@ impl fmt::Display for VCFRecord {
         match &self.alt_seq {
             Some(alts) => {
                 write!(
-            f,
-            "{chrom}\t{start}\t.\t{ref_seq}\t{alt_seq}\t.\t.\t\
-            {flags}END={end};RL={length1}|{length2};SUPP={support1}|{support2};STDEV={std_dev1}|{std_dev2};CONSENSUS_SCORE={score1}|{score2};{somatic_info_field}\
-            \tGT\t{allele1}|{allele2}",
-            chrom = self.chrom,
-            start = self.start,
-            flags = self.flags,
-            end = self.end,
-            ref_seq = self.ref_seq,
-            alt_seq = alts,
-            length1 = self.length.0,
-            length2 = self.length.1,
-            support1 = self.support.0,
-            support2 = self.support.1,
-            std_dev1 = self.std_dev.0,
-            std_dev2 = self.std_dev.1,
-            score1 = self.score.0,
-            score2 = self.score.1,
-            somatic_info_field = self.somatic_info_field,
-            allele1 = self.allele.0,
-            allele2 = self.allele.1,
-        )
+                    f,
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RL={l1},{l2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2};{somatic}\tGT\t{allele1}|{allele2}",
+                    chrom = self.chrom,
+                    start = self.start,
+                    flags = self.flags,
+                    end = self.end,
+                    ref = self.ref_seq,
+                    alt = alts,
+                    l1 = self.length.0,
+                    l2 = self.length.1,
+                    sup1 = self.support.0,
+                    sup2 = self.support.1,
+                    sd1 = self.std_dev.0,
+                    sd2 = self.std_dev.1,
+                    score1 = self.score.0,
+                    score2 = self.score.1,
+                    somatic = self.somatic_info_field,
+                    allele1 = self.allele.0,
+                    allele2 = self.allele.1,
+                )
             }
             None => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref_seq}\t.\t.\t.\tEND={end};SUPP={support1}|{support2};{somatic_info_field}\tGT\t{allele1}|{allele2}",
+                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\tEND={end};SUPP={sup1}|{sup2};{somatic}\tGT\t{allele1}|{allele2}",
                     chrom = self.chrom,
                     start = self.start,
                     end = self.end,
-                    ref_seq = self.ref_seq,
-                    support1 = self.support.0,
-                    support2 = self.support.1,
-                    somatic_info_field = self.somatic_info_field,
+                    ref = self.ref_seq,
+                    sup1 = self.support.0,
+                    sup2 = self.support.1,
+                    somatic = self.somatic_info_field,
                     allele1 = self.allele.0,
                     allele2 = self.allele.1,
                 )
@@ -222,6 +220,9 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
     );
     println!(
         r#"##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">"#
+    );
+    println!(
+        r#"##INFO=<ID=CONSENSUS_SCORE,Number=2,Type=Integer,Description="Consensus score per alleles">"#
     );
     println!(
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
