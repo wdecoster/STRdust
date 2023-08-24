@@ -24,28 +24,6 @@ impl Default for Consensus {
     }
 }
 
-impl Consensus {
-    pub fn format_lengths(&self, start: u32, end: u32) -> (String, String, String, String, String) {
-        match &self.seq {
-            Some(seq) => (
-                // length of the consensus sequence minus the length of the repeat sequence
-                (seq.len() as i32 - ((end - start) as i32)).to_string(),
-                seq.clone(),
-                self.support.to_string(),
-                self.std_dev.to_string(),
-                self.score.to_string(),
-            ),
-            None => (
-                ".".to_string(),
-                ".".to_string(),
-                self.support.to_string(),
-                ".".to_string(),
-                ".".to_string(),
-            ),
-        }
-    }
-}
-
 impl fmt::Display for Consensus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.seq {

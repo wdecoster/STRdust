@@ -32,14 +32,10 @@ impl VCFRecord {
         flag: Vec<String>,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
-        let (length2, alt2, support2, std_dev2, score2) = consenses
-            .pop()
-            .unwrap()
-            .format_lengths(repeat.start, repeat.end);
-        let (length1, alt1, support1, std_dev1, score1) = consenses
-            .pop()
-            .unwrap()
-            .format_lengths(repeat.start, repeat.end);
+        let (length2, alt2, support2, std_dev2, score2) =
+            format_lengths(consenses.pop().unwrap(), repeat.start, repeat.end);
+        let (length1, alt1, support1, std_dev1, score1) =
+            format_lengths(consenses.pop().unwrap(), repeat.start, repeat.end);
         debug!("Genotyping {repeat}:{repeat_ref_sequence} with {alt1} and {alt2}");
         let allele1 = if alt1 == "." {
             "."
@@ -122,7 +118,7 @@ impl fmt::Display for VCFRecord {
             Some(alts) => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RL={l1},{l2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2};{somatic}\tGT\t{allele1}|{allele2}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2};{somatic}\tGT\t{allele1}|{allele2}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -213,7 +209,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
         r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the repeat interval">"#
     );
     println!(
-        r#"##INFO=<ID=RL,Number=2,Type=Integer,Description="Repeat length of the two alleles">"#
+        r#"##INFO=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases">"#
     );
     println!(
         r#"##INFO=<ID=SUPP,Number=2,Type=Integer,Description="Number of reads supporting the two alleles">"#
@@ -226,6 +222,9 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
     );
     println!(
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
+    );
+    println!(
+        r#"##INFO=<ID=CLUSTERFAILURE,Type=Flag,Description="If unphased input failed to clusterin two haplotype">"#
     );
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
@@ -242,6 +241,30 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
         }
     };
     println!("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{name}",);
+}
+
+fn format_lengths(
+    consensus: crate::consensus::Consensus,
+    start: u32,
+    end: u32,
+) -> (String, String, String, String, String) {
+    match &consensus.seq {
+        Some(seq) => (
+            // length of the consensus sequence minus the length of the repeat sequence
+            (seq.len() as i32 - ((end - start) as i32)).to_string(),
+            seq.clone(),
+            consensus.support.to_string(),
+            consensus.std_dev.to_string(),
+            consensus.score.to_string(),
+        ),
+        None => (
+            ".".to_string(),
+            ".".to_string(),
+            consensus.support.to_string(),
+            ".".to_string(),
+            ".".to_string(),
+        ),
+    }
 }
 
 #[cfg(test)]
