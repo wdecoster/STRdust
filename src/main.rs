@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 pub mod call;
 pub mod consensus;
+pub mod motif;
 pub mod phase_insertions;
 pub mod repeats;
 pub mod utils;
@@ -15,7 +16,7 @@ pub mod vcf;
 #[derive(Parser, Debug)]
 #[structopt(global_settings=&[DeriveDisplayOrder])]
 #[clap(author, version, about="Tool to genotype STRs from long reads", long_about = None)]
-struct Cli {
+pub struct Cli {
     /// reference genome
     #[clap(parse(from_os_str), validator=is_file)]
     fasta: PathBuf,
@@ -70,18 +71,7 @@ fn main() {
     env_logger::init();
     let args = Cli::parse();
     info!("Collected arguments");
-    call::genotype_repeats(
-        args.bam,
-        args.fasta,
-        args.region,
-        args.region_file,
-        args.minlen,
-        args.support,
-        args.threads,
-        args.sample,
-        args.somatic,
-        args.unphased,
-    );
+    call::genotype_repeats(args);
 }
 
 #[cfg(test)]

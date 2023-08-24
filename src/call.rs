@@ -1,5 +1,5 @@
 use bio::io::bed;
-use log::{debug, error, info};
+use log::{debug, error};
 use minimap2::*;
 use rayon::prelude::*;
 use regex::Regex;
@@ -9,26 +9,20 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use url::Url;
 
-pub fn genotype_repeats(
-    bamp: PathBuf,
-    fasta: PathBuf,
-    region: Option<String>,
-    region_file: Option<PathBuf>,
-    minlen: usize,
-    support: usize,
-    threads: usize,
-    sample: Option<String>,
-    somatic: bool,
-    unphased: bool,
-) {
-    if !bamp.is_file() {
-        error!("ERROR: invalid path to bam file {}!\n\n", bamp.display());
+use crate::Cli;
+
+pub fn genotype_repeats(args: Cli) {
+    if !args.bam.is_file() {
+        error!(
+            "ERROR: invalid path to bam file {}!\n\n",
+            args.bam.display()
+        );
         panic!();
     };
-    let bamf = bamp.into_os_string().into_string().unwrap();
-    let fastaf = fasta.into_os_string().into_string().unwrap();
+    let bamf = args.bam.into_os_string().into_string().unwrap();
+    let fastaf = args.fasta.into_os_string().into_string().unwrap();
     debug!("Genotyping STRs in {bamf}");
-    match (region, region_file) {
+    match (args.region, args.region_file) {
         (Some(_region), Some(_region_file)) => {
             error!("ERROR: Specify either a region (-r) or region_file (-R), not both!\n\n");
             panic!();
@@ -40,9 +34,17 @@ pub fn genotype_repeats(
         (Some(region), None) => {
             let repeat = crate::repeats::process_region(region)
                 .expect("Error when parsing the region string");
-            match genotype_repeat(&bamf, &fastaf, repeat, minlen, support, somatic, unphased) {
+            match genotype_repeat(
+                &bamf,
+                &fastaf,
+                repeat,
+                args.minlen,
+                args.support,
+                args.somatic,
+                args.unphased,
+            ) {
                 Ok(output) => {
-                    crate::vcf::write_vcf_header(&fastaf, &bamf, sample);
+                    crate::vcf::write_vcf_header(&fastaf, &bamf, args.sample);
                     println!("{output}")
                 }
                 Err(chrom) => error!("Contig {chrom} not found in bam file"),
@@ -53,10 +55,10 @@ pub fn genotype_repeats(
             let mut reader =
                 bed::Reader::from_file(region_file.into_os_string().into_string().unwrap())
                     .expect("Problem reading bed file!");
-            crate::vcf::write_vcf_header(&fastaf, &bamf, sample);
-            if threads > 1 {
+            crate::vcf::write_vcf_header(&fastaf, &bamf, args.sample);
+            if args.threads > 1 {
                 rayon::ThreadPoolBuilder::new()
-                    .num_threads(threads)
+                    .num_threads(args.threads)
                     .build()
                     .unwrap();
                 // chrom_reported and genotypes are vectors that are used by multiple threads to add findings, therefore as a Mutex
@@ -76,10 +78,10 @@ pub fn genotype_repeats(
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
                         },
-                        minlen,
-                        support,
-                        somatic,
-                        unphased,
+                        args.minlen,
+                        args.support,
+                        args.somatic,
+                        args.unphased,
                     ) {
                         Ok(output) => {
                             let mut geno = genotypes.lock().unwrap();
@@ -119,10 +121,10 @@ pub fn genotype_repeats(
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
                         },
-                        minlen,
-                        support,
-                        somatic,
-                        unphased,
+                        args.minlen,
+                        args.support,
+                        args.somatic,
+                        args.unphased,
                     ) {
                         Ok(output) => {
                             println!("{output}");
@@ -509,6 +511,7 @@ mod tests {
     fn test_genotype_repeat_s3() {
         // let bam = String::from("https://s3.amazonaws.com/1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
         let bam = String::from("s3://1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
+        let bam = String::from("https://1000g-ont.s3.amazonaws.com/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
