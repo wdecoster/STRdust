@@ -41,7 +41,7 @@ pub fn split(insertions: &Vec<String>, repeat: &crate::repeats::RepeatInterval) 
     // create a vector with candidate haplotype-clusters
     let mut haplotype_clusters = vec![];
     // clusters have to represent at least 20% of the reads
-    let min_cluster_size = (insertions.len() as f32 / 5.0) as usize;
+    let min_cluster_size = (insertions.len() as f32 / 10.0) as usize;
     debug!("{repeat}: Minimum cluster size: {}", min_cluster_size);
 
     for (index, step) in dend.steps().iter().enumerate() {
