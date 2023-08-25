@@ -224,7 +224,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
     );
     println!(
-        r#"##INFO=<ID=CLUSTERFAILURE,Type=Flag,Description="If unphased input failed to clusterin two haplotype">"#
+        r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to clusterin two haplotype">"#
     );
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
