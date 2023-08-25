@@ -74,7 +74,7 @@ impl RepeatInterval {
 }
 
 /// parse a region string
-pub fn process_region(reg: String) -> Result<RepeatInterval, Box<dyn std::error::Error>> {
+pub fn process_region(reg: &str) -> Result<RepeatInterval, Box<dyn std::error::Error>> {
     let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
     let interval = reg.split(':').collect::<Vec<&str>>()[1];
     let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]

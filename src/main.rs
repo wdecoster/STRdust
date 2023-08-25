@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use clap::AppSettings::DeriveDisplayOrder;
 use clap::Parser;
-use log::info;
+use log::{info, warn};
 use std::path::PathBuf;
 
 pub mod call;
@@ -18,12 +18,12 @@ pub mod vcf;
 #[clap(author, version, about="Tool to genotype STRs from long reads", long_about = None)]
 pub struct Cli {
     /// reference genome
-    #[clap(parse(from_os_str), validator=is_file)]
-    fasta: PathBuf,
+    #[clap(validator=is_file)]
+    fasta: String,
 
     /// bam file to call STRs in
-    #[clap(parse(from_os_str), validator=is_file)]
-    bam: PathBuf,
+    #[clap(validator=is_file)]
+    bam: String,
 
     /// region string to genotype expansion in
     #[clap(short, long, value_parser)]
@@ -31,7 +31,7 @@ pub struct Cli {
 
     /// Bed file with region(s) to genotype expansion(s) in
     #[clap(short = 'R', long, value_parser, validator=is_file)]
-    region_file: Option<PathBuf>,
+    region_file: Option<String>,
 
     /// minimal length of insertion/deletion operation
     #[clap(short, long, value_parser, default_value_t = 5)]
@@ -56,6 +56,10 @@ pub struct Cli {
     /// Reads are not phased
     #[clap(long, value_parser, default_value_t = false)]
     unphased: bool,
+
+    /// Identify poorly supported outlier expansions (only with --unphased)
+    #[clap(long, value_parser, default_value_t = false)]
+    find_outliers: bool,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
@@ -70,6 +74,9 @@ fn is_file(pathname: &str) -> Result<(), String> {
 fn main() {
     env_logger::init();
     let args = Cli::parse();
+    if args.find_outliers && !args.unphased {
+        warn!("--find-outliers is only effective with --unphased");
+    }
     info!("Collected arguments");
     call::genotype_repeats(args);
 }

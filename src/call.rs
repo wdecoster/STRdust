@@ -11,17 +11,8 @@ use url::Url;
 use crate::Cli;
 
 pub fn genotype_repeats(args: Cli) {
-    if !args.bam.is_file() {
-        error!(
-            "ERROR: invalid path to bam file {}!\n\n",
-            args.bam.display()
-        );
-        panic!();
-    };
-    let bamf = args.bam.into_os_string().into_string().unwrap();
-    let fastaf = args.fasta.into_os_string().into_string().unwrap();
-    debug!("Genotyping STRs in {bamf}");
-    match (args.region, args.region_file) {
+    debug!("Genotyping STRs in {}", args.bam);
+    match (&args.region, &args.region_file) {
         (Some(_region), Some(_region_file)) => {
             error!("ERROR: Specify either a region (-r) or region_file (-R), not both!\n\n");
             panic!();
@@ -33,17 +24,9 @@ pub fn genotype_repeats(args: Cli) {
         (Some(region), None) => {
             let repeat = crate::repeats::process_region(region)
                 .expect("Error when parsing the region string");
-            match genotype_repeat(
-                &bamf,
-                &fastaf,
-                repeat,
-                args.minlen,
-                args.support,
-                args.somatic,
-                args.unphased,
-            ) {
+            match genotype_repeat(repeat, &args) {
                 Ok(output) => {
-                    crate::vcf::write_vcf_header(&fastaf, &bamf, args.sample);
+                    crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
                     println!("{output}")
                 }
                 Err(chrom) => error!("Contig {chrom} not found in bam file"),
@@ -52,9 +35,8 @@ pub fn genotype_repeats(args: Cli) {
         (None, Some(region_file)) => {
             // TODO: check if bed file is okay?
             let mut reader =
-                bed::Reader::from_file(region_file.into_os_string().into_string().unwrap())
-                    .expect("Problem reading bed file!");
-            crate::vcf::write_vcf_header(&fastaf, &bamf, args.sample);
+                bed::Reader::from_file(region_file).expect("Problem reading bed file!");
+            crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
             if args.threads > 1 {
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(args.threads)
@@ -70,17 +52,12 @@ pub fn genotype_repeats(args: Cli) {
                 reader.records().par_bridge().for_each(|record| {
                     let rec = record.expect("Error reading bed record.");
                     match genotype_repeat(
-                        &bamf,
-                        &fastaf,
                         crate::repeats::RepeatInterval {
                             chrom: rec.chrom().to_string(),
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
                         },
-                        args.minlen,
-                        args.support,
-                        args.somatic,
-                        args.unphased,
+                        &args,
                     ) {
                         Ok(output) => {
                             let mut geno = genotypes.lock().unwrap();
@@ -113,17 +90,12 @@ pub fn genotype_repeats(args: Cli) {
                 for record in reader.records() {
                     let rec = record.expect("Error reading bed record.");
                     match genotype_repeat(
-                        &bamf,
-                        &fastaf,
                         crate::repeats::RepeatInterval {
                             chrom: rec.chrom().to_string(),
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
                         },
-                        args.minlen,
-                        args.support,
-                        args.somatic,
-                        args.unphased,
+                        &args,
                     ) {
                         Ok(output) => {
                             println!("{output}");
@@ -147,17 +119,12 @@ pub fn genotype_repeats(args: Cli) {
 /// All indel cigar operations longer than minlen are considered
 /// The bam file is expected to be phased using the HP tag
 fn genotype_repeat(
-    bamf: &String,
-    fasta: &String,
     repeat: crate::repeats::RepeatInterval,
-    minlen: usize,
-    support: usize,
-    somatic: bool,
-    unphased: bool,
+    args: &Cli,
 ) -> Result<crate::vcf::VCFRecord, String> {
     let flanking = 2000;
     let mut flags = vec![];
-    let repeat_ref_seq = match repeat.reference_repeat_sequence(fasta) {
+    let repeat_ref_seq = match repeat.reference_repeat_sequence(&args.fasta) {
         Some(seq) => seq,
         // Return a missing genotype if the repeat is not found in the fasta file
         None => {
@@ -169,9 +136,9 @@ fn genotype_repeat(
         }
     };
 
-    let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(fasta, flanking);
+    let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
 
-    let seqs = match get_overlapping_reads(bamf, &repeat, unphased) {
+    let seqs = match get_overlapping_reads(&args.bam, &repeat, args.unphased) {
         Some(seqs) => seqs,
         None => {
             // Return a missing genotype if no (phased) reads overlap the repeat
@@ -191,7 +158,7 @@ fn genotype_repeat(
         .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
     let mut consenses: Vec<crate::consensus::Consensus> = vec![];
     let mut all_insertions = vec![]; // only used with `--somatic`
-    if unphased {
+    if args.unphased {
         let mut insertions = vec![];
         // get the sequences of this phase (or all if unphased)
         let seq = seqs.get(&0).unwrap();
@@ -200,13 +167,13 @@ fn genotype_repeat(
         for s in seq {
             let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
             for read in mapping {
-                if let Some(s) = parse_cs(read, minlen, flanking, &repeat) {
+                if let Some(s) = parse_cs(read, args.minlen, flanking, &repeat) {
                     // slice out inserted sequences from the CS tag
                     insertions.push(s.to_uppercase())
                 }
             }
         }
-        if insertions.len() < support {
+        if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
             return Ok(crate::vcf::VCFRecord::missing_genotype(
@@ -216,12 +183,16 @@ fn genotype_repeat(
             ));
         }
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(&insertions, &repeat);
+        let phased = crate::phase_insertions::split(&insertions, &repeat, args.find_outliers);
         match phased.hap2 {
             Some(phase2) => {
-                consenses.push(crate::consensus::consensus(&phased.hap1, support, &repeat));
-                consenses.push(crate::consensus::consensus(&phase2, support, &repeat));
-                if somatic {
+                consenses.push(crate::consensus::consensus(
+                    &phased.hap1,
+                    args.support,
+                    &repeat,
+                ));
+                consenses.push(crate::consensus::consensus(&phase2, args.support, &repeat));
+                if args.somatic {
                     // store all inserted sequences for identifying somatic variation
                     all_insertions.push(phased.hap1.join(":"));
                     all_insertions.push(phase2.join(":"));
@@ -229,10 +200,10 @@ fn genotype_repeat(
             }
             None => {
                 // there was only one haplotype, homozygous, so this gets duplicated for reporting
-                let consensus = crate::consensus::consensus(&phased.hap1, support, &repeat);
+                let consensus = crate::consensus::consensus(&phased.hap1, args.support, &repeat);
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
-                if somatic {
+                if args.somatic {
                     // store all inserted sequences for identifying somatic variation
                     all_insertions.push(phased.hap1.join(":"));
                 }
@@ -251,7 +222,7 @@ fn genotype_repeat(
             for s in seq {
                 let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
                 for read in mapping {
-                    if let Some(s) = parse_cs(read, minlen, flanking, &repeat) {
+                    if let Some(s) = parse_cs(read, args.minlen, flanking, &repeat) {
                         // slice out inserted sequences from the CS tag
                         insertions.push(s.to_uppercase())
                     }
@@ -262,9 +233,13 @@ fn genotype_repeat(
                 phase,
                 insertions.len(),
             );
-            consenses.push(crate::consensus::consensus(&insertions, support, &repeat));
+            consenses.push(crate::consensus::consensus(
+                &insertions,
+                args.support,
+                &repeat,
+            ));
 
-            if somatic {
+            if args.somatic {
                 // store all inserted sequences for identifying somatic variation
                 all_insertions.push(insertions.join(":"));
             }
@@ -273,7 +248,7 @@ fn genotype_repeat(
     Ok(crate::vcf::VCFRecord::new(
         consenses,
         repeat_ref_seq,
-        somatic,
+        args.somatic,
         all_insertions,
         repeat,
         flags,
@@ -456,72 +431,104 @@ mod tests {
 
     #[test]
     fn test_genotype_repeat() {
-        let bam = String::from("test_data/small-test-phased.bam");
-        let fasta = String::from("test_data/chr7.fa.gz");
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
         };
-        let minlen = 5;
-        let support = 1;
-        let somatic = false;
-        let unphased = false;
-        let genotype = genotype_repeat(&bam, &fasta, repeat, minlen, support, somatic, unphased);
+        let args = Cli {
+            bam: String::from("test_data/small-test-phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            minlen: 5,
+            support: 1,
+            somatic: false,
+            unphased: false,
+            find_outliers: false,
+            threads: 1,
+            sample: None,
+        };
+
+        let genotype = genotype_repeat(repeat, &args);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
     #[test]
     fn test_genotype_repeat_unphased() {
-        let bam = String::from("test_data/small-test-phased.bam");
-        let fasta = String::from("test_data/chr7.fa.gz");
+        let args = Cli {
+            bam: String::from("test_data/small-test-phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            minlen: 5,
+            support: 1,
+            somatic: false,
+            unphased: true,
+            find_outliers: false,
+            threads: 1,
+            sample: None,
+        };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
         };
-        let minlen = 5;
-        let support = 1;
-        let somatic = false;
-        let unphased = true;
-        let genotype = genotype_repeat(&bam, &fasta, repeat, minlen, support, somatic, unphased);
+
+        let genotype = genotype_repeat(repeat, &args);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
     #[test]
     fn test_genotype_repeat_somatic() {
-        let bam = String::from("test_data/small-test-phased.bam");
-        let fasta = String::from("test_data/chr7.fa.gz");
+        let args = Cli {
+            bam: String::from("test_data/small-test-phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            minlen: 5,
+            support: 1,
+            somatic: true,
+            unphased: false,
+            find_outliers: false,
+            threads: 1,
+            sample: None,
+        };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
         };
-        let minlen = 5;
-        let support = 1;
-        let somatic = true;
-        let unphased = false;
-        let genotype = genotype_repeat(&bam, &fasta, repeat, minlen, support, somatic, unphased);
+
+        let genotype = genotype_repeat(repeat, &args);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
     #[test]
     #[ignore]
     fn test_genotype_repeat_s3() {
-        // let bam = String::from("https://s3.amazonaws.com/1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
-        let bam = String::from("s3://1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
-        let bam = String::from("https://1000g-ont.s3.amazonaws.com/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
-        let fasta = String::from("test_data/chr7.fa.gz");
+        let args = Cli {
+            // bam:  String::from("https://s3.amazonaws.com/1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
+            // bam: String::from("s3://1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
+            bam: String::from("https://1000g-ont.s3.amazonaws.com/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            minlen: 5,
+            support: 1,
+            somatic: true,
+            unphased: false,
+            find_outliers: false,
+            threads: 1,
+            sample: None,
+        };
+
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
         };
-        let minlen = 5;
-        let support = 1;
-        let somatic = true;
-        let unphased = false;
-        let genotype = genotype_repeat(&bam, &fasta, repeat, minlen, support, somatic, unphased);
+        let genotype = genotype_repeat(repeat, &args);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 }

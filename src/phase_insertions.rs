@@ -7,9 +7,14 @@ pub struct SplitSequences {
     pub hap1: Vec<String>,
     pub hap2: Option<Vec<String>>,
     pub flag: Option<String>,
+    pub outliers: Option<Vec<String>>,
 }
 
-pub fn split(insertions: &Vec<String>, repeat: &crate::repeats::RepeatInterval) -> SplitSequences {
+pub fn split(
+    insertions: &Vec<String>,
+    repeat: &crate::repeats::RepeatInterval,
+    check_outliers: bool,
+) -> SplitSequences {
     // the insertions are from an unphased experiment
     // and should be split in one (if homozygous) or two haplotypes
     // this is based on the length of the insertion
@@ -130,19 +135,30 @@ pub fn split(insertions: &Vec<String>, repeat: &crate::repeats::RepeatInterval) 
                 hap1: insertions.clone(),
                 hap2: None,
                 flag: Some("CLUSTERFAILURE".to_string()),
+                // looking for outlier lengths that could be a poorly covered allele
+                outliers: if check_outliers {
+                    find_outliers(insertions.clone())
+                } else {
+                    None
+                },
             }
         }
         1 => {
             // if there is only one haplotype cluster, and the locus is considered homozygous
             // all insertions are returned as the first haplotype with None as the second haplotype
-            // this ignores roots and outliers, but identifying those is rather problematic in the homozygous case
+            // this ignores roots and noise insertions, but identifying those is rather problematic in the homozygous case
             // and the end result is often that we lose too many reads as false-positive roots
-            // I assume the poa consensus will deal with outliers
+            // I assume the poa consensus will deal with noise insertions
             debug!("{repeat}: Only one haplotype cluster found");
             SplitSequences {
                 hap1: insertions.clone(),
                 hap2: None,
                 flag: None,
+                outliers: if check_outliers {
+                    find_outliers(insertions.clone())
+                } else {
+                    None
+                },
             }
         }
         2 => {
@@ -159,10 +175,11 @@ pub fn split(insertions: &Vec<String>, repeat: &crate::repeats::RepeatInterval) 
                     insertions,
                 )),
                 flag: None,
+                outliers: None,
             }
         }
         _ => {
-            error!("Found more than two haplotype clusters");
+            error!("Found more than two haplotype clusters. This shouldn't happen.");
             panic!();
         }
     }
@@ -242,6 +259,37 @@ fn find_cluster_members(
     insertions_of_this_cluster
 }
 
+fn find_outliers(seqs: Vec<String>) -> Option<Vec<String>> {
+    // find outlier insertions that are much longer than the rest as these could be a poorly covered allele
+    // this is based on the length of the insertion and an insertion is considered an outlier
+    // if it is more than twice the median length
+    let mut lengths = vec![];
+    for seq in &seqs {
+        lengths.push(seq.len());
+    }
+    // sort the lengths
+    lengths.sort();
+    // find the median length, but check if there is an even or odd number of lengths
+    let median_length = if lengths.len() % 2 == 0 {
+        (lengths[lengths.len() / 2] + lengths[lengths.len() / 2 - 1]) / 2
+    } else {
+        lengths[lengths.len() / 2]
+    };
+
+    let mut outliers = vec![];
+    for seq in seqs.iter() {
+        if seq.len() > median_length * 2 {
+            outliers.push(seq.clone());
+            debug!("Found outlier: {}", seq);
+        }
+    }
+    if outliers.is_empty() {
+        None
+    } else {
+        Some(outliers)
+    }
+}
+
 mod tests {
     #[allow(unused_imports)]
     use super::*;
@@ -269,6 +317,7 @@ mod tests {
                 start: 154654404,
                 end: 154654432,
             },
+            false,
         );
         assert!(splitseqs.hap1.len() == splitseqs.hap2.unwrap().len());
         // check that all sequences in hap1 are the same length
@@ -308,6 +357,7 @@ mod tests {
                 start: 154654404,
                 end: 154654432,
             },
+            false,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
@@ -346,6 +396,7 @@ mod tests {
                 start: 154654404,
                 end: 154654432,
             },
+            false,
         );
         assert!(splitseqs.hap1.len() + splitseqs.hap2.unwrap().len() == insertions.len());
     }
@@ -387,6 +438,7 @@ mod tests {
                 start: 154654404,
                 end: 154654432,
             },
+            false,
         );
         assert!(splitseqs.hap2.is_none());
         println!("hap1: {:?}", splitseqs.hap1);
@@ -394,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_with_outlier() {
+    fn test_split_with_noise() {
         // test that the split function identifies two haplotype, based on sequence composition
         // using a AAGGG and AAAAG expansion with some SNV and length noise
         // this is the composition in the RFC1 expansion in CANVAS, with the former being pathogenic
@@ -426,6 +478,7 @@ mod tests {
                 start: 154654404,
                 end: 154654432,
             },
+            false,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
@@ -442,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_with_two_outliers() {
+    fn test_split_with_two_times_noise() {
         // test that the split function identifies two haplotype, based on sequence composition
         // using a AAGGG and AAAAG expansion with some SNV and length noise
         // this is the composition in the RFC1 expansion in CANVAS, with the former being pathogenic
@@ -496,6 +549,7 @@ mod tests {
                 start: 154654404,
                 end: 154654432,
             },
+            false,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();

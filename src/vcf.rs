@@ -177,7 +177,7 @@ impl PartialEq for VCFRecord {
 
 impl Eq for VCFRecord {}
 
-pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
+pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     println!(r#"##fileformat=VCFv4.2"#);
     // get absolute path to fasta file
     let path = std::fs::canonicalize(fasta)
@@ -237,7 +237,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: Option<String>) {
                 .unwrap()
                 .to_str()
                 .unwrap();
-            name.to_string()
+            name
         }
     };
     println!("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{name}",);
@@ -273,7 +273,7 @@ fn test_write_vcf_header_from_bam() {
     write_vcf_header(
         "test_data/chr7.fa.gz",
         "test_data/small-test-phased.bam",
-        None,
+        &None,
     );
 }
 
@@ -282,6 +282,6 @@ fn test_write_vcf_header_from_name() {
     write_vcf_header(
         "test_data/chr7.fa.gz",
         "test_data/small-test-phased.bam",
-        Some("test_sample".to_string()),
+        &Some("test_sample".to_string()),
     );
 }
