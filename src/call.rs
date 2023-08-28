@@ -377,9 +377,9 @@ fn parse_cs(
                     insertions.push(cap[0][1..].to_string());
                 } else if cap[0][1..].len() > minlen {
                     debug!(
-                        "{repeat}: Insertion {} is too far from the repeat locus junction to be considered: {}",
+                        "{repeat}: Insertion at {} is too far from the junction to be considered: {}",
+                        ref_pos,
                         cap[0][1..].to_string(),
-                        ref_pos
                     );
                 }
             }
