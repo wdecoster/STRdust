@@ -18,6 +18,7 @@ pub struct VCFRecord {
     pub std_dev: (String, String),
     pub score: (String, String),
     pub somatic_info_field: String,
+    pub outliers: String,
     pub flags: String,
     pub allele: (String, String),
 }
@@ -26,8 +27,8 @@ impl VCFRecord {
     pub fn new(
         mut consenses: Vec<Consensus>,
         repeat_ref_sequence: String,
-        somatic: bool,
-        all_insertions: Vec<String>,
+        all_insertions: Option<Vec<String>>,
+        outlier_insertions: Option<Vec<String>>,
         repeat: crate::repeats::RepeatInterval,
         flag: Vec<String>,
     ) -> VCFRecord {
@@ -67,10 +68,16 @@ impl VCFRecord {
             _ => ".".to_string(), // includes ./. and 0/0
         };
 
-        let somatic_info_field = if somatic {
-            format!(";SEQS={}", all_insertions.join(","))
-        } else {
-            "".to_string()
+        let somatic_info_field = match all_insertions {
+            Some(somatic_insertions) => {
+                format!(";SEQS={}", somatic_insertions.join(","))
+            }
+            None => "".to_string(),
+        };
+
+        let outliers = match outlier_insertions {
+            Some(outlier_insertions) => format!(";OUTLIERS={}", outlier_insertions.join(",")),
+            None => "".to_string(),
         };
 
         let flags = format!("{};", flag.join(";"));
@@ -85,6 +92,7 @@ impl VCFRecord {
             std_dev: (std_dev1, std_dev2),
             score: (score1, score2),
             somatic_info_field,
+            outliers,
             flags,
             allele: (allele1.to_string(), allele2.to_string()),
         }
@@ -106,6 +114,7 @@ impl VCFRecord {
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
+            outliers: "".to_string(),
             flags: "".to_string(),
             allele: (".".to_string(), ".".to_string()),
         }
@@ -118,7 +127,7 @@ impl fmt::Display for VCFRecord {
             Some(alts) => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2};{somatic}\tGT\t{allele1}|{allele2}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2}{somatic}{outliers}\tGT\t{allele1}|{allele2}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -134,6 +143,7 @@ impl fmt::Display for VCFRecord {
                     score1 = self.score.0,
                     score2 = self.score.1,
                     somatic = self.somatic_info_field,
+                    outliers = self.outliers,
                     allele1 = self.allele.0,
                     allele2 = self.allele.1,
                 )
@@ -224,7 +234,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
     );
     println!(
-        r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to clusterin two haplotype">"#
+        r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
     );
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);

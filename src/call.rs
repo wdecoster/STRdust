@@ -157,22 +157,20 @@ fn genotype_repeat(
         .with_seq(&repeat_compressed_reference)
         .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
     let mut consenses: Vec<crate::consensus::Consensus> = vec![];
-    let mut all_insertions = vec![]; // only used with `--somatic`
+    // only used with `--somatic`
+    let mut all_insertions = if args.somatic { Some(vec![]) } else { None };
+    // only used with `--find_outliers`
+    let mut outlier_insertions = if args.find_outliers {
+        Some(vec![])
+    } else {
+        None
+    };
     if args.unphased {
-        let mut insertions = vec![];
-        // get the sequences of this phase (or all if unphased)
+        // get the sequences
         let seq = seqs.get(&0).unwrap();
         debug!("{repeat}: Unphased: Aliging {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
-        for s in seq {
-            let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
-            for read in mapping {
-                if let Some(s) = parse_cs(read, args.minlen, flanking, &repeat) {
-                    // slice out inserted sequences from the CS tag
-                    insertions.push(s.to_uppercase())
-                }
-            }
-        }
+        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, &repeat);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
@@ -192,21 +190,27 @@ fn genotype_repeat(
                     &repeat,
                 ));
                 consenses.push(crate::consensus::consensus(&phase2, args.support, &repeat));
-                if args.somatic {
-                    // store all inserted sequences for identifying somatic variation
-                    all_insertions.push(phased.hap1.join(":"));
-                    all_insertions.push(phase2.join(":"));
+                // store all inserted sequences for identifying somatic variation
+                if let Some(ref mut all_ins) = all_insertions {
+                    all_ins.extend([phased.hap1.join(":"), phase2.join(":")]);
                 }
             }
             None => {
                 // there was only one haplotype, homozygous, so this gets duplicated for reporting
+                // not sure if cloning is the best approach here, but this is only the case for unphased data
+                // and therefore is typically for small datasets obtained through capture methods
                 let consensus = crate::consensus::consensus(&phased.hap1, args.support, &repeat);
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
-                if args.somatic {
-                    // store all inserted sequences for identifying somatic variation
-                    all_insertions.push(phased.hap1.join(":"));
+                // store all inserted sequences for identifying somatic variation
+                if let Some(ref mut all_ins) = all_insertions {
+                    all_ins.push(phased.hap1.join(":"));
                 }
+                if let Some(ref mut outliers) = outlier_insertions {
+                    // store all inserted sequences for identifying somatic variation
+                    outliers.push(phased.outliers.unwrap().join(":"));
+                }
+                // escalate the flag to the VCF
                 if let Some(splitflag) = phased.flag {
                     flags.push(splitflag);
                 }
@@ -214,20 +218,11 @@ fn genotype_repeat(
         }
     } else {
         for phase in [1, 2] {
-            let mut insertions = vec![];
-            // get the sequences of this phase (or all if unphased)
+            // get the sequences of this phase
             let seq = seqs.get(&phase).unwrap();
             debug!("{repeat}: Phase {}: Aliging {} reads", phase, seq.len());
-            // align the reads to the new repeat-compressed reference
-            for s in seq {
-                let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
-                for read in mapping {
-                    if let Some(s) = parse_cs(read, args.minlen, flanking, &repeat) {
-                        // slice out inserted sequences from the CS tag
-                        insertions.push(s.to_uppercase())
-                    }
-                }
-            }
+            let insertions = find_insertions(seq, &aligner, args.minlen, flanking, &repeat);
+
             debug!(
                 "{repeat}: Phase {}: Creating consensus from {} insertions",
                 phase,
@@ -239,20 +234,43 @@ fn genotype_repeat(
                 &repeat,
             ));
 
-            if args.somatic {
+            if let Some(ref mut all_ins) = all_insertions {
                 // store all inserted sequences for identifying somatic variation
-                all_insertions.push(insertions.join(":"));
+                all_ins.push(insertions.join(":"));
             }
         }
     }
     Ok(crate::vcf::VCFRecord::new(
         consenses,
         repeat_ref_seq,
-        args.somatic,
         all_insertions,
+        outlier_insertions,
         repeat,
         flags,
     ))
+}
+
+// may adapt the function below to allow for multiple alignment methods later
+fn find_insertions(
+    seq: &Vec<Vec<u8>>,
+    aligner: &Aligner,
+    minlen: usize,
+    flanking: u32,
+    repeat: &crate::repeats::RepeatInterval,
+) -> Vec<String> {
+    let mut insertions = vec![];
+
+    // align the reads to the new repeat-compressed reference
+    for s in seq {
+        let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
+        for read in mapping {
+            if let Some(s) = parse_cs(read, minlen, flanking, repeat) {
+                // slice out inserted sequences from the CS tag
+                insertions.push(s.to_uppercase())
+            }
+        }
+    }
+    insertions
 }
 
 fn get_overlapping_reads(
@@ -295,9 +313,9 @@ fn get_overlapping_reads(
     if seqs.is_empty() {
         // error/warning message depends on whether we are looking for phased reads or not
         if unphased {
-            eprintln!("Cannot genotype repeat at {repeat}: no reads found");
+            eprintln!("Cannot genotype {repeat}: no reads found");
         } else {
-            eprintln!("Cannot genotype repeat at {repeat}: no phased reads found");
+            eprintln!("Cannot genotype {repeat}: no phased reads found");
         }
         None
     } else {
