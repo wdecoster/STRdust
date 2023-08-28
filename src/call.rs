@@ -206,10 +206,13 @@ fn genotype_repeat(
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.push(phased.hap1.join(":"));
                 }
-                if let Some(ref mut outliers) = outlier_insertions {
-                    // store all inserted sequences for identifying somatic variation
-                    outliers.push(phased.outliers.unwrap().join(":"));
+                // if looking for outliers, and outliers were found, store them
+                if let Some(ref mut outliers_vec) = outlier_insertions {
+                    if let Some(outliers_found) = phased.outliers {
+                        outliers_vec.push(outliers_found.join(":"));
+                    }
                 }
+
                 // escalate the flag to the VCF
                 if let Some(splitflag) = phased.flag {
                     flags.push(splitflag);

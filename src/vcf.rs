@@ -76,7 +76,13 @@ impl VCFRecord {
         };
 
         let outliers = match outlier_insertions {
-            Some(outlier_insertions) => format!(";OUTLIERS={}", outlier_insertions.join(",")),
+            Some(outlier_insertions) => {
+                if !outlier_insertions.is_empty() {
+                    format!(";OUTLIERS={}", outlier_insertions.join(","))
+                } else {
+                    "".to_string()
+                }
+            }
             None => "".to_string(),
         };
 
