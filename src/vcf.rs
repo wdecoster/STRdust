@@ -7,6 +7,38 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::io::Read;
 
+pub struct Allele {
+    pub length: String, // length of the consensus sequence minus the length of the repeat sequence
+    pub full_length: String, // length of the consensus sequence
+    pub support: String, // number of reads supporting the allele
+    pub std_dev: String, // standard deviation of the repeat length
+    pub score: String,  // consensus score in the poa graph
+    pub seq: String,    // consensus sequence
+}
+
+impl Allele {
+    pub fn from_consensus(consensus: Consensus, start: u32, end: u32) -> Allele {
+        match consensus.seq {
+            Some(seq) => Allele {
+                length: (seq.len() as i32 - ((end - start) as i32)).to_string(),
+                full_length: seq.len().to_string(),
+                support: consensus.support.to_string(),
+                std_dev: consensus.std_dev.to_string(),
+                score: consensus.score.to_string(),
+                seq,
+            },
+            None => Allele {
+                length: ".".to_string(),
+                full_length: ".".to_string(),
+                support: consensus.support.to_string(),
+                std_dev: ".".to_string(),
+                score: ".".to_string(),
+                seq: ".".to_string(),
+            },
+        }
+    }
+}
+
 pub struct VCFRecord {
     pub chrom: String,
     pub start: u32,
@@ -14,6 +46,7 @@ pub struct VCFRecord {
     pub ref_seq: String,
     pub alt_seq: Option<String>,
     pub length: (String, String),
+    pub full_length: (String, String),
     pub support: (String, String),
     pub std_dev: (String, String),
     pub score: (String, String),
@@ -33,38 +66,40 @@ impl VCFRecord {
         flag: Vec<String>,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
-        let (length2, alt2, support2, std_dev2, score2) =
-            format_lengths(consenses.pop().unwrap(), repeat.start, repeat.end);
-        let (length1, alt1, support1, std_dev1, score1) =
-            format_lengths(consenses.pop().unwrap(), repeat.start, repeat.end);
-        debug!("Genotyping {repeat}:{repeat_ref_sequence} with {alt1} and {alt2}");
-        let allele1 = if alt1 == "." {
-            "."
+        let allele2 = Allele::from_consensus(consenses.pop().unwrap(), repeat.start, repeat.end);
+        let allele1 = Allele::from_consensus(consenses.pop().unwrap(), repeat.start, repeat.end);
+
+        debug!(
+            "Genotyping {repeat}:{repeat_ref_sequence} with {} and {}",
+            allele1.seq, allele2.seq,
+        );
         // if the consensus is very similar to the reference the variant is considered ref
         // for this I use a threshold of 5% of the length of the repeat sequence in the reference
         // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
         // not sure if these numbers require further tuning
         // note that is an integer division, i.e. floor division
-        } else if levenshtein(&alt1, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
+        let genotype1 = if allele1.seq == "." {
+            "."
+        } else if levenshtein(&allele1.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
             "0"
         } else {
             "1"
         };
 
-        let allele2 = if alt2 == "." {
+        let genotype2 = if allele2.seq == "." {
             "."
-        } else if levenshtein(&alt2, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
+        } else if levenshtein(&allele2.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
             "0"
-        } else if alt2 == alt1 {
+        } else if levenshtein(&allele2.seq, &allele1.seq) < allele1.seq.len() / 20 {
             "1"
         } else {
             "2"
         };
 
-        let alts = match (allele1, allele2) {
-            ("1", "0") | ("1", ".") | ("1", "1") => alt1, // if both alleles are the same, only report one
-            ("0", "1") | (".", "1") => alt2,
-            ("1", "2") => alt1 + "," + &alt2,
+        let alts = match (genotype1, genotype2) {
+            ("1", "0") | ("1", ".") | ("1", "1") => allele1.seq, // if both alleles are the same, only report one
+            ("0", "1") | (".", "1") => allele2.seq,
+            ("1", "2") => allele1.seq + "," + &allele2.seq,
             _ => ".".to_string(), // includes ./. and 0/0
         };
 
@@ -97,14 +132,15 @@ impl VCFRecord {
             end: repeat.end,
             ref_seq: repeat_ref_sequence,
             alt_seq: Some(alts),
-            length: (length1, length2),
-            support: (support1, support2),
-            std_dev: (std_dev1, std_dev2),
-            score: (score1, score2),
+            length: (allele1.length, allele2.length),
+            full_length: (allele1.full_length, allele2.full_length),
+            support: (allele1.support, allele2.support),
+            std_dev: (allele1.std_dev, allele2.std_dev),
+            score: (allele1.score, allele2.score),
             somatic_info_field,
             outliers,
             flags,
-            allele: (allele1.to_string(), allele2.to_string()),
+            allele: (genotype1.to_string(), genotype2.to_string()),
         }
     }
 
@@ -120,6 +156,7 @@ impl VCFRecord {
             ref_seq: repeat_ref_seq.to_string(),
             alt_seq: Some(".".to_string()),
             length: (".".to_string(), ".".to_string()),
+            full_length: (".".to_string(), ".".to_string()),
             support: (support, ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
@@ -137,7 +174,7 @@ impl fmt::Display for VCFRecord {
             Some(alts) => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2}{somatic}{outliers}\tGT\t{allele1}|{allele2}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};FRB={fl1},{fl2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2}{somatic}{outliers}\tGT\t{genotype1}|{genotype2}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -146,6 +183,8 @@ impl fmt::Display for VCFRecord {
                     alt = alts,
                     l1 = self.length.0,
                     l2 = self.length.1,
+                    fl1 = self.full_length.0,
+                    fl2 = self.full_length.1,
                     sup1 = self.support.0,
                     sup2 = self.support.1,
                     sd1 = self.std_dev.0,
@@ -154,14 +193,14 @@ impl fmt::Display for VCFRecord {
                     score2 = self.score.1,
                     somatic = self.somatic_info_field,
                     outliers = self.outliers,
-                    allele1 = self.allele.0,
-                    allele2 = self.allele.1,
+                    genotype1 = self.allele.0,
+                    genotype2 = self.allele.1,
                 )
             }
             None => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\tEND={end};SUPP={sup1}|{sup2};{somatic}\tGT\t{allele1}|{allele2}",
+                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\tEND={end};SUPP={sup1}|{sup2};{somatic}\tGT\t{genotype1}|{genotype2}",
                     chrom = self.chrom,
                     start = self.start,
                     end = self.end,
@@ -169,8 +208,8 @@ impl fmt::Display for VCFRecord {
                     sup1 = self.support.0,
                     sup2 = self.support.1,
                     somatic = self.somatic_info_field,
-                    allele1 = self.allele.0,
-                    allele2 = self.allele.1,
+                    genotype1 = self.allele.0,
+                    genotype2 = self.allele.1,
                 )
             }
         }
@@ -264,30 +303,6 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         }
     };
     println!("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{name}",);
-}
-
-fn format_lengths(
-    consensus: crate::consensus::Consensus,
-    start: u32,
-    end: u32,
-) -> (String, String, String, String, String) {
-    match &consensus.seq {
-        Some(seq) => (
-            // length of the consensus sequence minus the length of the repeat sequence
-            (seq.len() as i32 - ((end - start) as i32)).to_string(),
-            seq.clone(),
-            consensus.support.to_string(),
-            consensus.std_dev.to_string(),
-            consensus.score.to_string(),
-        ),
-        None => (
-            ".".to_string(),
-            ".".to_string(),
-            consensus.support.to_string(),
-            ".".to_string(),
-            ".".to_string(),
-        ),
-    }
 }
 
 #[cfg(test)]
