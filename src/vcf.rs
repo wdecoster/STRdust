@@ -77,16 +77,20 @@ impl VCFRecord {
 
         let outliers = match outlier_insertions {
             Some(outlier_insertions) => {
-                if !outlier_insertions.is_empty() {
-                    format!(";OUTLIERS={}", outlier_insertions.join(","))
-                } else {
+                if outlier_insertions.is_empty() {
                     "".to_string()
+                } else {
+                    format!(";OUTLIERS={}", outlier_insertions.join(","))
                 }
             }
             None => "".to_string(),
         };
 
-        let flags = format!("{};", flag.join(";"));
+        let flags = if flag.is_empty() {
+            "".to_string()
+        } else {
+            format!("{};", flag.join(";"))
+        };
         VCFRecord {
             chrom: repeat.chrom,
             start: repeat.start,
@@ -238,6 +242,9 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     );
     println!(
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
+    );
+    println!(
+        r#"##INFO=<ID=OUTLIERS,Number=1,Type=String,Description="Outlier sequences much longer than the alleles">"#
     );
     println!(
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
