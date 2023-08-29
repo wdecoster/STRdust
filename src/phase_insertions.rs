@@ -1,7 +1,7 @@
 use kodama::{linkage, Method};
 use levenshtein::levenshtein;
 use log::{debug, error, log_enabled, Level};
-use std::collections::HashMap;
+use std::{cmp::max, collections::HashMap};
 
 pub struct SplitSequences {
     pub hap1: Vec<String>,
@@ -137,7 +137,7 @@ pub fn split(
                 flag: Some("CLUSTERFAILURE".to_string()),
                 // looking for outlier lengths that could be a poorly covered allele
                 outliers: if check_outliers {
-                    find_outliers(insertions.clone())
+                    find_outliers(insertions, None)
                 } else {
                     None
                 },
@@ -155,7 +155,7 @@ pub fn split(
                 hap2: None,
                 flag: None,
                 outliers: if check_outliers {
-                    find_outliers(insertions.clone())
+                    find_outliers(insertions, None)
                 } else {
                     None
                 },
@@ -163,23 +163,30 @@ pub fn split(
         }
         2 => {
             debug!("{repeat}: Found two haplotype clusters");
+            let hap1 =
+                find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions);
+            let hap2 =
+                find_cluster_members(&haplotype_clusters[1], &cluster_to_subclusters, insertions);
+            let larger_median = if check_outliers {
+                let hap1_median = find_median(&hap1);
+                let hap2_median = find_median(&hap2);
+                Some(max(hap1_median, hap2_median))
+            } else {
+                None
+            };
             SplitSequences {
-                hap1: find_cluster_members(
-                    &haplotype_clusters[0],
-                    &cluster_to_subclusters,
-                    insertions,
-                ),
-                hap2: Some(find_cluster_members(
-                    &haplotype_clusters[1],
-                    &cluster_to_subclusters,
-                    insertions,
-                )),
+                hap1,
+                hap2: Some(hap2),
                 flag: None,
-                outliers: None,
+                outliers: if check_outliers {
+                    find_outliers(insertions, larger_median)
+                } else {
+                    None
+                },
             }
         }
         _ => {
-            error!("Found more than two haplotype clusters. This shouldn't happen.");
+            error!("{repeat}: Found more than two haplotype clusters. This shouldn't happen.");
             panic!();
         }
     }
@@ -259,30 +266,39 @@ fn find_cluster_members(
     insertions_of_this_cluster
 }
 
-fn find_outliers(seqs: Vec<String>) -> Option<Vec<String>> {
-    // find outlier insertions that are much longer than the rest as these could be a poorly covered allele
-    // this is based on the length of the insertion and an insertion is considered an outlier
-    // if it is more than twice the median length
+fn find_median(seqs: &Vec<String>) -> usize {
     let mut lengths = vec![];
-    for seq in &seqs {
+    for seq in seqs {
         lengths.push(seq.len());
     }
     // sort the lengths
     lengths.sort();
     // find the median length, but check if there is an even or odd number of lengths
-    let median_length = if lengths.len() % 2 == 0 {
+    if lengths.len() % 2 == 0 {
         (lengths[lengths.len() / 2] + lengths[lengths.len() / 2 - 1]) / 2
     } else {
         lengths[lengths.len() / 2]
+    }
+}
+
+fn find_outliers(seqs: &Vec<String>, larger_median: Option<usize>) -> Option<Vec<String>> {
+    // this generates optional output only to be ran with --find-outliers
+    // find outlier insertions that are much longer than the rest as these could be a poorly covered allele
+    // this is based on the length of the insertion and an insertion is considered an outlier if it is more than twice the median length
+    // in the case of a heterozygous allele the median is already calculated
+    // and we will use the median of the larger allele to identify outliers
+    let median_length = match larger_median {
+        Some(median) => median,
+        None => find_median(seqs),
     };
 
     let mut outliers = vec![];
     for seq in seqs.iter() {
         if seq.len() > median_length * 2 {
             outliers.push(seq.clone());
-            debug!("Found outlier: {}", seq);
         }
     }
+    debug!("Found {} outliers.", outliers.len());
     if outliers.is_empty() {
         None
     } else {
