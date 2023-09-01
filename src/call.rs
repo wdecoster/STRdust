@@ -344,7 +344,7 @@ fn parse_cs(
     let re = Regex::new(r"(:\d+)|(\*\w+)|(\+\w+)|(-\w+)").unwrap();
 
     let mut insertions = Vec::new();
-    let interval_around_junction = flanking as i32 - 10..=flanking as i32 + 10;
+    let interval_around_junction = flanking as i32 - 15..=flanking as i32 + 15;
 
     for cap in re.captures_iter(&cs) {
         let op = &cap[0].chars().next().unwrap();
