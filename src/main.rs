@@ -64,7 +64,7 @@ pub struct Cli {
 
 fn is_file(pathname: &str) -> Result<(), String> {
     let path = PathBuf::from(pathname);
-    if path.is_file() {
+    if path.is_file() || pathname.starts_with("http") {
         Ok(())
     } else {
         Err(format!("Input file {} is invalid", path.display()))

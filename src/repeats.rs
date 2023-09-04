@@ -1,6 +1,6 @@
 use log::error;
 use rust_htslib::faidx;
-use std::{fmt, io::Write};
+use std::fmt;
 
 pub struct RepeatInterval {
     pub chrom: String,
@@ -45,16 +45,18 @@ impl RepeatInterval {
                 (self.end + flanking - 2) as usize,
             )
             .expect("Failed to extract fas_right sequence from fasta for {chrom}:{start}-{end}");
-        // write the new reference sequence to a file
-        let mut newref_file =
-            std::fs::File::create("newref.fa").expect("Unable to create newref.fa");
-        newref_file
-            .write_all(&[fas_left, fas_right].concat())
-            .expect("Unable to write to newref.fa");
-        [fas_left, fas_right].concat()
+        // // write the new reference sequence to a file
+        // let mut newref_file =
+        //     std::fs::File::create("newref.fa").expect("Unable to create newref.fa");
+        // newref_file
+        //     .write_all(&[fas_left, fas_right].concat())
+        //     .expect("Unable to write to newref.fa");
+        let newref = [fas_left, fas_right].concat();
+        unsafe { libc::free(fas_left.as_ptr() as *mut std::ffi::c_void) }; // Free up memory
+        unsafe { libc::free(fas_right.as_ptr() as *mut std::ffi::c_void) }; // Free up memory
+        newref
     }
 
-    /// If the repeat sequence is out of bounds, None is returned
     pub fn reference_repeat_sequence(&self, fasta: &String) -> Option<String> {
         let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
         let repeat_ref_sequence = std::str::from_utf8(
@@ -63,6 +65,7 @@ impl RepeatInterval {
         )
         .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")
         .to_string();
+        // If the repeat sequence is out of bounds, None is returned
         if repeat_ref_sequence == "N" {
             eprintln!(
                 "Cannot genotype repeat at {self} because it is out of bounds for the fasta file",
