@@ -174,7 +174,7 @@ impl fmt::Display for VCFRecord {
             Some(alts) => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};FRB={fl1},{fl2};SUPP={sup1},{sup2};STDEV={sd1},{sd2};CONSENSUS_SCORE={score1},{score2}{somatic}{outliers}\tGT\t{genotype1}|{genotype2}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};FRB={fl1},{fl2};STDEV={sd1},{sd2}{somatic}{outliers}\tGT:SUP:SC\t{genotype1}|{genotype2}:{sup1},{sup2}:{score1},{score2}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -185,31 +185,31 @@ impl fmt::Display for VCFRecord {
                     l2 = self.length.1,
                     fl1 = self.full_length.0,
                     fl2 = self.full_length.1,
-                    sup1 = self.support.0,
-                    sup2 = self.support.1,
                     sd1 = self.std_dev.0,
                     sd2 = self.std_dev.1,
-                    score1 = self.score.0,
-                    score2 = self.score.1,
                     somatic = self.somatic_info_field,
                     outliers = self.outliers,
                     genotype1 = self.allele.0,
                     genotype2 = self.allele.1,
+                    sup1 = self.support.0,
+                    sup2 = self.support.1,
+                    score1 = self.score.0,
+                    score2 = self.score.1,
                 )
             }
             None => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\tEND={end};SUPP={sup1}|{sup2};{somatic}\tGT\t{genotype1}|{genotype2}",
+                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\tEND={end};{somatic}\tGT:SUP\t{genotype1}|{genotype2}:{sup1},{sup2}",
                     chrom = self.chrom,
                     start = self.start,
                     end = self.end,
                     ref = self.ref_seq,
-                    sup1 = self.support.0,
-                    sup2 = self.support.1,
                     somatic = self.somatic_info_field,
                     genotype1 = self.allele.0,
                     genotype2 = self.allele.1,
+                    sup1 = self.support.0,
+                    sup2 = self.support.1,
                 )
             }
         }
@@ -271,13 +271,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         r#"##INFO=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases">"#
     );
     println!(
-        r#"##INFO=<ID=SUPP,Number=2,Type=Integer,Description="Number of reads supporting the two alleles">"#
-    );
-    println!(
         r#"##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">"#
-    );
-    println!(
-        r#"##INFO=<ID=CONSENSUS_SCORE,Number=2,Type=Integer,Description="Consensus score per alleles">"#
     );
     println!(
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
@@ -290,6 +284,8 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     );
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
+    println!(r#"##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">"#);
+    println!(r#"##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Consensus score per allele">"#);
     let name = match sample {
         Some(name) => name,
         None => {
