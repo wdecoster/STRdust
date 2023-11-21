@@ -52,7 +52,7 @@ impl RepeatInterval {
         //     .write_all(&[fas_left, fas_right].concat())
         //     .expect("Unable to write to newref.fa");
         let newref = [fas_left, fas_right].concat();
-        unsafe { libc::free(fas_left.as_ptr() as *mut std::ffi::c_void) }; // Free up memory
+        unsafe { libc::free(fas_left.as_ptr() as *mut std::ffi::c_void) }; // Free up memory (https://github.com/rust-bio/rust-htslib/issues/401#issuecomment-1704290171)
         unsafe { libc::free(fas_right.as_ptr() as *mut std::ffi::c_void) }; // Free up memory
         newref
     }
