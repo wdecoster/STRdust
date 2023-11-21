@@ -7,6 +7,7 @@ use std::path::PathBuf;
 pub mod call;
 pub mod consensus;
 pub mod motif;
+pub mod parse_bam;
 pub mod phase_insertions;
 pub mod repeats;
 pub mod utils;

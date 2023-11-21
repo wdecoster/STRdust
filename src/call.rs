@@ -3,10 +3,7 @@ use log::{debug, error};
 use minimap2::*;
 use rayon::prelude::*;
 use regex::Regex;
-use rust_htslib::{bam, bam::Read};
-use std::collections::HashMap;
 use std::sync::Mutex;
-use url::Url;
 
 use crate::Cli;
 
@@ -138,7 +135,7 @@ fn genotype_repeat(
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
 
-    let seqs = match get_overlapping_reads(&args.bam, &repeat, args.unphased) {
+    let reads = match crate::parse_bam::get_overlapping_reads(&args.bam, &repeat, args.unphased) {
         Some(seqs) => seqs,
         None => {
             // Return a missing genotype if no (phased) reads overlap the repeat
@@ -167,7 +164,7 @@ fn genotype_repeat(
     };
     if args.unphased {
         // get the sequences
-        let seq = seqs.get(&0).unwrap();
+        let seq = reads.seqs.get(&0).unwrap();
         debug!("{repeat}: Unphased: Aliging {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, &repeat);
@@ -220,9 +217,10 @@ fn genotype_repeat(
             }
         }
     } else {
+        // input reads are phased
         for phase in [1, 2] {
             // get the sequences of this phase
-            let seq = seqs.get(&phase).unwrap();
+            let seq = reads.seqs.get(&phase).unwrap();
             debug!("{repeat}: Phase {}: Aliging {} reads", phase, seq.len());
             let insertions = find_insertions(seq, &aligner, args.minlen, flanking, &repeat);
 
@@ -249,6 +247,7 @@ fn genotype_repeat(
         all_insertions,
         outlier_insertions,
         repeat,
+        reads.ps,
         flags,
     ))
 }
@@ -274,56 +273,6 @@ fn find_insertions(
         }
     }
     insertions
-}
-
-fn get_overlapping_reads(
-    bamf: &String,
-    repeat: &crate::repeats::RepeatInterval,
-    unphased: bool,
-) -> Option<HashMap<u8, Vec<Vec<u8>>>> {
-    let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
-        bam::IndexedReader::from_url(&Url::parse(bamf.as_str()).expect("Failed to parse s3 URL"))
-            .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
-    } else {
-        bam::IndexedReader::from_path(bamf)
-            .unwrap_or_else(|err| panic!("Error opening local BAM: {err}"))
-    };
-    let tid = bam
-        .header()
-        .tid(repeat.chrom.as_bytes())
-        .unwrap_or_else(|| panic!("Invalid chromosome {}", repeat.chrom));
-    bam.fetch((tid, repeat.start, repeat.end))
-        .unwrap_or_else(|err| panic!("Failure to extract reads from bam for {repeat}:\n{err}"));
-    // Per haplotype the read sequences are kept in a dictionary
-    let mut seqs = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
-
-    // extract sequences spanning the repeat locus
-    for r in bam.rc_records() {
-        let r = r.unwrap_or_else(|err| panic!("Error reading BAM file in region {repeat}:\n{err}"));
-        if unphased {
-            // if unphased put reads in phase 0
-            seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
-        } else {
-            let phase = crate::utils::get_phase(&r);
-            if phase > 0 {
-                let seq = r.seq().as_bytes();
-                seqs.get_mut(&phase).unwrap().push(seq);
-                // writing fasta to stdout
-                // println!(">read_{}\n{}", phase, std::str::from_utf8(&seq).unwrap());
-            }
-        }
-    }
-    if seqs.is_empty() {
-        // error/warning message depends on whether we are looking for phased reads or not
-        if unphased {
-            eprintln!("Cannot genotype {repeat}: no reads found");
-        } else {
-            eprintln!("Cannot genotype {repeat}: no phased reads found");
-        }
-        None
-    } else {
-        Some(seqs)
-    }
 }
 
 fn parse_cs(
@@ -399,17 +348,6 @@ fn parse_cs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_get_overlapping_reads() {
-        let bam = String::from("test_data/small-test-phased.bam");
-        let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
-            start: 154654404,
-            end: 154654432,
-        };
-        let unphased = false;
-        let _reads = get_overlapping_reads(&bam, &repeat, unphased);
-    }
 
     #[test]
     fn test_parse_cs() {
@@ -425,8 +363,9 @@ mod tests {
         let _support = 1;
         let unphased = false;
         let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        let binding = get_overlapping_reads(&bam, &repeat, unphased).unwrap();
+        let binding = crate::parse_bam::get_overlapping_reads(&bam, &repeat, unphased).unwrap();
         let read = binding
+            .seqs
             .get(&1)
             .expect("Could not find phase 1")
             .iter()

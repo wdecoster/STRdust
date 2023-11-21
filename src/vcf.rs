@@ -52,6 +52,7 @@ pub struct VCFRecord {
     pub score: (String, String),
     pub somatic_info_field: String,
     pub outliers: String,
+    pub ps: Option<u32>, // phase set identifier
     pub flags: String,
     pub allele: (String, String),
 }
@@ -63,6 +64,7 @@ impl VCFRecord {
         all_insertions: Option<Vec<String>>,
         outlier_insertions: Option<Vec<String>>,
         repeat: crate::repeats::RepeatInterval,
+        ps: Option<u32>,
         flag: Vec<String>,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
@@ -78,12 +80,14 @@ impl VCFRecord {
         // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
         // not sure if these numbers require further tuning
         // note that is an integer division, i.e. floor division
-        let genotype1 = if allele1.seq == "." {
-            "."
+        // the next_alt variable dictates which genotype code the genotype2 can be in the case it is not the same as genotype1
+        // this avoids a 0/2 genotype
+        let (genotype1, next_alt) = if allele1.seq == "." {
+            (".", "1")
         } else if levenshtein(&allele1.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
-            "0"
+            ("0", "1")
         } else {
-            "1"
+            ("1", "2")
         };
 
         let genotype2 = if allele2.seq == "." {
@@ -91,9 +95,9 @@ impl VCFRecord {
         } else if levenshtein(&allele2.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
             "0"
         } else if levenshtein(&allele2.seq, &allele1.seq) < allele1.seq.len() / 20 {
-            "1"
+            genotype1
         } else {
-            "2"
+            next_alt
         };
 
         let alts = match (genotype1, genotype2) {
@@ -139,6 +143,7 @@ impl VCFRecord {
             score: (allele1.score, allele2.score),
             somatic_info_field,
             outliers,
+            ps,
             flags,
             allele: (genotype1.to_string(), genotype2.to_string()),
         }
@@ -162,6 +167,7 @@ impl VCFRecord {
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
+            ps: None,
             flags: "".to_string(),
             allele: (".".to_string(), ".".to_string()),
         }
@@ -172,9 +178,13 @@ impl fmt::Display for VCFRecord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.alt_seq {
             Some(alts) => {
+                let (FORMAT, ps) = match self.ps {
+                    Some(ps) => ("GT:SUP:SC:PS", format!(":{}", ps)),
+                    None => ("GT:SUP:SC", "".to_string()),
+                };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};FRB={fl1},{fl2};STDEV={sd1},{sd2}{somatic}{outliers}\tGT:SUP:SC\t{genotype1}|{genotype2}:{sup1},{sup2}:{score1},{score2}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};FRB={fl1},{fl2};STDEV={sd1},{sd2}{somatic}{outliers}\t{FORMAT}\t{genotype1}|{genotype2}:{sup1},{sup2}:{score1},{score2}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -268,7 +278,10 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the repeat interval">"#
     );
     println!(
-        r#"##INFO=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases">"#
+        r#"##INFO=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases relative to reference">"#
+    );
+    println!(
+        r#"##INFO=<ID=FRB,Number=2,Type=Integer,Description="Full repeat length of the two alleles in bases">"#
     );
     println!(
         r#"##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">"#
