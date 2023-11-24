@@ -85,23 +85,12 @@ pub fn consensus(
         // mainly have to make sure the consensus does not get longer than the individual insertions
         let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
         let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        eprintln!("-----------------------------------------");
-        eprintln!("{}", std::str::from_utf8(&seqs_bytes[0]).unwrap());
-        for seq in seqs_bytes.iter().skip(1) {
-            eprintln!("{}", std::str::from_utf8(seq).unwrap());
-        }
 
         for seq in seqs_bytes.iter().skip(1) {
 
             aligner.global(seq).add_to_graph();
         }
 
-
-        let graph = aligner.graph();
-        eprintln!(
-            "{:?}",
-            petgraph::dot::Dot::new(&graph.map(|_, n| (*n) as char, |_, e| *e))
-        );
         let consensus = aligner.consensus();
         let score = aligner.global(&consensus).alignment().score;
 
@@ -279,7 +268,6 @@ mod tests {
         println!("Consensus score: {}", score);
     }
 
-    #[ignore]
     #[test]
     fn test_consensus_4() {
         let seqs = vec![
