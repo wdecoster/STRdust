@@ -34,6 +34,9 @@ pub fn get_overlapping_reads(
     // extract sequences spanning the repeat locus
     for r in bam.rc_records() {
         let r = r.unwrap_or_else(|err| panic!("Error reading BAM file in region {repeat}:\n{err}"));
+        if r.mapq() < 10 {
+            continue;
+        }
         if unphased {
             // if unphased put reads in phase 0
             seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
