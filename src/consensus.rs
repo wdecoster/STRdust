@@ -4,6 +4,8 @@ use bio::alignment::pairwise::Scoring;
 use bio::alignment::poa::*;
 use log::debug;
 use rand::seq::SliceRandom;
+use rust_spoa::poa_consensus;
+
 
 #[derive(Clone)]
 pub struct Consensus {
@@ -76,29 +78,53 @@ pub fn consensus(
             seqs
         };
         let mut seqs_bytes = vec![];
+        // code below is for rust-bio, but going back to rust-spoa now to avoid errors
+        // hopefully able to revert back to rust-bio as soon as those errors are patched
+        // for seq in seqs.iter() {
+        //     seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
+        // }
+        
+        let consensus_max_length = seqs.iter().map(|x| x.len()).max().unwrap_or(0);
         for seq in seqs.iter() {
-            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
+            seqs_bytes.push(format!("{seq}\0").bytes().collect::<Vec<u8>>());
         }
+        let consensus = poa_consensus(
+            &seqs_bytes,
+            consensus_max_length,
+            1,   // 0 = local, 1 = global, 2 = gapped
+            3,   // match_score,
+            -4,  // mismatch_score,
+            -12, // gap_open,
+            -6,  // gap_extend,
+        );    
 
+        // code below is again for rust-bio poa
         // I empirically determined the following parameters to be suitable,
         // but further testing on other repeats would be good
         // mainly have to make sure the consensus does not get longer than the individual insertions
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
+        // let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
+        // let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
+        // eprintln!("-----------------------------------------");
+        // eprintln!("{}", std::str::from_utf8(&seqs_bytes[0]).unwrap());
+        // for seq in seqs_bytes.iter().skip(1) {
+        //     aligner.global(seq).add_to_graph();
+        //     eprintln!("{}", std::str::from_utf8(seq).unwrap());
+        // }
 
-        for seq in seqs_bytes.iter().skip(1) {
+        // let consensus = aligner.consensus();
+        // let score = aligner.global(&consensus).alignment().score;
 
-            aligner.global(seq).add_to_graph();
-        }
-
-        let consensus = aligner.consensus();
-        let score = aligner.global(&consensus).alignment().score;
-
+        // Consensus {
+        //     seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
+        //     support: num_reads,
+        //     std_dev,
+        //     score,
+        // }
         Consensus {
             seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
             support: num_reads,
             std_dev,
-            score,
+            score: 0,
         }
     }
 }
@@ -311,4 +337,45 @@ mod tests {
         println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
         println!("Consensus score: {}", score);
     }
+
+    #[test]
+    fn test_consensus_5(){
+        let seqs = vec!["TATATATATATAAACATATATTATATATATAAAATATAACATATATAAACATATATATTATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATAATATAAACATATATAAACATATATTATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATA".to_string(),
+            "ATATATATAAACATATATTATATATGTAATATAAATATATATAAACATATATTTATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAAACATATATGTATACATATATATACA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAAATATATATAAACATATATTATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATA".to_string(),
+            "TATATATTTATAAACATATATTATGTATGTAATATAAACATATATAAACATATATTATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATATATAAACATATATAAACATATATTATATATATA".to_string(),
+            "TATATATATATAAACATATATTCTATATATGTAATATAAACATATATAAACATATATTATCTATATA".to_string(),
+            "TATATATATATAAACATATATTATATATAATATAAACATATAAACATATATTATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATGTTTTCTATATGTTGCTATATTATACAACATA".to_string(),
+            "ATATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATATA".to_string(),
+            "TATATATATATAAACATATATTATATATGTAATATAACATATATAAACATATATTATATATATA".to_string(),
+            ];
+        let mut seqs_bytes = vec![];
+        for seq in seqs.iter() {
+            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
+        }
+
+        // I empirically determined the following parameters to be suitable,
+        // but further testing on other repeats would be good
+        // mainly have to make sure the consensus does not get longer than the individual insertions
+        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
+        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
+        for seq in seqs_bytes.iter().skip(1) {
+            aligner.global(seq).add_to_graph();
+        }
+
+        let consensus = aligner.consensus();
+        let score = aligner.global(&consensus).alignment().score;
+        
+        println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
+        println!("Consensus score: {}", score);
+}
+
 }
