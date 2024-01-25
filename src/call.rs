@@ -11,14 +11,17 @@ use crate::{parse_bam, Cli};
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
     match (&args.region, &args.region_file) {
+        // both input options are specified: invalid
         (Some(_region), Some(_region_file)) => {
             error!("ERROR: Specify either a region (-r) or region_file (-R), not both!\n\n");
             panic!();
         }
+        // no input options are specified: invalid
         (None, None) => {
             error!("ERROR: Specify one of region (-r) or region_file (-R)!\n\n");
             panic!();
         }
+        // a region string is specified: single threaded
         (Some(region), None) => {
             let repeat = crate::repeats::RepeatInterval::from_string(region, &args.fasta);
             let mut bam = parse_bam::create_bam_reader(&args.bam);
@@ -31,16 +34,18 @@ pub fn genotype_repeats(args: Cli) {
                 error!("Interval {region} not found in the fasta file, ignoring...");
             }
         }
+        // a region file is specified: single or multithreaded
         (None, Some(region_file)) => {
             // TODO: check if bed file is okay?
             let mut reader =
                 bed::Reader::from_file(region_file).expect("Problem reading bed file!");
             crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
+            // if multithreaded, create a threadpool
             if args.threads > 1 {
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(args.threads)
                     .build()
-                    .unwrap();
+                    .expect("Failed to create threadpool");
                 // genotypes contains the output of the genotyping, a struct instance
                 let genotypes = Mutex::new(Vec::new());
                 // par_bridge does not guarantee that results are returned in order
@@ -49,18 +54,14 @@ pub fn genotype_repeats(args: Cli) {
                     let repeat = crate::repeats::RepeatInterval::from_bed(&rec, &args.fasta);
                     if let Some(repeat) = repeat {
                         if let Ok(output) = genotype_repeat_multithreaded(&repeat, &args) {
-                            let mut geno = genotypes.lock().unwrap();
+                            let mut geno =
+                                genotypes.lock().expect("Unable to lock genotypes mutex");
                             geno.push(output);
                         } else {
                             error!("Problem processing {repeat}");
                         }
                     } else {
-                        // None is returned when the interval from the bed file does not appear in the fasta file
-                        error!("Interval {chrom}:{begin}-{end} not found in the fasta file, ignoring...",
-                                chrom = rec.chrom(),
-                                begin = rec.start(),
-                                end = rec.end()
-                            );
+                        error_invalid_interval(&rec);
                     }
                 });
                 let mut genotypes_vec = genotypes.lock().unwrap();
@@ -71,7 +72,7 @@ pub fn genotype_repeats(args: Cli) {
                 }
             } else {
                 // When running single threaded things become easier and the tool will require less memory
-                // Output is returned in the same order as the bed, and therefore not sorted before writing to stdout
+                // Output is returned in the same order as the bed, and therefore not sorted before writing immediately to stdout
                 let mut bam = parse_bam::create_bam_reader(&args.bam);
                 // genotypes contains the output of the genotyping, a struct instance
                 for record in reader.records() {
@@ -83,17 +84,21 @@ pub fn genotype_repeats(args: Cli) {
                             println!("{output}");
                         }
                     } else {
-                        // None is returned when the interval from the bed file does not appear in the fasta file
-                        error!("Interval {chrom}:{begin}-{end} not found in the fasta file, ignoring...",
-                                chrom = rec.chrom(),
-                                begin = rec.start(),
-                                end = rec.end()
-                            );
+                        error_invalid_interval(&rec);
                     }
                 }
             }
         }
     }
+}
+// None is returned when the interval from the bed file does not appear in the fasta file
+fn error_invalid_interval(rec: &bed::Record) {
+    error!(
+        "ERROR: Invalid interval in bed file: {chrom}:{begin}-{end}",
+        chrom = rec.chrom(),
+        begin = rec.start(),
+        end = rec.end()
+    );
 }
 
 // when running multithreaded, the indexedreader has to be created every time again
