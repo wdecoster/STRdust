@@ -1,7 +1,4 @@
 use std::fmt;
-
-use bio::alignment::pairwise::Scoring;
-use bio::alignment::poa::*;
 use log::debug;
 use rand::seq::SliceRandom;
 use rust_spoa::poa_consensus;
@@ -170,6 +167,8 @@ fn remove_outliers<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bio::alignment::pairwise::Scoring;
+    use bio::alignment::poa::*;
     #[test]
     fn test_consensus() {
         // I created this test because these sequences segfaulted on bianca
