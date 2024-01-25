@@ -1,7 +1,10 @@
+use log::debug;
 use rust_htslib::bam;
+use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
 use rust_htslib::bam::Read;
 use std::collections::HashMap;
+use std::env;
 use url::Url;
 
 pub struct Reads {
@@ -10,18 +13,34 @@ pub struct Reads {
     pub ps: Option<u32>,
 }
 
-pub fn get_overlapping_reads(
-    bamf: &String,
-    repeat: &crate::repeats::RepeatInterval,
-    unphased: bool,
-) -> Option<Reads> {
+pub fn create_bam_reader(bamf: &str) -> bam::IndexedReader {
     let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
-        bam::IndexedReader::from_url(&Url::parse(bamf.as_str()).expect("Failed to parse s3 URL"))
+        if env::var("CURL_CA_BUNDLE").is_err() {
+            env::set_var("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt");
+        }
+        bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse s3 URL"))
             .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
     } else {
         bam::IndexedReader::from_path(bamf)
             .unwrap_or_else(|err| panic!("Error opening local BAM: {err}"))
     };
+    if bamf.ends_with(".cram") {
+        bam.set_cram_options(
+            hts_sys::hts_fmt_option_CRAM_OPT_REQUIRED_FIELDS,
+            hts_sys::sam_fields_SAM_AUX
+                | hts_sys::sam_fields_SAM_MAPQ
+                | hts_sys::sam_fields_SAM_SEQ,
+        )
+        .expect("Failed setting cram options");
+    }
+    bam
+}
+
+pub fn get_overlapping_reads(
+    bam: &mut bam::IndexedReader,
+    repeat: &crate::repeats::RepeatInterval,
+    unphased: bool,
+) -> Option<Reads> {
     let tid = bam
         .header()
         .tid(repeat.chrom.as_bytes())
@@ -34,7 +53,15 @@ pub fn get_overlapping_reads(
     // extract sequences spanning the repeat locus
     for r in bam.rc_records() {
         let r = r.unwrap_or_else(|err| panic!("Error reading BAM file in region {repeat}:\n{err}"));
-        if r.mapq() < 10 {
+        // skip reads with mapq 0 or reads that do not span the repeat locus
+        if r.mapq() == 0
+            || r.reference_start() > repeat.start.into()
+            || r.reference_end() < repeat.end.into()
+        {
+            debug!(
+                "Skipping read {}",
+                std::str::from_utf8(r.qname()).expect("Could get read identifier")
+            );
             continue;
         }
         if unphased {
@@ -99,7 +126,60 @@ fn test_get_overlapping_reads() {
         end: 154654432,
     };
     let unphased = false;
-    let _reads = get_overlapping_reads(&bam, &repeat, unphased);
+    let mut bam = create_bam_reader(&bam);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
+}
+
+#[test]
+fn test_get_overlapping_reads_url1() {
+    let bam = String::from("https://s3.amazonaws.com/1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
+    let repeat = crate::repeats::RepeatInterval {
+        chrom: String::from("chr20"),
+        start: 154654404,
+        end: 154654432,
+    };
+    let unphased = false;
+    let mut bam = create_bam_reader(&bam);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
+}
+
+#[test]
+fn test_get_overlapping_reads_url2() {
+    let bam = String::from("s3://1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
+    let repeat = crate::repeats::RepeatInterval {
+        chrom: String::from("chr20"),
+        start: 154654404,
+        end: 154654432,
+    };
+    let unphased = false;
+    let mut bam = create_bam_reader(&bam);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
+}
+
+#[test]
+fn test_get_overlapping_reads_url3() {
+    let bam = String::from("https://s3.amazonaws.com/1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
+    let repeat = crate::repeats::RepeatInterval {
+        chrom: String::from("chr20"),
+        start: 154654404,
+        end: 154654432,
+    };
+    let unphased = false;
+    let mut bam = create_bam_reader(&bam);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
+}
+
+#[test]
+fn test_get_overlapping_reads_url4() {
+    let bam = String::from("https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram");
+    let repeat = crate::repeats::RepeatInterval {
+        chrom: String::from("chr20"),
+        start: 154654404,
+        end: 154654432,
+    };
+    let unphased = false;
+    let mut bam = create_bam_reader(&bam);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
 }
 
 #[test]

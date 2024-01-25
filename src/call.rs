@@ -3,9 +3,10 @@ use log::{debug, error};
 use minimap2::*;
 use rayon::prelude::*;
 use regex::Regex;
+use rust_htslib::bam;
 use std::sync::Mutex;
 
-use crate::Cli;
+use crate::{parse_bam, Cli};
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
@@ -21,7 +22,8 @@ pub fn genotype_repeats(args: Cli) {
         (Some(region), None) => {
             let repeat = crate::repeats::process_region(region)
                 .expect("Error when parsing the region string");
-            match genotype_repeat(repeat, &args) {
+            let mut bam = parse_bam::create_bam_reader(&args.bam);
+            match genotype_repeat_singlethreaded(repeat, &args, &mut bam) {
                 Ok(output) => {
                     crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
                     println!("{output}")
@@ -48,7 +50,7 @@ pub fn genotype_repeats(args: Cli) {
                 // par_bridge does not guarantee that results are returned in order
                 reader.records().par_bridge().for_each(|record| {
                     let rec = record.expect("Error reading bed record.");
-                    match genotype_repeat(
+                    match genotype_repeat_multithreaded(
                         crate::repeats::RepeatInterval {
                             chrom: rec.chrom().to_string(),
                             start: rec.start().try_into().unwrap(),
@@ -82,17 +84,19 @@ pub fn genotype_repeats(args: Cli) {
                 // Output is returned in the same order as the bed, and therefore not sorted before writing to stdout
                 // chrom_reported contains those chromosomes for which an error (absence in the bam) was already reported
                 // to avoid reporting the same error multiple times
+                let mut bam = parse_bam::create_bam_reader(&args.bam);
                 let mut chrom_reported = Vec::new();
                 // genotypes contains the output of the genotyping, a struct instance
                 for record in reader.records() {
                     let rec = record.expect("Error reading bed record.");
-                    match genotype_repeat(
+                    match genotype_repeat_singlethreaded(
                         crate::repeats::RepeatInterval {
                             chrom: rec.chrom().to_string(),
                             start: rec.start().try_into().unwrap(),
                             end: rec.end().try_into().unwrap(),
                         },
                         &args,
+                        &mut bam,
                     ) {
                         Ok(output) => {
                             println!("{output}");
@@ -111,6 +115,23 @@ pub fn genotype_repeats(args: Cli) {
         }
     }
 }
+// when running multithreaded, the indexedreader has to be created every time again
+fn genotype_repeat_multithreaded(
+    repeat: crate::repeats::RepeatInterval,
+    args: &Cli,
+) -> Result<crate::vcf::VCFRecord, String> {
+    let mut bam = parse_bam::create_bam_reader(&args.bam);
+    genotype_repeat(repeat, args, &mut bam)
+}
+
+// when running singlethreaded, the indexedreader is created once and simply passed on
+fn genotype_repeat_singlethreaded(
+    repeat: crate::repeats::RepeatInterval,
+    args: &Cli,
+    bam: &mut bam::IndexedReader,
+) -> Result<crate::vcf::VCFRecord, String> {
+    genotype_repeat(repeat, args, bam)
+}
 
 /// This function genotypes a particular repeat defined by chrom, start and end in the specified bam file
 /// All indel cigar operations longer than minlen are considered
@@ -118,6 +139,7 @@ pub fn genotype_repeats(args: Cli) {
 fn genotype_repeat(
     repeat: crate::repeats::RepeatInterval,
     args: &Cli,
+    bam: &mut bam::IndexedReader,
 ) -> Result<crate::vcf::VCFRecord, String> {
     let flanking = 2000;
     let mut flags = vec![];
@@ -135,7 +157,7 @@ fn genotype_repeat(
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
 
-    let reads = match crate::parse_bam::get_overlapping_reads(&args.bam, &repeat, args.unphased) {
+    let reads = match crate::parse_bam::get_overlapping_reads(bam, &repeat, args.unphased) {
         Some(seqs) => seqs,
         None => {
             // Return a missing genotype if no (phased) reads overlap the repeat
@@ -363,7 +385,8 @@ mod tests {
         let _support = 1;
         let unphased = false;
         let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        let binding = crate::parse_bam::get_overlapping_reads(&bam, &repeat, unphased).unwrap();
+        let mut bam = parse_bam::create_bam_reader(&bam);
+        let binding = crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased).unwrap();
         let read = binding
             .seqs
             .get(&1)
@@ -409,8 +432,8 @@ mod tests {
             threads: 1,
             sample: None,
         };
-
-        let genotype = genotype_repeat(repeat, &args);
+        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let genotype = genotype_repeat(repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
@@ -434,8 +457,8 @@ mod tests {
             start: 154654404,
             end: 154654432,
         };
-
-        let genotype = genotype_repeat(repeat, &args);
+        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let genotype = genotype_repeat(repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
@@ -459,18 +482,15 @@ mod tests {
             start: 154654404,
             end: 154654432,
         };
-
-        let genotype = genotype_repeat(repeat, &args);
+        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let genotype = genotype_repeat(repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
     #[test]
-    #[ignore]
-    fn test_genotype_repeat_s3() {
+    fn test_genotype_repeat_url() {
         let args = Cli {
-            // bam:  String::from("https://s3.amazonaws.com/1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
-            // bam: String::from("s3://1000g-ont/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam");
-            bam: String::from("https://1000g-ont.s3.amazonaws.com/aligned_data_minimap2_2.24/HG01312/aligned_bams/HG01312.STD_eee-prom1_guppy-6.3.7-sup-prom_fastq_pass.phased.bam"),
+            bam: String::from("https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram"),
             fasta: String::from("test_data/chr7.fa.gz"),
             region: None,
             region_file: None,
@@ -488,7 +508,8 @@ mod tests {
             start: 154654404,
             end: 154654432,
         };
-        let genotype = genotype_repeat(repeat, &args);
+        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let genotype = genotype_repeat(repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 }
