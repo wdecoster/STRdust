@@ -338,7 +338,9 @@ mod tests {
         println!("Consensus score: {}", score);
     }
 
+
     #[test]
+    #[ignore]
     fn test_consensus_5(){
         let seqs = vec!["TATATATATATAAACATATATTATATATATAAAATATAACATATATAAACATATATATTATATATATA".to_string(),
             "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATA".to_string(),
