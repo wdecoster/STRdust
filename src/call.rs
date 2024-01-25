@@ -20,16 +20,16 @@ pub fn genotype_repeats(args: Cli) {
             panic!();
         }
         (Some(region), None) => {
-            let repeat = crate::repeats::process_region(region)
-                .expect("Error when parsing the region string");
+            let repeat = crate::repeats::RepeatInterval::from_string(region, &args.fasta);
             let mut bam = parse_bam::create_bam_reader(&args.bam);
-            match genotype_repeat_singlethreaded(repeat, &args, &mut bam) {
-                Ok(output) => {
-                    crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
-                    println!("{output}")
+            if let Some(repeat) = repeat {
+                if let Ok(output) = genotype_repeat_singlethreaded(&repeat, &args, &mut bam) {
+                    println!("{output}");
                 }
-                Err(chrom) => error!("Contig {chrom} not found in bam file"),
-            };
+            } else {
+                // None is returned when the interval from the bed file does not appear in the fasta file
+                error!("Interval {region} not found in the fasta file, ignoring...");
+            }
         }
         (None, Some(region_file)) => {
             // TODO: check if bed file is okay?
@@ -41,37 +41,27 @@ pub fn genotype_repeats(args: Cli) {
                     .num_threads(args.threads)
                     .build()
                     .unwrap();
-                // chrom_reported and genotypes are vectors that are used by multiple threads to add findings, therefore as a Mutex
-                // chrom_reported contains those chromosomes for which an error (absence in the bam) was already reported
-                // to avoid reporting the same error multiple times
-                let chrom_reported = Mutex::new(Vec::new());
                 // genotypes contains the output of the genotyping, a struct instance
                 let genotypes = Mutex::new(Vec::new());
                 // par_bridge does not guarantee that results are returned in order
                 reader.records().par_bridge().for_each(|record| {
-                    let rec = record.expect("Error reading bed record.");
-                    match genotype_repeat_multithreaded(
-                        crate::repeats::RepeatInterval {
-                            chrom: rec.chrom().to_string(),
-                            start: rec.start().try_into().unwrap(),
-                            end: rec.end().try_into().unwrap(),
-                        },
-                        &args,
-                    ) {
-                        Ok(output) => {
+                    let rec: bed::Record = record.expect("Error reading bed record.");
+                    let repeat = crate::repeats::RepeatInterval::from_bed(&rec, &args.fasta);
+                    if let Some(repeat) = repeat {
+                        if let Ok(output) = genotype_repeat_multithreaded(&repeat, &args) {
                             let mut geno = genotypes.lock().unwrap();
                             geno.push(output);
+                        } else {
+                            error!("Problem processing {repeat}");
                         }
-                        Err(chrom) => {
-                            // For now the Err is only used for when a chromosome from the bed file does not appear in the bam file
-                            // this error is reported once per chromosome
-                            let mut chroms_reported = chrom_reported.lock().unwrap();
-                            if !chroms_reported.contains(&chrom) {
-                                error!("Contig {chrom} not found in bam file");
-                                chroms_reported.push(chrom);
-                            }
-                        }
-                    };
+                    } else {
+                        // None is returned when the interval from the bed file does not appear in the fasta file
+                        error!("Interval {chrom}:{begin}-{end} not found in the fasta file, ignoring...",
+                                chrom = rec.chrom(),
+                                begin = rec.start(),
+                                end = rec.end()
+                            );
+                    }
                 });
                 let mut genotypes_vec = genotypes.lock().unwrap();
                 // The final output is sorted by chrom, start and end
@@ -82,42 +72,33 @@ pub fn genotype_repeats(args: Cli) {
             } else {
                 // When running single threaded things become easier and the tool will require less memory
                 // Output is returned in the same order as the bed, and therefore not sorted before writing to stdout
-                // chrom_reported contains those chromosomes for which an error (absence in the bam) was already reported
-                // to avoid reporting the same error multiple times
                 let mut bam = parse_bam::create_bam_reader(&args.bam);
-                let mut chrom_reported = Vec::new();
                 // genotypes contains the output of the genotyping, a struct instance
                 for record in reader.records() {
                     let rec = record.expect("Error reading bed record.");
-                    match genotype_repeat_singlethreaded(
-                        crate::repeats::RepeatInterval {
-                            chrom: rec.chrom().to_string(),
-                            start: rec.start().try_into().unwrap(),
-                            end: rec.end().try_into().unwrap(),
-                        },
-                        &args,
-                        &mut bam,
-                    ) {
-                        Ok(output) => {
+                    let repeat = crate::repeats::RepeatInterval::from_bed(&rec, &args.fasta);
+                    if let Some(repeat) = repeat {
+                        if let Ok(output) = genotype_repeat_singlethreaded(&repeat, &args, &mut bam)
+                        {
                             println!("{output}");
                         }
-                        Err(chrom) => {
-                            // For now the Err is only used for when a chromosome from the bed file does not appear in the bam file
-                            // this error is reported once per chromosome
-                            if !chrom_reported.contains(&chrom) {
-                                error!("Contig {chrom} not found in bam file");
-                                chrom_reported.push(chrom);
-                            }
-                        }
-                    };
+                    } else {
+                        // None is returned when the interval from the bed file does not appear in the fasta file
+                        error!("Interval {chrom}:{begin}-{end} not found in the fasta file, ignoring...",
+                                chrom = rec.chrom(),
+                                begin = rec.start(),
+                                end = rec.end()
+                            );
+                    }
                 }
             }
         }
     }
 }
+
 // when running multithreaded, the indexedreader has to be created every time again
 fn genotype_repeat_multithreaded(
-    repeat: crate::repeats::RepeatInterval,
+    repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
 ) -> Result<crate::vcf::VCFRecord, String> {
     let mut bam = parse_bam::create_bam_reader(&args.bam);
@@ -126,7 +107,7 @@ fn genotype_repeat_multithreaded(
 
 // when running singlethreaded, the indexedreader is created once and simply passed on
 fn genotype_repeat_singlethreaded(
-    repeat: crate::repeats::RepeatInterval,
+    repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
     bam: &mut bam::IndexedReader,
 ) -> Result<crate::vcf::VCFRecord, String> {
@@ -137,7 +118,7 @@ fn genotype_repeat_singlethreaded(
 /// All indel cigar operations longer than minlen are considered
 /// The bam file is expected to be phased using the HP tag
 fn genotype_repeat(
-    repeat: crate::repeats::RepeatInterval,
+    repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
     bam: &mut bam::IndexedReader,
 ) -> Result<crate::vcf::VCFRecord, String> {
@@ -148,7 +129,7 @@ fn genotype_repeat(
         // Return a missing genotype if the repeat is not found in the fasta file
         None => {
             return Ok(crate::vcf::VCFRecord::missing_genotype(
-                &repeat,
+                repeat,
                 "N",
                 ".".to_string(),
             ))
@@ -157,12 +138,12 @@ fn genotype_repeat(
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
 
-    let reads = match crate::parse_bam::get_overlapping_reads(bam, &repeat, args.unphased) {
+    let reads = match crate::parse_bam::get_overlapping_reads(bam, repeat, args.unphased) {
         Some(seqs) => seqs,
         None => {
             // Return a missing genotype if no (phased) reads overlap the repeat
             return Ok(crate::vcf::VCFRecord::missing_genotype(
-                &repeat,
+                repeat,
                 &repeat_ref_seq,
                 0.to_string(),
             ));
@@ -189,26 +170,26 @@ fn genotype_repeat(
         let seq = reads.seqs.get(&0).unwrap();
         debug!("{repeat}: Unphased: Aliging {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, &repeat);
+        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
             return Ok(crate::vcf::VCFRecord::missing_genotype(
-                &repeat,
+                repeat,
                 &repeat_ref_seq,
                 insertions.len().to_string(),
             ));
         }
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(&insertions, &repeat, args.find_outliers);
+        let phased = crate::phase_insertions::split(&insertions, repeat, args.find_outliers);
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(
                     &phased.hap1,
                     args.support,
-                    &repeat,
+                    repeat,
                 ));
-                consenses.push(crate::consensus::consensus(&phase2, args.support, &repeat));
+                consenses.push(crate::consensus::consensus(&phase2, args.support, repeat));
                 // store all inserted sequences for identifying somatic variation
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.extend([phased.hap1.join(":"), phase2.join(":")]);
@@ -218,7 +199,7 @@ fn genotype_repeat(
                 // there was only one haplotype, homozygous, so this gets duplicated for reporting
                 // not sure if cloning is the best approach here, but this is only the case for unphased data
                 // and therefore is typically for small datasets obtained through capture methods
-                let consensus = crate::consensus::consensus(&phased.hap1, args.support, &repeat);
+                let consensus = crate::consensus::consensus(&phased.hap1, args.support, repeat);
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
                 // store all inserted sequences for identifying somatic variation
@@ -244,7 +225,7 @@ fn genotype_repeat(
             // get the sequences of this phase
             let seq = reads.seqs.get(&phase).unwrap();
             debug!("{repeat}: Phase {}: Aliging {} reads", phase, seq.len());
-            let insertions = find_insertions(seq, &aligner, args.minlen, flanking, &repeat);
+            let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
 
             debug!(
                 "{repeat}: Phase {}: Creating consensus from {} insertions",
@@ -254,7 +235,7 @@ fn genotype_repeat(
             consenses.push(crate::consensus::consensus(
                 &insertions,
                 args.support,
-                &repeat,
+                repeat,
             ));
 
             if let Some(ref mut all_ins) = all_insertions {
@@ -433,7 +414,7 @@ mod tests {
             sample: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam);
-        let genotype = genotype_repeat(repeat, &args, &mut bam);
+        let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
@@ -458,7 +439,7 @@ mod tests {
             end: 154654432,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam);
-        let genotype = genotype_repeat(repeat, &args, &mut bam);
+        let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
@@ -483,7 +464,7 @@ mod tests {
             end: 154654432,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam);
-        let genotype = genotype_repeat(repeat, &args, &mut bam);
+        let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 
@@ -509,7 +490,7 @@ mod tests {
             end: 154654432,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam);
-        let genotype = genotype_repeat(repeat, &args, &mut bam);
+        let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
 }

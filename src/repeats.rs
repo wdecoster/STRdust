@@ -1,4 +1,4 @@
-use log::error;
+use bio::io::bed;
 use rust_htslib::faidx;
 use std::fmt;
 
@@ -19,18 +19,63 @@ impl RepeatInterval {
     /// The repeat sequence is removed, and <flanking> bases of flanking sequence is added on either side
     /// If the extended interval (+/- flanking) is out of bounds, the extended interval is shortened automatically by faidx
 
-    pub fn make_repeat_compressed_sequence(&self, fasta: &String, flanking: u32) -> Vec<u8> {
-        let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
+    // parse a bed record
+    pub fn from_bed(rec: &bed::Record, fasta: &str) -> Option<Self> {
+        let chrom = rec.chrom().to_string();
+        let start = rec.start().try_into().unwrap();
+        let end = rec.end().try_into().unwrap();
+        RepeatInterval::new_interval(chrom, start, end, fasta)
+    }
+
+    // parse a region string
+    pub fn from_string(reg: &str, fasta: &str) -> Option<Self> {
+        let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
+        let interval = reg.split(':').collect::<Vec<&str>>()[1];
+        let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
+            .parse()
+            .unwrap();
+        let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
+            .parse()
+            .unwrap();
+        Self::new_interval(chrom, start, end, fasta)
+    }
+
+    fn new_interval(chrom: String, start: u32, end: u32, fasta: &str) -> Option<Self> {
+        if end < start {
+            return None;
+        }
+
         let fai = format!("{}.fai", fasta);
         // check if the chromosome exists in the fai file
-        if !std::fs::read_to_string(fai)
+        // and if the end coordinate is within the chromosome length
+        for line in std::fs::read_to_string(fai)
             .expect("Failed to read fai file")
             .lines()
-            .any(|line| line.split('\t').collect::<Vec<&str>>()[0] == self.chrom)
         {
-            error!("Chromosome {} not found in the fasta file", self.chrom);
-            panic!();
+            if line.split('\t').collect::<Vec<&str>>()[0] == chrom
+                && line.split('\t').collect::<Vec<&str>>()[1]
+                    .parse::<u32>()
+                    .expect("Failed parsing chromosome length from fai file")
+                    > end
+            {
+                return Some(Self { chrom, start, end });
+            } else {
+                println!("Chromosome {} not found in fai file", chrom);
+            }
         }
+        // if the chromosome is not in the fai file or the end does not fit the interval, return None
+        None
+    }
+    pub fn new(chrom: &str, start: u32, end: u32) -> Self {
+        Self {
+            chrom: chrom.to_string(),
+            start,
+            end,
+        }
+    }
+
+    pub fn make_repeat_compressed_sequence(&self, fasta: &String, flanking: u32) -> Vec<u8> {
+        let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
         let fas_left = fas
             .fetch_seq(
                 &self.chrom,
@@ -45,12 +90,7 @@ impl RepeatInterval {
                 (self.end + flanking - 2) as usize,
             )
             .expect("Failed to extract fas_right sequence from fasta for {chrom}:{start}-{end}");
-        // // write the new reference sequence to a file
-        // let mut newref_file =
-        //     std::fs::File::create("newref.fa").expect("Unable to create newref.fa");
-        // newref_file
-        //     .write_all(&[fas_left, fas_right].concat())
-        //     .expect("Unable to write to newref.fa");
+
         let newref = [fas_left, fas_right].concat();
         unsafe { libc::free(fas_left.as_ptr() as *mut std::ffi::c_void) }; // Free up memory (https://github.com/rust-bio/rust-htslib/issues/401#issuecomment-1704290171)
         unsafe { libc::free(fas_right.as_ptr() as *mut std::ffi::c_void) }; // Free up memory
@@ -65,6 +105,7 @@ impl RepeatInterval {
         )
         .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")
         .to_string();
+
         // If the repeat sequence is out of bounds, None is returned
         if repeat_ref_sequence == "N" {
             eprintln!(
@@ -76,38 +117,15 @@ impl RepeatInterval {
     }
 }
 
-/// parse a region string
-pub fn process_region(reg: &str) -> Result<RepeatInterval, Box<dyn std::error::Error>> {
-    let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
-    let interval = reg.split(':').collect::<Vec<&str>>()[1];
-    let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
-        .parse()
-        .unwrap();
-    let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
-        .parse()
-        .unwrap();
-    assert!(
-        end - start > 0,
-        r#"Invalid region: begin has to be smaller than end."#
-    );
-    Ok(RepeatInterval { chrom, start, end })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn test_make_repeat_compressed_sequence() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval {
-            chrom: String::from("chr7"),
-            start: 154654404,
-            end: 154654432,
-        };
+        let repeat = RepeatInterval::from_string("chr7:154654404-154654432", &fasta).unwrap();
         let flanking = 2000;
         let newref = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        // println!("{:?}", std::str::from_utf8(&seq[9990..10010]));
-        // println!("{:?}", std::str::from_utf8(&seq));
         assert_eq!(newref.len() as u32, flanking * 2);
     }
 
@@ -115,12 +133,8 @@ mod tests {
     #[test]
     fn test_interval_out_of_bounds() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval {
-            chrom: String::from("chr7"),
-            start: 1154654404,
-            end: 1154654432,
-        };
-        assert!(repeat.reference_repeat_sequence(&fasta).is_none());
+        let repeat = RepeatInterval::from_string("chr7:1154654404-1154654432", &fasta);
+        assert!(repeat.is_none());
     }
 
     // capture the case where the newref extended by <flanking> bases is out of bounds (<0) for the fasta file
@@ -128,11 +142,7 @@ mod tests {
     #[test]
     fn test_make_newref_interval_out_of_bounds1() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval {
-            chrom: String::from("chr7"),
-            start: 1000,
-            end: 5010,
-        };
+        let repeat = RepeatInterval::from_string("chr7:1000-5010", &fasta).unwrap();
         let flanking = 2000;
         let newref = repeat.make_repeat_compressed_sequence(&fasta, flanking);
         assert!((newref.len() as u32) < flanking * 2);
@@ -142,28 +152,17 @@ mod tests {
     #[test]
     fn test_make_newref_interval_out_of_bounds2() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval {
-            chrom: String::from("chr7"),
-            start: 159345373,
-            end: 159345400,
-        };
+        let repeat = RepeatInterval::from_string("chr7:159345373-159345400", &fasta).unwrap();
         let flanking = 2000;
         let newref = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        // println!("{:?}", std::str::from_utf8(&newref));
-        // println!("{}", newref.len());
         assert!((newref.len() as u32) < flanking * 2);
     }
 
     #[test]
-    #[should_panic]
     fn test_make_newref_interval_invalid_chrom() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval {
-            chrom: String::from("chr27"),
-            start: 159345373,
-            end: 159345400,
-        };
-        let flanking = 2000;
-        let _ = repeat.make_repeat_compressed_sequence(&fasta, flanking);
+        let repeat =
+            crate::repeats::RepeatInterval::from_string("chr27:159345373-159345400", &fasta);
+        assert!(repeat.is_none());
     }
 }

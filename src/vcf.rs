@@ -63,7 +63,7 @@ impl VCFRecord {
         repeat_ref_sequence: String,
         all_insertions: Option<Vec<String>>,
         outlier_insertions: Option<Vec<String>>,
-        repeat: crate::repeats::RepeatInterval,
+        repeat: &crate::repeats::RepeatInterval,
         ps: Option<u32>,
         flag: Vec<String>,
     ) -> VCFRecord {
@@ -131,7 +131,7 @@ impl VCFRecord {
             format!("{};", flag.join(";"))
         };
         VCFRecord {
-            chrom: repeat.chrom,
+            chrom: repeat.chrom.clone(),
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_sequence,
