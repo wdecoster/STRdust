@@ -86,7 +86,12 @@ fn genotype_repeat(
     // Either the reads are from a haploid chromosome, unphased or phased by a tool like WhatsHap/hiphase/...
     // A chromosome being haploid overrides the other options, including if the alignments were phased by a tool
 
-    if args.haploid.contains(&repeat.chrom) {
+    if args
+        .haploid
+        .split(',')
+        .collect::<Vec<&str>>()
+        .contains(&repeat.chrom.as_str())
+    {
         // if the chromosome is haploid, all reads are put in phase 0
         let seq = reads.seqs.get(&0).unwrap();
         debug!("{repeat}: Haploid: Aliging {} reads", seq.len());

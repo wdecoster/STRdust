@@ -63,9 +63,9 @@ pub struct Cli {
     #[clap(long, value_parser, default_value_t = false)]
     find_outliers: bool,
 
-    /// list haploid (sex) chromosomes
+    /// comma-separated list of haploid (sex) chromosomes
     #[clap(long, value_parser)]
-    haploid: Vec<String>,
+    haploid: String,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
