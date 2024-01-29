@@ -13,7 +13,7 @@ pub struct Reads {
     pub ps: Option<u32>,
 }
 
-pub fn create_bam_reader(bamf: &str) -> bam::IndexedReader {
+pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
     let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
         if env::var("CURL_CA_BUNDLE").is_err() {
             env::set_var("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt");
@@ -32,6 +32,8 @@ pub fn create_bam_reader(bamf: &str) -> bam::IndexedReader {
                 | hts_sys::sam_fields_SAM_SEQ,
         )
         .expect("Failed setting cram options");
+        bam.set_reference(fasta)
+            .expect("Failed setting reference for CRAM file");
     }
     bam
 }
@@ -120,65 +122,70 @@ fn get_phase_set(record: &bam::Record) -> Option<u32> {
 #[test]
 fn test_get_overlapping_reads() {
     let bam = String::from("test_data/small-test-phased.bam");
+    let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
         chrom: String::from("chr7"),
         start: 154654404,
         end: 154654432,
     };
     let unphased = false;
-    let mut bam = create_bam_reader(&bam);
+    let mut bam = create_bam_reader(&bam, &fasta);
     let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
 }
 
 #[test]
 fn test_get_overlapping_reads_url1() {
     let bam = String::from("https://s3.amazonaws.com/1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
+    let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
     };
     let unphased = false;
-    let mut bam = create_bam_reader(&bam);
+    let mut bam = create_bam_reader(&bam, &fasta);
     let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
 }
 
 #[test]
 fn test_get_overlapping_reads_url2() {
     let bam = String::from("s3://1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
+    let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
     };
     let unphased = false;
-    let mut bam = create_bam_reader(&bam);
+    let mut bam = create_bam_reader(&bam, &fasta);
     let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
 }
 
 #[test]
 fn test_get_overlapping_reads_url3() {
     let bam = String::from("https://s3.amazonaws.com/1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
+    let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
     };
     let unphased = false;
-    let mut bam = create_bam_reader(&bam);
+    let mut bam = create_bam_reader(&bam, &fasta);
     let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
 }
 
 #[test]
 fn test_get_overlapping_reads_url4() {
     let bam = String::from("https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram");
+    let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
     };
     let unphased = false;
-    let mut bam = create_bam_reader(&bam);
+    let mut bam = create_bam_reader(&bam, &fasta);
     let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
 }
 

@@ -10,7 +10,7 @@ pub fn genotype_repeat_multithreaded(
     repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
 ) -> Result<crate::vcf::VCFRecord, String> {
-    let mut bam = parse_bam::create_bam_reader(&args.bam);
+    let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
     genotype_repeat(repeat, args, &mut bam)
 }
 
@@ -313,7 +313,7 @@ mod tests {
         let _support = 1;
         let unphased = false;
         let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        let mut bam = parse_bam::create_bam_reader(&bam);
+        let mut bam = parse_bam::create_bam_reader(&bam, &fasta);
         let binding = crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased).unwrap();
         let read = binding
             .seqs
@@ -359,9 +359,9 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: vec![],
+            haploid: String::from(""),
         };
-        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
@@ -385,9 +385,9 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: vec!["chr7".to_string()],
+            haploid: String::from("chr7"),
         };
-        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
@@ -406,14 +406,14 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: vec![],
+            haploid: String::from(""),
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
         };
-        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
@@ -432,14 +432,14 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: vec![],
+            haploid: String::from(""),
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
         };
-        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }
@@ -458,7 +458,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: vec![],
+            haploid: String::from(""),
         };
 
         let repeat = crate::repeats::RepeatInterval {
@@ -466,7 +466,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
         };
-        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
         println!("{}", genotype.expect("Unable to genotype repeat"));
     }

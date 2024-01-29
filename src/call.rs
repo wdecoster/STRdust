@@ -23,7 +23,7 @@ pub fn genotype_repeats(args: Cli) {
         // a region string is specified: single threaded
         (Some(region), None) => {
             let repeat = crate::repeats::RepeatInterval::from_string(region, &args.fasta);
-            let mut bam = parse_bam::create_bam_reader(&args.bam);
+            let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
             if let Some(repeat) = repeat {
                 if let Ok(output) =
                     genotype::genotype_repeat_singlethreaded(&repeat, &args, &mut bam)
@@ -79,7 +79,7 @@ pub fn genotype_repeats(args: Cli) {
                 // When running single threaded things become easier and the tool will require less memory
                 // Output is returned in the same order as the bed, and therefore not sorted before writing immediately to stdout
                 // The indexedreader is created once and passed on to the function
-                let mut bam = parse_bam::create_bam_reader(&args.bam);
+                let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
                 // genotypes contains the output of the genotyping, a struct instance
                 for record in reader.records() {
                     let rec = record.expect("Error reading bed record.");
