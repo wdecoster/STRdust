@@ -1,7 +1,8 @@
 use bio::io::bed;
 use log::{debug, error};
 use rayon::prelude::*;
-use std::sync::Mutex;
+use std::io::Write;
+use std::{io, sync::Mutex};
 
 use crate::{genotype, parse_bam, Cli};
 
@@ -40,6 +41,9 @@ pub fn genotype_repeats(args: Cli) {
             let mut reader =
                 bed::Reader::from_file(region_file).expect("Problem reading bed file!");
             crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
+            let stdout = io::stdout(); // get the global stdout entity
+            let mut handle = io::BufWriter::new(stdout); // optional: wrap that handle in a buffer
+
             // if multithreaded, create a threadpool
             if args.threads > 1 {
                 rayon::ThreadPoolBuilder::new()
@@ -69,7 +73,7 @@ pub fn genotype_repeats(args: Cli) {
                 // The final output is sorted by chrom, start and end
                 genotypes_vec.sort_unstable();
                 for g in &mut *genotypes_vec {
-                    println!("{g}");
+                    writeln!(handle, "{g}").expect("Failed writing the result.");
                 }
             } else {
                 // When running single threaded things become easier and the tool will require less memory
@@ -84,7 +88,7 @@ pub fn genotype_repeats(args: Cli) {
                         if let Ok(output) =
                             genotype::genotype_repeat_singlethreaded(&repeat, &args, &mut bam)
                         {
-                            println!("{output}");
+                            writeln!(handle, "{output}").expect("Failed writing the result.");
                         }
                     } else {
                         error_invalid_interval(&rec);
