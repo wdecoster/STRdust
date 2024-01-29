@@ -59,8 +59,6 @@ impl RepeatInterval {
                     > end
             {
                 return Some(Self { chrom, start, end });
-            } else {
-                println!("Chromosome {} not found in fai file", chrom);
             }
         }
         // if the chromosome is not in the fai file or the end does not fit the interval, return None
