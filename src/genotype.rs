@@ -50,7 +50,9 @@ fn genotype_repeat(
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
-    let unphased = args.haploid.contains(&repeat.chrom) || args.unphased;
+    let unphased = (args.haploid.is_some()
+        && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
+        || args.unphased;
 
     let reads = match crate::parse_bam::get_overlapping_reads(bam, repeat, unphased) {
         Some(seqs) => seqs,
@@ -86,11 +88,14 @@ fn genotype_repeat(
     // Either the reads are from a haploid chromosome, unphased or phased by a tool like WhatsHap/hiphase/...
     // A chromosome being haploid overrides the other options, including if the alignments were phased by a tool
 
-    if args
-        .haploid
-        .split(',')
-        .collect::<Vec<&str>>()
-        .contains(&repeat.chrom.as_str())
+    if args.haploid.is_some()
+        && args
+            .haploid
+            .as_ref()
+            .unwrap()
+            .split(',')
+            .collect::<Vec<&str>>()
+            .contains(&repeat.chrom.as_str())
     {
         // if the chromosome is haploid, all reads are put in phase 0
         let seq = reads.seqs.get(&0).unwrap();
@@ -364,7 +369,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: String::from(""),
+            haploid: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -390,7 +395,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: String::from("chr7"),
+            haploid: Some(String::from("chr7")),
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -411,7 +416,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: String::from(""),
+            haploid: None,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -437,7 +442,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: String::from(""),
+            haploid: None,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -463,7 +468,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
-            haploid: String::from(""),
+            haploid: None,
         };
 
         let repeat = crate::repeats::RepeatInterval {
