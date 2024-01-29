@@ -7,6 +7,7 @@ use crate::{genotype, parse_bam, Cli};
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
+
     match (&args.region, &args.region_file) {
         // both input options are specified: invalid
         (Some(_region), Some(_region_file)) => {
@@ -94,6 +95,7 @@ pub fn genotype_repeats(args: Cli) {
     }
 }
 // None is returned when the interval from the bed file does not appear in the fasta file
+// Alternatively, this error can be raised if the end is smaller than the start
 fn error_invalid_interval(rec: &bed::Record) {
     error!(
         "ERROR: Invalid interval in bed file: {chrom}:{begin}-{end}",

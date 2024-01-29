@@ -62,6 +62,10 @@ pub struct Cli {
     /// Identify poorly supported outlier expansions (only with --unphased)
     #[clap(long, value_parser, default_value_t = false)]
     find_outliers: bool,
+
+    /// list haploid (sex) chromosomes
+    #[clap(long, value_parser)]
+    haploid: Vec<String>,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {

@@ -5,6 +5,7 @@ use regex::Regex;
 use rust_htslib::bam;
 
 // when running multithreaded, the indexedreader has to be created every time again
+// this is probably expensive
 pub fn genotype_repeat_multithreaded(
     repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
@@ -24,7 +25,8 @@ pub fn genotype_repeat_singlethreaded(
 
 /// This function genotypes a particular repeat defined by chrom, start and end in the specified bam file
 /// All indel cigar operations longer than minlen are considered
-/// The bam file is expected to be phased using the HP tag
+/// The bam file is expected to be phased using the HP tag, unless --unphased is specified
+/// haploid (sex) chromosomes should be listed under --haploid
 fn genotype_repeat(
     repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
@@ -46,7 +48,11 @@ fn genotype_repeat(
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
 
-    let reads = match crate::parse_bam::get_overlapping_reads(bam, repeat, args.unphased) {
+    // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
+    // this means that --haploid overrides the phases which could be present in the bam file
+    let unphased = args.haploid.contains(&repeat.chrom) || args.unphased;
+
+    let reads = match crate::parse_bam::get_overlapping_reads(bam, repeat, unphased) {
         Some(seqs) => seqs,
         None => {
             // Return a missing genotype if no (phased) reads overlap the repeat
@@ -64,16 +70,49 @@ fn genotype_repeat(
         .with_cigar()
         .with_seq(&repeat_compressed_reference)
         .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
+
+    // Set up vectors to collect the results
     let mut consenses: Vec<crate::consensus::Consensus> = vec![];
-    // only used with `--somatic`
+    // only used with --somatic: collecting all individual insertions
     let mut all_insertions = if args.somatic { Some(vec![]) } else { None };
-    // only used with `--find_outliers`
-    let mut outlier_insertions = if args.find_outliers {
+    // only used with --find_outliers: collecting all outlier insertions that could not be phased
+    let mut outliers = if args.find_outliers {
         Some(vec![])
     } else {
         None
     };
-    if args.unphased {
+
+    // The rest of the function has three mutually exclusive options from here.
+    // Either the reads are from a haploid chromosome, unphased or phased by a tool like WhatsHap/hiphase/...
+    // A chromosome being haploid overrides the other options, including if the alignments were phased by a tool
+
+    if args.haploid.contains(&repeat.chrom) {
+        // if the chromosome is haploid, all reads are put in phase 0
+        let seq = reads.seqs.get(&0).unwrap();
+        debug!("{repeat}: Haploid: Aliging {} reads", seq.len());
+        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        debug!(
+            "{repeat}: Haploid: Creating consensus from {} insertions",
+            insertions.len(),
+        );
+        if insertions.len() < args.support {
+            // Return a missing genotype if not enough insertions are found
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                repeat,
+                &repeat_ref_seq,
+                insertions.len().to_string(),
+            ));
+        }
+        // there is only one haplotype, haploid, so this gets duplicated for reporting in the VCF module
+        // Ideally vcf.rs would explicitly handle haploid chromosomes
+        let consensus = crate::consensus::consensus(&insertions, args.support, repeat);
+        consenses.push(consensus.clone());
+        consenses.push(consensus);
+        if let Some(ref mut all_ins) = all_insertions {
+            // store all inserted sequences for identifying somatic variation
+            all_ins.push(insertions.join(":"));
+        }
+    } else if args.unphased {
         // get the sequences
         let seq = reads.seqs.get(&0).unwrap();
         debug!("{repeat}: Unphased: Aliging {} reads", seq.len());
@@ -122,13 +161,13 @@ fn genotype_repeat(
                 }
             }
         }
-        if let Some(ref mut outliers_vec) = outlier_insertions {
+        if let Some(ref mut outliers_vec) = outliers {
             if let Some(outliers_found) = phased.outliers {
                 outliers_vec.push(outliers_found.join(","));
             }
         }
     } else {
-        // input reads are phased
+        // input alignments are already phased
         for phase in [1, 2] {
             // get the sequences of this phase
             let seq = reads.seqs.get(&phase).unwrap();
@@ -156,7 +195,7 @@ fn genotype_repeat(
         consenses,
         repeat_ref_seq,
         all_insertions,
-        outlier_insertions,
+        outliers,
         repeat,
         reads.ps,
         flags,
@@ -320,6 +359,33 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
+            haploid: vec![],
+        };
+        let mut bam = parse_bam::create_bam_reader(&args.bam);
+        let genotype = genotype_repeat(&repeat, &args, &mut bam);
+        println!("{}", genotype.expect("Unable to genotype repeat"));
+    }
+
+    #[test]
+    fn test_genotype_repeat_haploid() {
+        let repeat = crate::repeats::RepeatInterval {
+            chrom: String::from("chr7"),
+            start: 154654404,
+            end: 154654432,
+        };
+        let args = Cli {
+            bam: String::from("test_data/small-test-phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            minlen: 5,
+            support: 1,
+            somatic: false,
+            unphased: true,
+            find_outliers: false,
+            threads: 1,
+            sample: None,
+            haploid: vec!["chr7".to_string()],
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -340,6 +406,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
+            haploid: vec![],
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -365,6 +432,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
+            haploid: vec![],
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -390,6 +458,7 @@ mod tests {
             find_outliers: false,
             threads: 1,
             sample: None,
+            haploid: vec![],
         };
 
         let repeat = crate::repeats::RepeatInterval {

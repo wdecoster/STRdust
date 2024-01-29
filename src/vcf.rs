@@ -68,8 +68,20 @@ impl VCFRecord {
         flag: Vec<String>,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
-        let allele2 = Allele::from_consensus(consenses.pop().unwrap(), repeat.start, repeat.end);
-        let allele1 = Allele::from_consensus(consenses.pop().unwrap(), repeat.start, repeat.end);
+        let allele2 = Allele::from_consensus(
+            consenses
+                .pop()
+                .expect("Failed getting allele2 from consenses"),
+            repeat.start,
+            repeat.end,
+        );
+        let allele1 = Allele::from_consensus(
+            consenses
+                .pop()
+                .expect("Failed getting allele1 from consenses"),
+            repeat.start,
+            repeat.end,
+        );
 
         debug!(
             "Genotyping {repeat}:{repeat_ref_sequence} with {} and {}",
@@ -262,7 +274,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     let _ =
         faidx::Reader::from_path(fasta).unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
 
-    let mut fai_file = std::fs::File::open(format!("{fasta}.fai")).expect("Can't open file");
+    let mut fai_file = std::fs::File::open(format!("{fasta}.fai")).expect("Can't open .fai file");
     // parse the fasta index file
     let mut buf = String::new();
     fai_file
