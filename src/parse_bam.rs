@@ -18,7 +18,7 @@ pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
         if env::var("CURL_CA_BUNDLE").is_err() {
             env::set_var("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt");
         }
-        bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse s3 URL"))
+        bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse URL"))
             .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
     } else {
         bam::IndexedReader::from_path(bamf)
@@ -67,6 +67,22 @@ pub fn get_overlapping_reads(
             continue;
         }
         if unphased {
+            // for ([read_start, read_stop], [genome_start, genome_stop]) in r.aligned_block_pairs() {
+            //     if repeat.start - genome_start as u32 > 2000 {
+            //         continue;
+            //     } else {
+            //         debug!(
+            //             "Read {} has aligned block pair: read_start: {}, read_stop: {}, genome_start: {}, genome_stop: {}",
+            //             std::str::from_utf8(r.qname()).expect("Could get read identifier"),
+            //             read_start,
+            //             read_stop,
+            //             genome_start,
+            //             genome_stop
+            //         );
+            //         // let seq = r.seq().as_bytes();
+            //         // seqs.get_mut(&0).unwrap().push(&seq[*start..*end]);
+            //     };
+            // }
             // if unphased put reads in phase 0
             seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
         } else {

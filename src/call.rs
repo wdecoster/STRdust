@@ -28,6 +28,7 @@ pub fn genotype_repeats(args: Cli) {
                 if let Ok(output) =
                     genotype::genotype_repeat_singlethreaded(&repeat, &args, &mut bam)
                 {
+                    crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
                     println!("{output}");
                 }
             } else {
