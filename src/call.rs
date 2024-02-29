@@ -1,4 +1,4 @@
-use bio::io::bed;
+use crate::repeats::RepeatIntervalIterator;
 use log::{debug, error};
 use rayon::prelude::*;
 use std::io::Write;
@@ -8,22 +8,7 @@ use crate::{genotype, parse_bam, Cli};
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
-
-    let repeats = match (&args.region, &args.region_file, args.pathogenic) {
-        // a region string is specified: single threaded
-        (Some(region), None, false) => {
-            crate::repeats::RepeatIntervalIterator::from_string(region, &args.fasta)
-        }
-        // a region file is specified: single or multithreaded
-        (None, Some(region_file), false) => {
-            crate::repeats::RepeatIntervalIterator::from_bed(region_file, &args.fasta)
-        }
-        (None, None, true) => crate::repeats::RepeatIntervalIterator::pathogenic(&args.fasta),
-        _ => {
-            error!("ERROR: Specify either a region (-r), a region_file (-R) or --pathogenic!\n\n");
-            panic!();
-        }
-    };
+    let repeats = get_targets(&args);
     crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
     let stdout = io::stdout(); // get the global stdout entity
     let mut handle = io::BufWriter::new(stdout); // wrap that handle in a buffer
@@ -58,6 +43,24 @@ pub fn genotype_repeats(args: Cli) {
         genotypes_vec.sort_unstable();
         for g in &mut *genotypes_vec {
             writeln!(handle, "{g}").expect("Failed writing the result.");
+        }
+    }
+}
+
+fn get_targets(args: &Cli) -> RepeatIntervalIterator {
+    match (&args.region, &args.region_file, args.pathogenic) {
+        // a region string
+        (Some(region), None, false) => RepeatIntervalIterator::from_string(region, &args.fasta),
+        // a region file
+        (None, Some(region_file), false) => {
+            RepeatIntervalIterator::from_bed(region_file, &args.fasta)
+        }
+        // with --pathogenic
+        (None, None, true) => RepeatIntervalIterator::pathogenic(&args.fasta),
+        // invalid input
+        _ => {
+            eprintln!("ERROR: Specify a region string (-r), a region_file (-R) or --pathogenic!\n");
+            std::process::exit(1);
         }
     }
 }
