@@ -1,7 +1,98 @@
 use bio::io::bed;
 use rust_htslib::faidx;
 use std::fmt;
+use std::io;
 
+#[derive(Debug)]
+pub struct RepeatIntervalIterator {
+    // Add fields here that you need for iteration.
+    // For example, you might need a current index and a vector of RepeatInterval.
+    current_index: usize,
+    data: Vec<RepeatInterval>,
+}
+
+impl RepeatIntervalIterator {
+    // parse a region string
+    pub fn from_string(reg: &str, fasta: &str) -> Self {
+        let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
+        let interval = reg.split(':').collect::<Vec<&str>>()[1];
+        let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
+            .parse()
+            .unwrap();
+        let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
+            .parse()
+            .unwrap();
+        let repeat = RepeatInterval::new_interval(chrom, start, end, fasta)
+            .expect("Failed to create repeat interval");
+        RepeatIntervalIterator {
+            current_index: 0,
+            data: vec![repeat],
+        }
+    }
+    pub fn from_bed(region_file: &String, fasta: &str) -> Self {
+        let mut reader = bed::Reader::from_file(region_file).expect("Problem reading bed file!");
+        let mut data = Vec::new();
+        for record in reader.records() {
+            let rec = record.expect("Error reading bed record.");
+            let repeat = RepeatInterval::from_bed(&rec, fasta);
+            if let Some(repeat) = repeat {
+                data.push(repeat);
+            }
+        }
+        RepeatIntervalIterator {
+            current_index: 0,
+            data,
+        }
+    }
+
+    pub fn pathogenic(fasta: &str) -> Self {
+        let url = "https://raw.githubusercontent.com/hdashnow/STRchive/main/data/hg38.STRchive-disease-loci.TRGT.bed";
+        let resp = reqwest::blocking::get(url).expect("request to STRchive failed");
+        let body = resp.text().expect("body invalid");
+        let mut reader = io::BufReader::new(body.as_bytes());
+        let mut data = Vec::new();
+        let mut reader = bed::Reader::new(&mut reader);
+        for record in reader.records() {
+            let rec = record.expect("Error reading bed record.");
+            let repeat = RepeatInterval::from_bed(&rec, fasta);
+            if let Some(repeat) = repeat {
+                data.push(repeat);
+            }
+        }
+        RepeatIntervalIterator {
+            current_index: 0,
+            data,
+        }
+    }
+}
+
+impl Clone for RepeatInterval {
+    fn clone(&self) -> Self {
+        RepeatInterval {
+            chrom: self.chrom.clone(),
+            start: self.start,
+            end: self.end,
+        }
+    }
+}
+
+impl Iterator for RepeatIntervalIterator {
+    type Item = RepeatInterval;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Implement the logic to get the next RepeatInterval here.
+        // This is a simple example that gets the next item from a vector.
+        if self.current_index < self.data.len() {
+            let result = self.data[self.current_index].clone();
+            self.current_index += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct RepeatInterval {
     pub chrom: String,
     pub start: u32,
@@ -27,22 +118,9 @@ impl RepeatInterval {
         RepeatInterval::new_interval(chrom, start, end, fasta)
     }
 
-    // parse a region string
-    pub fn from_string(reg: &str, fasta: &str) -> Option<Self> {
-        let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
-        let interval = reg.split(':').collect::<Vec<&str>>()[1];
-        let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
-            .parse()
-            .unwrap();
-        let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
-            .parse()
-            .unwrap();
-        Self::new_interval(chrom, start, end, fasta)
-    }
-
     fn new_interval(chrom: String, start: u32, end: u32, fasta: &str) -> Option<Self> {
         if end < start {
-            return None;
+            panic!("End coordinate is smaller than start coordinate for {chrom}:{start}-{end}")
         }
 
         let fai = format!("{}.fai", fasta);
@@ -62,7 +140,9 @@ impl RepeatInterval {
             }
         }
         // if the chromosome is not in the fai file or the end does not fit the interval, return None
-        None
+        panic!(
+            "Chromosome {chrom} is not in the fasta file or the end coordinate is out of bounds"
+        );
     }
     pub fn new(chrom: &str, start: u32, end: u32) -> Self {
         Self {
@@ -121,18 +201,20 @@ mod tests {
     #[test]
     fn test_make_repeat_compressed_sequence() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval::from_string("chr7:154654404-154654432", &fasta).unwrap();
+        let repeat = RepeatIntervalIterator::from_string("chr7:154654404-154654432", &fasta);
         let flanking = 2000;
-        let newref = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        assert_eq!(newref.len() as u32, flanking * 2);
+        for r in repeat {
+            let newref = r.make_repeat_compressed_sequence(&fasta, flanking);
+            assert_eq!(newref.len() as u32, flanking * 2);
+        }
     }
 
     // captures the case when the repeat interval is out of bounds for the fasta file
     #[test]
+    #[should_panic]
     fn test_interval_out_of_bounds() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval::from_string("chr7:1154654404-1154654432", &fasta);
-        assert!(repeat.is_none());
+        let _ = RepeatIntervalIterator::from_string("chr7:1154654404-1154654432", &fasta);
     }
 
     // capture the case where the newref extended by <flanking> bases is out of bounds (<0) for the fasta file
@@ -140,27 +222,41 @@ mod tests {
     #[test]
     fn test_make_newref_interval_out_of_bounds1() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval::from_string("chr7:1000-5010", &fasta).unwrap();
+        let repeat = RepeatIntervalIterator::from_string("chr7:1000-5010", &fasta);
         let flanking = 2000;
-        let newref = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        assert!((newref.len() as u32) < flanking * 2);
+        for r in repeat {
+            let newref = r.make_repeat_compressed_sequence(&fasta, flanking);
+            assert!((newref.len() as u32) < flanking * 2);
+        }
     }
 
     // capture the case where the newref extended by <flanking>b is out of bounds (> chromosome end) for the fasta file
     #[test]
     fn test_make_newref_interval_out_of_bounds2() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat = RepeatInterval::from_string("chr7:159345373-159345400", &fasta).unwrap();
+        let repeat = RepeatIntervalIterator::from_string("chr7:159345373-159345400", &fasta);
         let flanking = 2000;
-        let newref = repeat.make_repeat_compressed_sequence(&fasta, flanking);
-        assert!((newref.len() as u32) < flanking * 2);
+        for r in repeat {
+            let newref = r.make_repeat_compressed_sequence(&fasta, flanking);
+            assert!((newref.len() as u32) < flanking * 2);
+        }
     }
 
     #[test]
+    #[should_panic]
     fn test_make_newref_interval_invalid_chrom() {
         let fasta = String::from("test_data/chr7.fa.gz");
-        let repeat =
-            crate::repeats::RepeatInterval::from_string("chr27:159345373-159345400", &fasta);
-        assert!(repeat.is_none());
+        let _ = crate::repeats::RepeatIntervalIterator::from_string(
+            "chr27:159345373-159345400",
+            &fasta,
+        );
+    }
+
+    // this test is ignored as it uses a file outside the test_data directory
+    #[test]
+    #[ignore]
+    fn test_pathogenic() {
+        let fasta = String::from("/home/wdecoster/reference/GRCh38.fa");
+        let _ = crate::repeats::RepeatIntervalIterator::pathogenic(&fasta);
     }
 }
