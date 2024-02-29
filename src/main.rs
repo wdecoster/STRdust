@@ -35,6 +35,10 @@ pub struct Cli {
     #[clap(short = 'R', long, value_parser, validator=is_file)]
     region_file: Option<String>,
 
+    /// Genotype the pathogenic STRs from STRchive
+    #[clap(long, value_parser, default_value_t = false)]
+    pathogenic: bool,
+
     /// minimal length of insertion/deletion operation
     #[clap(short, long, value_parser, default_value_t = 5)]
     minlen: usize,
