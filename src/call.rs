@@ -1,4 +1,6 @@
 use crate::repeats::RepeatIntervalIterator;
+use indicatif::ParallelProgressIterator;
+use indicatif::ProgressIterator;
 use log::{debug, error};
 use rayon::prelude::*;
 use std::io::Write;
@@ -16,8 +18,9 @@ pub fn genotype_repeats(args: Cli) {
         // When running single threaded things become easier and the tool will require less memory
         // Output is returned in the same order as the bed, and therefore not sorted before writing immediately to stdout
         // The indexedreader is created once and passed on to the function
+        let num_intervals = repeats.num_intervals;
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
-        for repeat in repeats {
+        for repeat in repeats.progress_count(num_intervals as u64) {
             if let Ok(output) = genotype::genotype_repeat_singlethreaded(&repeat, &args, &mut bam) {
                 writeln!(handle, "{output}").expect("Failed writing the result.");
             }
@@ -30,14 +33,18 @@ pub fn genotype_repeats(args: Cli) {
         // genotypes contains the output of the genotyping, a struct instance
         let genotypes = Mutex::new(Vec::new());
         // par_bridge does not guarantee that results are returned in order
-        repeats.par_bridge().for_each(|repeat| {
-            if let Ok(output) = genotype::genotype_repeat_multithreaded(&repeat, &args) {
-                let mut geno = genotypes.lock().expect("Unable to lock genotypes mutex");
-                geno.push(output);
-            } else {
-                error!("Problem processing {repeat}");
-            }
-        });
+        let num_intervals = repeats.num_intervals;
+        repeats
+            .par_bridge()
+            .progress_count(num_intervals as u64)
+            .for_each(|repeat| {
+                if let Ok(output) = genotype::genotype_repeat_multithreaded(&repeat, &args) {
+                    let mut geno = genotypes.lock().expect("Unable to lock genotypes mutex");
+                    geno.push(output);
+                } else {
+                    error!("Problem processing {repeat}");
+                }
+            });
         let mut genotypes_vec = genotypes.lock().unwrap();
         // The final output is sorted by chrom, start and end
         genotypes_vec.sort_unstable();

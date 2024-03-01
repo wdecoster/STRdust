@@ -5,10 +5,9 @@ use std::io;
 
 #[derive(Debug)]
 pub struct RepeatIntervalIterator {
-    // Add fields here that you need for iteration.
-    // For example, you might need a current index and a vector of RepeatInterval.
     current_index: usize,
     data: Vec<RepeatInterval>,
+    pub num_intervals: usize,
 }
 
 impl RepeatIntervalIterator {
@@ -27,6 +26,7 @@ impl RepeatIntervalIterator {
         RepeatIntervalIterator {
             current_index: 0,
             data: vec![repeat],
+            num_intervals: 1,
         }
     }
     pub fn from_bed(region_file: &String, fasta: &str) -> Self {
@@ -41,7 +41,8 @@ impl RepeatIntervalIterator {
         }
         RepeatIntervalIterator {
             current_index: 0,
-            data,
+            data: data.clone(),
+            num_intervals: data.len(),
         }
     }
 
@@ -61,7 +62,8 @@ impl RepeatIntervalIterator {
         }
         RepeatIntervalIterator {
             current_index: 0,
-            data,
+            data: data.clone(),
+            num_intervals: data.len(),
         }
     }
 }

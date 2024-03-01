@@ -27,6 +27,7 @@ libc = "0.2.147"
 petgraph = "0.6.4"
 hts-sys = "2.1.1"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
+indicatif = { version = "0.17.1", features = ["rayon"] }
 
 [dev-dependencies]
 ctor = "*"
