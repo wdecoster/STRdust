@@ -191,12 +191,12 @@ impl fmt::Display for VCFRecord {
         match &self.alt_seq {
             Some(alts) => {
                 let (FORMAT, ps) = match self.ps {
-                    Some(ps) => ("GT:SUP:SC:PS", format!(":{}", ps)),
-                    None => ("GT:SUP:SC", "".to_string()),
+                    Some(ps) => ("GT:RB:FRB:SUP:SC:PS", format!(":{}", ps)),
+                    None => ("GT:RB:FRB:SUP:SC", "".to_string()),
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};RB={l1},{l2};FRB={fl1},{fl2};STDEV={sd1},{sd2}{somatic}{outliers}\t{FORMAT}\t{genotype1}|{genotype2}:{sup1},{sup2}:{score1},{score2}{ps}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{sup1},{sup2}:{score1},{score2}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -290,12 +290,6 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the repeat interval">"#
     );
     println!(
-        r#"##INFO=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases relative to reference">"#
-    );
-    println!(
-        r#"##INFO=<ID=FRB,Number=2,Type=Integer,Description="Full repeat length of the two alleles in bases">"#
-    );
-    println!(
         r#"##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">"#
     );
     println!(
@@ -308,6 +302,12 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
     );
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
+    println!(
+        r#"##FORMAT=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases relative to reference">"#
+    );
+    println!(
+        r#"##FORMAT=<ID=FRB,Number=2,Type=Integer,Description="Full repeat length of the two alleles in bases">"#
+    );
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
     println!(r#"##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">"#);
     println!(r#"##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Consensus score per allele">"#);
