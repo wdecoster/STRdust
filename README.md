@@ -39,4 +39,4 @@ You may have to change the file permissions to execute it with `chmod +x STRdust
 
 ## CITATION
 
-If you use this tool, please consider citing our publication.
+If you use this tool, please consider citing our [publication](https://www.medrxiv.org/content/10.1101/2024.03.06.24303700v1).
