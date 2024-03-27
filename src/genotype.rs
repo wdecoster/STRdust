@@ -384,6 +384,7 @@ mod tests {
             threads: 1,
             sample: None,
             haploid: None,
+            debug: false,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -411,6 +412,7 @@ mod tests {
             threads: 1,
             sample: None,
             haploid: Some(String::from("chr7")),
+            debug: false,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -433,6 +435,7 @@ mod tests {
             threads: 1,
             sample: None,
             haploid: None,
+            debug: false,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -460,6 +463,7 @@ mod tests {
             threads: 1,
             sample: None,
             haploid: None,
+            debug: false,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -487,6 +491,7 @@ mod tests {
             threads: 1,
             sample: None,
             haploid: None,
+            debug: false,
         };
 
         let repeat = crate::repeats::RepeatInterval {
