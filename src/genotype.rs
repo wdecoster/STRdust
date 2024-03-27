@@ -32,7 +32,7 @@ fn genotype_repeat(
     args: &Cli,
     bam: &mut bam::IndexedReader,
 ) -> Result<crate::vcf::VCFRecord, String> {
-    let flanking = 2000;
+    let flanking = 5000;
     let mut flags = vec![];
     let repeat_ref_seq = match repeat.reference_repeat_sequence(&args.fasta) {
         Some(seq) => seq,
@@ -47,6 +47,13 @@ fn genotype_repeat(
     };
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
+    if args.debug {
+        // write the repeat compressed reference to a file
+        use std::fs;
+        let header = format!(">{chrom}:{start}-{end}\n", chrom = repeat.chrom, start = repeat.start, end = repeat.end);
+        let fas = String::from_utf8(repeat_compressed_reference.clone()).expect("Unable to convert repeat compressed reference to string");
+        fs::write("repeat_compressed.fa", header + &fas).expect("Unable to write repeat compressed reference to file");
+    }
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
@@ -99,7 +106,7 @@ fn genotype_repeat(
     {
         // if the chromosome is haploid, all reads are put in phase 0
         let seq = reads.seqs.get(&0).unwrap();
-        debug!("{repeat}: Haploid: Aliging {} reads", seq.len());
+        debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
         debug!(
             "{repeat}: Haploid: Creating consensus from {} insertions",
@@ -125,12 +132,13 @@ fn genotype_repeat(
     } else if args.unphased {
         // get the sequences
         let seq = reads.seqs.get(&0).unwrap();
-        debug!("{repeat}: Unphased: Aliging {} reads", seq.len());
+        debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
+            debug!("{repeat}: Not enough insertions found: {}", insertions.len());
             return Ok(crate::vcf::VCFRecord::missing_genotype(
                 repeat,
                 &repeat_ref_seq,
@@ -181,7 +189,7 @@ fn genotype_repeat(
         for phase in [1, 2] {
             // get the sequences of this phase
             let seq = reads.seqs.get(&phase).unwrap();
-            debug!("{repeat}: Phase {}: Aliging {} reads", phase, seq.len());
+            debug!("{repeat}: Phase {}: Aligning {} reads", phase, seq.len());
             let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
 
             debug!(
@@ -253,6 +261,11 @@ fn parse_cs(
     let re = Regex::new(r"(:\d+)|(\*\w+)|(\+\w+)|(-\w+)").unwrap();
 
     let mut insertions = Vec::new();
+    debug!(
+        "{repeat}: Parsing CS tag for read at {ref_pos}:{cs}",
+        ref_pos = ref_pos,
+        cs = cs
+    );
     let interval_around_junction = flanking as i32 - 15..=flanking as i32 + 15;
 
     for cap in re.captures_iter(&cs) {

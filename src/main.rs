@@ -70,6 +70,10 @@ pub struct Cli {
     /// comma-separated list of haploid (sex) chromosomes
     #[clap(long, value_parser)]
     haploid: Option<String>,
+
+    /// Debug mode
+    #[clap(long, value_parser, default_value_t = false)]
+    debug: bool,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
