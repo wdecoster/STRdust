@@ -332,6 +332,8 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                id: "TEST".to_string(),
+                motifs: "CA".to_string(),
             },
             false,
         );
@@ -372,6 +374,8 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                id: "TEST".to_string(),
+                motifs: "CA".to_string(),
             },
             false,
         );
@@ -411,6 +415,8 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                id: "TEST".to_string(),
+                motifs: "CA".to_string(),
             },
             false,
         );
@@ -453,6 +459,8 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                id: "TEST".to_string(),
+                motifs: "CA".to_string(),
             },
             false,
         );
@@ -493,6 +501,8 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                id: "TEST_RFC1".to_string(),
+                motifs: "CA".to_string(),
             },
             false,
         );
@@ -564,6 +574,8 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                id: "TEST_RFC1".to_string(),
+                motifs: "CA".to_string(),
             },
             false,
         );
