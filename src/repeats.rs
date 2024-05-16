@@ -123,7 +123,6 @@ impl RepeatInterval {
         let chrom = rec.chrom().to_string();
         let start = rec.start().try_into().unwrap();
         let end = rec.end().try_into().unwrap();
-        // TODO: Should be ID
         let mut id = String::new();
         let mut motifs = String::new();
         if let Some(info) = rec.name() {
