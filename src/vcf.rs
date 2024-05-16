@@ -338,7 +338,7 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     );
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
     println!(r#"##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">"#);
-    println!(r#"##FORMAT=<ID=MC,Number=2,Type=Integer,Description="Motif count per allele">"#);
+    println!(r#"##FORMAT=<ID=MC,Number=2,Type=String,Description="Motif count per allele">"#);
     println!(r#"##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Consensus score per allele">"#);
     let name = match sample {
         Some(name) => name,
