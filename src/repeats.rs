@@ -21,7 +21,9 @@ impl RepeatIntervalIterator {
         let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
             .parse()
             .unwrap();
-        let repeat = RepeatInterval::new_interval(chrom, start, end, fasta)
+        let id = String::new();
+        let motifs = String::new();
+        let repeat = RepeatInterval::new_interval(chrom, start, end, fasta, id, motifs)
             .expect("Failed to create repeat interval");
         RepeatIntervalIterator {
             current_index: 0,
@@ -74,6 +76,8 @@ impl Clone for RepeatInterval {
             chrom: self.chrom.clone(),
             start: self.start,
             end: self.end,
+            id: self.id.clone(),
+            motifs: self.motifs.clone(),
         }
     }
 }
@@ -99,6 +103,8 @@ pub struct RepeatInterval {
     pub chrom: String,
     pub start: u32,
     pub end: u32,
+    pub id: String,
+    pub motifs: String,
 }
 
 impl fmt::Display for RepeatInterval {
@@ -117,10 +123,26 @@ impl RepeatInterval {
         let chrom = rec.chrom().to_string();
         let start = rec.start().try_into().unwrap();
         let end = rec.end().try_into().unwrap();
-        RepeatInterval::new_interval(chrom, start, end, fasta)
+        // TODO: Should be ID
+        let mut id = String::new();
+        let mut motifs = String::new();
+        if let Some(info) = rec.name() {
+            let key_value_pairs: Vec<&str> = info.split(';').collect();
+            // Find and extract the value associated with the "ID" key
+            for pair in key_value_pairs {
+                if pair.starts_with("ID=") {
+                    id = pair.trim_start_matches("ID=").to_string();
+                }
+                else if pair.starts_with("MOTIFS=") {
+                    motifs = pair.trim_start_matches("MOTIFS=").to_string();
+                    break;
+                }
+            }
+        }
+        RepeatInterval::new_interval(chrom, start, end, fasta, id, motifs)
     }
 
-    fn new_interval(chrom: String, start: u32, end: u32, fasta: &str) -> Option<Self> {
+    fn new_interval(chrom: String, start: u32, end: u32, fasta: &str, id: String, motifs: String) -> Option<Self> {
         if end < start {
             panic!("End coordinate is smaller than start coordinate for {chrom}:{start}-{end}")
         }
@@ -138,7 +160,7 @@ impl RepeatInterval {
                     .expect("Failed parsing chromosome length from fai file")
                     > end
             {
-                return Some(Self { chrom, start, end });
+                return Some(Self { chrom, start, end, id, motifs});
             }
         }
         // if the chromosome is not in the fai file or the end does not fit the interval, return None
@@ -146,11 +168,13 @@ impl RepeatInterval {
             "Chromosome {chrom} is not in the fasta file or the end coordinate is out of bounds"
         );
     }
-    pub fn new(chrom: &str, start: u32, end: u32) -> Self {
+    pub fn new(chrom: &str, start: u32, end: u32, id: &str, motifs: &str) -> Self {
         Self {
             chrom: chrom.to_string(),
             start,
             end,
+            id: id.to_string(),
+            motifs: motifs.to_string(),
         }
     }
 

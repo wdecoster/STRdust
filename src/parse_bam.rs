@@ -143,6 +143,7 @@ fn test_get_overlapping_reads() {
         chrom: String::from("chr7"),
         start: 154654404,
         end: 154654432,
+        id: "TEST".to_string(),
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
@@ -157,6 +158,7 @@ fn test_get_overlapping_reads_url1() {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
+        id: "TEST".to_string(),
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
@@ -171,6 +173,7 @@ fn test_get_overlapping_reads_url2() {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
+        id: "TEST".to_string(),
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
@@ -185,6 +188,7 @@ fn test_get_overlapping_reads_url3() {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
+        id: "TEST".to_string(),
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
@@ -199,6 +203,7 @@ fn test_get_overlapping_reads_url4() {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
+        id: "TEST".to_string(),
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);

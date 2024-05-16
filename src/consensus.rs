@@ -197,6 +197,7 @@ mod tests {
                 chrom: "chr1".to_string(),
                 start: 1,
                 end: 100,
+                id: "".to_string(),
             },
         );
         println!("Consensus: {}", cons.seq.unwrap());
