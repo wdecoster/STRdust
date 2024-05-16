@@ -94,6 +94,7 @@ impl VCFRecord {
         );
         let mc1 = create_mc(&repeat.motifs, &allele1.seq);
         let mc2 = create_mc(&repeat.motifs, &allele2.seq);
+        println!("{:?} {:?} {:?} {:?} {:?} {:?}", &repeat, &repeat.motifs, &mc1, &mc2, &allele1.seq, &allele2.seq);
         // if the consensus is very similar to the reference the variant is considered ref
         // for this I use a threshold of 5% of the length of the repeat sequence in the reference
         // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
