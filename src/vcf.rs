@@ -309,6 +309,12 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
         println!(r#"##contig=<ID={},length={}>"#, name, length);
     }
     println!(
+        r#"##INFO=<ID=REPID,Number=1,Type=String,Description="Repeat ID">"#
+    );
+    println!(
+        r#"##INFO=<ID=MOTIFS,Number=1,Type=String,Description="Repeat motifs">"#
+    );
+    println!(
         r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the repeat interval">"#
     );
     println!(
