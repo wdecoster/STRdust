@@ -112,10 +112,11 @@ pub fn get_overlapping_reads(
 fn get_phase(record: &bam::Record) -> u8 {
     match record.aux(b"HP") {
         Ok(value) => {
-            if let Aux::U8(v) = value {
-                v
-            } else {
-                panic!("Unexpected type of Aux {value:?}")
+            match value {
+                Aux::U8(v) => v,
+                Aux::U16(v) => u8::try_from(v).expect("Unexpected phase identifier for HP: {v:?}"),
+                Aux::I32(v) => u8::try_from(v).expect("Unexpected phase identifier for HP: {v:?}"),
+                _ => panic!("Unexpected type of Aux {value:?} for HP"),
             }
         }
         Err(_e) => 0,
@@ -128,7 +129,7 @@ fn get_phase_set(record: &bam::Record) -> Option<u32> {
             if let Aux::U32(v) = value {
                 Some(v)
             } else {
-                panic!("Unexpected type of Aux {value:?}")
+                panic!("Unexpected type of Aux {value:?} for PS")
             }
         }
         Err(_e) => None,
@@ -150,49 +151,7 @@ fn test_get_overlapping_reads() {
 }
 
 #[test]
-fn test_get_overlapping_reads_url1() {
-    let bam = String::from("https://s3.amazonaws.com/1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
-    let fasta = String::from("test_data/chr7.fa.gz");
-    let repeat = crate::repeats::RepeatInterval {
-        chrom: String::from("chr20"),
-        start: 154654404,
-        end: 154654432,
-    };
-    let unphased = false;
-    let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
-}
-
-#[test]
-fn test_get_overlapping_reads_url2() {
-    let bam = String::from("s3://1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
-    let fasta = String::from("test_data/chr7.fa.gz");
-    let repeat = crate::repeats::RepeatInterval {
-        chrom: String::from("chr20"),
-        start: 154654404,
-        end: 154654432,
-    };
-    let unphased = false;
-    let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
-}
-
-#[test]
-fn test_get_overlapping_reads_url3() {
-    let bam = String::from("https://s3.amazonaws.com/1000g-ont/FIRST_100_FREEZE/minimap2_2.24_alignment_data/GM18501/GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam");
-    let fasta = String::from("test_data/chr7.fa.gz");
-    let repeat = crate::repeats::RepeatInterval {
-        chrom: String::from("chr20"),
-        start: 154654404,
-        end: 154654432,
-    };
-    let unphased = false;
-    let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
-}
-
-#[test]
-fn test_get_overlapping_reads_url4() {
+fn test_get_overlapping_reads_url() {
     let bam = String::from("https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram");
     let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {

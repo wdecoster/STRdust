@@ -126,6 +126,10 @@ impl RepeatInterval {
         }
 
         let fai = format!("{}.fai", fasta);
+        // check if the fai file exists, give a nice error if not
+        if !std::path::Path::new(&fai).exists() {
+            panic!("Fasta index file not found: {}. Please create it using samtools faidx", fai);
+        }
         // check if the chromosome exists in the fai file
         // and if the end coordinate is within the chromosome length
         for line in std::fs::read_to_string(fai)
