@@ -11,17 +11,18 @@ You may have to change the file permissions to execute it with `chmod +x STRdust
 
 
 
-### Quick start
+### Quick start examples
 
 ```bash
-STRdust -r chr7:154654404-154654432 reference.fa sample.cram
-STRdust --pathogenic reference.fa sample.cram
+STRdust -r chr7:154654404-154654432 reference.fa sample.cram > sample.vcf
+STRdust --pathogenic reference.fa sample.cram | bgzip > sample.vcf.gz
+STRdust -R targets.bed --haploid chrX,chrY reference.fa male_sample.cram | bgzip > repeats.vcf.gz
 ```
 
 The 'test_data' directory contains a small example dataset to test the tool:
 
 ```bash
-STRdust -r chr7:154654404-154654432 test_data/chr7.fa.gz test_data/small-test-phased.bam
+STRdust -r chr7:154654404-154654432 test_data/chr7.fa.gz test_data/small-test-phased.bam > small-test-phased.vcf
 ```
 
 ### All arguments
