@@ -1,6 +1,6 @@
 [package]
 name = "STRdust"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 
 
@@ -12,7 +12,7 @@ env_logger = "0.10.0"
 flate2 = "1.0.24"
 log = "0.4.17"
 rayon = "1.5.3"
-rust-htslib = { version = "0.46.0", features = ["s3", "curl"] }
+rust-htslib = { version = "0.47.0", features = ["s3", "curl"] }
 bio = { git = "https://github.com/lorewar2/rust-bio.git", branch = "reverse_edge_fix" }
 human-sort = "0.2.2"
 minimap2 = { version = "0.1.16", features = ["htslib"] }
