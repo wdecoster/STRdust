@@ -27,7 +27,7 @@ pub struct Cli {
     #[clap(validator=is_file)]
     bam: String,
 
-    /// region string to genotype expansion in
+    /// region string to genotype expansion in (format: chr:start-end)
     #[clap(short, long, value_parser)]
     region: Option<String>,
 
