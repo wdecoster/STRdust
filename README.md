@@ -9,7 +9,13 @@ Tandem repeat genotyper for long reads, returning the repeat length and sequence
 Preferably, for most users, download a ready-to-use binary for your system to add directory on your $PATH from the [releases](https://github.com/wdecoster/STRdust/releases).  
 You may have to change the file permissions to execute it with `chmod +x STRdust`
 
+Alternatively, you can install the tool using cargo:
 
+```bash
+git clone https://github.com/wdecoster/STRdust.git
+cd STRdust
+cargo build --release
+```
 
 ### Quick start examples
 
