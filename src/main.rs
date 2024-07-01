@@ -74,6 +74,10 @@ pub struct Cli {
     /// Debug mode
     #[clap(long, value_parser, default_value_t = false)]
     debug: bool,
+
+    /// Sort output by chrom, start and end
+    #[clap(long, value_parser, default_value_t = false)]
+    sorted: bool,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {

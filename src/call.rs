@@ -25,7 +25,8 @@ pub fn genotype_repeats(args: Cli) {
                 writeln!(handle, "{output}").expect("Failed writing the result.");
             }
         }
-    } else {
+    } else if args.sorted {
+        // output is sorted by chrom, start and end
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
             .build()
@@ -51,6 +52,24 @@ pub fn genotype_repeats(args: Cli) {
         for g in &mut *genotypes_vec {
             writeln!(handle, "{g}").expect("Failed writing the result.");
         }
+    } else {
+        // run in parallel, but output is most probably unsorted
+        // par_bridge does not guarantee that results are returned in order
+        // but writing it out immediately makes for low memory usage
+        // this does not use the BufWriter (as that doesn't work across threads), but writes directly to stdout
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(args.threads)
+            .build()
+            .expect("Failed to create threadpool");
+        let num_intervals = repeats.num_intervals;
+        repeats
+            .par_bridge()
+            .progress_count(num_intervals as u64)
+            .for_each(|repeat| {
+                if let Ok(output) = genotype::genotype_repeat_multithreaded(&repeat, &args) {
+                    println!("{output}");
+                }
+            });
     }
 }
 
