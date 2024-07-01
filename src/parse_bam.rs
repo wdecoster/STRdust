@@ -60,29 +60,9 @@ pub fn get_overlapping_reads(
             || r.reference_start() > repeat.start.into()
             || r.reference_end() < repeat.end.into()
         {
-            debug!(
-                "Skipping read {}",
-                std::str::from_utf8(r.qname()).expect("Could get read identifier")
-            );
             continue;
         }
         if unphased {
-            // for ([read_start, read_stop], [genome_start, genome_stop]) in r.aligned_block_pairs() {
-            //     if repeat.start - genome_start as u32 > 2000 {
-            //         continue;
-            //     } else {
-            //         debug!(
-            //             "Read {} has aligned block pair: read_start: {}, read_stop: {}, genome_start: {}, genome_stop: {}",
-            //             std::str::from_utf8(r.qname()).expect("Could get read identifier"),
-            //             read_start,
-            //             read_stop,
-            //             genome_start,
-            //             genome_stop
-            //         );
-            //         // let seq = r.seq().as_bytes();
-            //         // seqs.get_mut(&0).unwrap().push(&seq[*start..*end]);
-            //     };
-            // }
             // if unphased put reads in phase 0
             seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
         } else {
