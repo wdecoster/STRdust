@@ -1,4 +1,3 @@
-use log::debug;
 use rust_htslib::bam;
 use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
