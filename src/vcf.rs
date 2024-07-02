@@ -106,7 +106,7 @@ impl VCFRecord {
             "."
         } else if levenshtein(&allele2.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
             "0"
-        } else if levenshtein(&allele2.seq, &allele1.seq) < allele1.seq.len() / 20 {
+        } else if allele2.seq == allele1.seq || levenshtein(&allele2.seq, &allele1.seq) < allele1.seq.len() / 20 {
             genotype1
         } else {
             next_alt
