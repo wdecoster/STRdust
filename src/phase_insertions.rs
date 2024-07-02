@@ -45,8 +45,8 @@ pub fn split(
     let mut clusters = vec![];
     // create a vector with candidate haplotype-clusters
     let mut haplotype_clusters = vec![];
-    // clusters have to represent at least 20% of the reads
-    let min_cluster_size = (insertions.len() as f32 / 10.0) as usize;
+    // clusters have to represent at least 10% of the reads, but never less than 1
+    let min_cluster_size = max((insertions.len() as f32 / 10.0) as usize, 1);
     debug!("{repeat}: Minimum cluster size: {}", min_cluster_size);
 
     for (index, step) in dend.steps().iter().enumerate() {

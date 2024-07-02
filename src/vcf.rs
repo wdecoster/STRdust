@@ -184,6 +184,44 @@ impl VCFRecord {
             allele: (".".to_string(), ".".to_string()),
         }
     }
+
+    pub fn single_read(
+        seq: &str,
+        repeat: &crate::repeats::RepeatInterval,
+        repeat_ref_seq: &str,
+        all_insertions: Option<Vec<String>>,
+        ps: Option<u32>,
+        flag: Vec<String>,        
+    ) -> VCFRecord {
+                let somatic_info_field = match all_insertions {
+            Some(somatic_insertions) => {
+                format!(";SEQS={}", somatic_insertions.join(","))
+            }
+            None => "".to_string(),
+        };
+        VCFRecord {
+            chrom: repeat.chrom.clone(),
+            start: repeat.start,
+            end: repeat.end,
+            ref_seq: repeat_ref_seq.to_string(),
+            alt_seq: Some(seq.to_string()),
+            length: ((seq.len() as u32 - (repeat.end - repeat.start)).to_string(), ".".to_string()),
+            full_length: ((seq.len() as u32).to_string(), ".".to_string()),
+            support: ("1".to_string(), ".".to_string()),
+            std_dev: (".".to_string(), ".".to_string()),
+            score: (".".to_string(), ".".to_string()),
+            somatic_info_field,
+            outliers: "".to_string(),
+            ps,
+            flags : if flag.is_empty() {
+                "".to_string()
+            } else {
+                format!("{};", flag.join(";"))
+            },
+            allele: (".".to_string(), ".".to_string()),
+        }
+    
+    }
 }
 
 impl fmt::Display for VCFRecord {

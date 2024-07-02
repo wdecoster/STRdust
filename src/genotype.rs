@@ -145,6 +145,19 @@ fn genotype_repeat(
                 insertions.len().to_string(),
             ));
         }
+        // handle the special case where there is only 1 read for the repeat (but minimal support is 1 so it passes)
+        // no need to make a consensus or phase, just report the single read
+        if insertions.len() == 1 {
+            return Ok(crate::vcf::VCFRecord::single_read(
+                &insertions[0],
+                repeat,
+                &repeat_ref_seq,
+                all_insertions,
+                reads.ps,
+                flags,
+            ));
+        }
+
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
         let phased = crate::phase_insertions::split(&insertions, repeat, args.find_outliers);
         match phased.hap2 {
