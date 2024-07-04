@@ -1,3 +1,4 @@
+use log::warn;
 use rust_htslib::bam;
 use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
@@ -78,9 +79,9 @@ pub fn get_overlapping_reads(
     if seqs.is_empty() {
         // error/warning message depends on whether we are looking for phased reads or not
         if unphased {
-            eprintln!("Cannot genotype {repeat}: no reads found");
+            warn!("Cannot genotype {repeat}: no reads found");
         } else {
-            eprintln!("Cannot genotype {repeat}: no phased reads found");
+            warn!("Cannot genotype {repeat}: no phased reads found. Use --unphased to genotype unphased reads.");
         }
         None
     } else {
