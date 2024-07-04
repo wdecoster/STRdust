@@ -76,6 +76,7 @@ fn genotype_repeat(
     // Create an index for minimap2 alignment to the artificial reference
     let aligner = minimap2::Aligner::builder()
         .map_ont()
+        .with_index_threads(1)
         .with_cigar()
         .with_seq(&repeat_compressed_reference)
         .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));

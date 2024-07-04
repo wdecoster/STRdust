@@ -29,7 +29,7 @@ pub fn genotype_repeats(args: Cli) {
         // output is sorted by chrom, start and end
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
-            .build()
+            .build_global()
             .expect("Failed to create threadpool");
         // genotypes contains the output of the genotyping, a struct instance
         let genotypes = Mutex::new(Vec::new());
@@ -59,7 +59,7 @@ pub fn genotype_repeats(args: Cli) {
         // this does not use the BufWriter (as that doesn't work across threads), but writes directly to stdout
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
-            .build()
+            .build_global()
             .expect("Failed to create threadpool");
         let num_intervals = repeats.num_intervals;
         repeats
