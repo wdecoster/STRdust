@@ -1,4 +1,5 @@
 use bio::io::bed;
+use log::error;
 use rust_htslib::faidx;
 use std::fmt;
 use std::io;
@@ -30,6 +31,11 @@ impl RepeatIntervalIterator {
         }
     }
     pub fn from_bed(region_file: &String, fasta: &str) -> Self {
+        // check if the bed file exists
+        if !std::path::Path::new(region_file).exists() {
+            error!("Bed file does not exist");
+            std::process::exit(1);
+        }
         let mut reader = bed::Reader::from_file(region_file).expect("Problem reading bed file!");
         let mut data = Vec::new();
         for record in reader.records() {
@@ -126,10 +132,6 @@ impl RepeatInterval {
         }
 
         let fai = format!("{}.fai", fasta);
-        // check if the fai file exists, give a nice error if not
-        if !std::path::Path::new(&fai).exists() {
-            panic!("Fasta index file not found: {}. Please create it using samtools faidx", fai);
-        }
         // check if the chromosome exists in the fai file
         // and if the end coordinate is within the chromosome length
         for line in std::fs::read_to_string(fai)

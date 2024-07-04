@@ -6,10 +6,11 @@ use rayon::prelude::*;
 use std::io::Write;
 use std::{io, sync::Mutex};
 
-use crate::{genotype, parse_bam, Cli};
+use crate::{genotype, parse_bam, Cli, utils::check_files_exist};
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
+    check_files_exist(&args);
     let repeats = get_targets(&args);
     crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
     let stdout = io::stdout(); // get the global stdout entity
