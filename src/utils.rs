@@ -30,9 +30,9 @@ pub fn check_files_exist(args: &crate::Cli) {
         std::process::exit(1);
     }
     let index_extension = if args.bam.ends_with(".cram") {
-        ".crai"
+        "crai"
     } else {
-        ".bai"
+        "bai"
     };
     let index = format!("{}.{}", args.bam, index_extension);
     if !Path::new(&index).exists() {
