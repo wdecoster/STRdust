@@ -106,10 +106,10 @@ fn get_phase(record: &bam::Record) -> u8 {
 fn get_phase_set(record: &bam::Record) -> Option<u32> {
     match record.aux(b"PS") {
         Ok(value) => {
-            if let Aux::U32(v) = value {
-                Some(v)
-            } else {
-                panic!("Unexpected type of Aux {value:?} for PS")
+            match value {
+                Aux::U32(v) => Some(v),
+                Aux::I32(v) => Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}")),
+                _ => panic!("Unexpected type of Aux {value:?} for PS"),
             }
         }
         Err(_e) => None,
