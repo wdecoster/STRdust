@@ -34,7 +34,7 @@ pub fn check_files_exist(args: &crate::Cli) {
     } else {
         "bai"
     };
-    let index = format!("{}{}", args.bam, index_extension);
+    let index = format!("{}.{}", args.bam, index_extension);
     if !Path::new(&index).exists() {
         error!("Index file not found: {}", index);
         std::process::exit(1);
