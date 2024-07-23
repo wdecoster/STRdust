@@ -80,6 +80,7 @@ impl Clone for RepeatInterval {
             chrom: self.chrom.clone(),
             start: self.start,
             end: self.end,
+            created: self.created,
         }
     }
 }
@@ -105,6 +106,7 @@ pub struct RepeatInterval {
     pub chrom: String,
     pub start: u32,
     pub end: u32,
+    pub created: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl fmt::Display for RepeatInterval {
@@ -144,7 +146,7 @@ impl RepeatInterval {
                     .expect("Failed parsing chromosome length from fai file")
                     > end
             {
-                return Some(Self { chrom, start, end });
+                return Some(Self { chrom, start, end, created: None });
             }
         }
         // if the chromosome is not in the fai file or the end does not fit the interval, return None
@@ -157,6 +159,7 @@ impl RepeatInterval {
             chrom: chrom.to_string(),
             start,
             end,
+            created: None
         }
     }
 
@@ -200,6 +203,10 @@ impl RepeatInterval {
             return None;
         }
         Some(repeat_ref_sequence)
+    }
+
+    pub fn set_time_stamp(& mut self) {
+        self.created = Some(chrono::Utc::now());
     }
 }
 

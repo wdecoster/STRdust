@@ -1,6 +1,6 @@
 [package]
 name = "STRdust"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2021"
 
 
@@ -28,6 +28,7 @@ petgraph = "0.6.4"
 hts-sys = "2.1.1"
 reqwest = { version = "0.12.5", features = ["blocking", "json"] }
 indicatif = { version = "0.17.1", features = ["rayon"] }
+chrono = "0.4.38"
 
 [dev-dependencies]
 ctor = "*"

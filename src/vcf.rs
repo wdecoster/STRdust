@@ -52,6 +52,7 @@ pub struct VCFRecord {
     pub score: (String, String),
     pub somatic_info_field: String,
     pub outliers: String,
+    pub time_taken: String,
     pub ps: Option<u32>, // phase set identifier
     pub flags: String,
     pub allele: (String, String),
@@ -66,6 +67,7 @@ impl VCFRecord {
         repeat: &crate::repeats::RepeatInterval,
         ps: Option<u32>,
         flag: Vec<String>,
+        args: &crate::Cli,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
         let allele2 = Allele::from_consensus(
@@ -142,6 +144,11 @@ impl VCFRecord {
         } else {
             format!("{};", flag.join(";"))
         };
+        let time_taken = if args.debug {
+            format!(";TIME={}", chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp") )
+        } else {
+            "".to_string()
+        };
         VCFRecord {
             chrom: repeat.chrom.clone(),
             start: repeat.start,
@@ -155,6 +162,7 @@ impl VCFRecord {
             score: (allele1.score, allele2.score),
             somatic_info_field,
             outliers,
+            time_taken,
             ps,
             flags,
             allele: (genotype1.to_string(), genotype2.to_string()),
@@ -165,7 +173,13 @@ impl VCFRecord {
         repeat: &crate::repeats::RepeatInterval,
         repeat_ref_seq: &str,
         support: String,
+        args: &crate::Cli,
     ) -> VCFRecord {
+        let time_taken = if args.debug {
+            format!(";TIME={}", chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp") )
+        } else {
+            "".to_string()
+        };
         VCFRecord {
             chrom: repeat.chrom.clone(),
             start: repeat.start,
@@ -179,6 +193,7 @@ impl VCFRecord {
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
+            time_taken,
             ps: None,
             flags: "".to_string(),
             allele: (".".to_string(), ".".to_string()),
@@ -191,13 +206,19 @@ impl VCFRecord {
         repeat_ref_seq: &str,
         all_insertions: Option<Vec<String>>,
         ps: Option<u32>,
-        flag: Vec<String>,        
+        flag: Vec<String>,
+        args: &crate::Cli,  
     ) -> VCFRecord {
                 let somatic_info_field = match all_insertions {
             Some(somatic_insertions) => {
                 format!(";SEQS={}", somatic_insertions.join(","))
             }
             None => "".to_string(),
+        };
+        let time_taken = if args.debug {
+            format!(";TIME={}", chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp") )
+        } else {
+            "".to_string()
         };
         VCFRecord {
             chrom: repeat.chrom.clone(),
@@ -212,6 +233,7 @@ impl VCFRecord {
             score: (".".to_string(), ".".to_string()),
             somatic_info_field,
             outliers: "".to_string(),
+            time_taken,
             ps,
             flags : if flag.is_empty() {
                 "".to_string()
@@ -234,7 +256,7 @@ impl fmt::Display for VCFRecord {
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{sup1},{sup2}:{score1},{score2}{ps}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}{time_taken}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{sup1},{sup2}:{score1},{score2}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -249,6 +271,7 @@ impl fmt::Display for VCFRecord {
                     sd2 = self.std_dev.1,
                     somatic = self.somatic_info_field,
                     outliers = self.outliers,
+                    time_taken = self.time_taken,
                     genotype1 = self.allele.0,
                     genotype2 = self.allele.1,
                     sup1 = self.support.0,

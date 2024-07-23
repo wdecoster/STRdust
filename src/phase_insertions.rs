@@ -332,6 +332,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                created: None
             },
             false,
         );
@@ -372,6 +373,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                created: None
             },
             false,
         );
@@ -411,6 +413,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                created: None
             },
             false,
         );
@@ -453,6 +456,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                created: None
             },
             false,
         );
@@ -493,6 +497,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                created: None
             },
             false,
         );
@@ -564,6 +569,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
+                created: None
             },
             false,
         );

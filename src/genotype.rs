@@ -7,19 +7,25 @@ use rust_htslib::bam;
 // when running multithreaded, the indexedreader has to be created every time again
 // this is probably expensive
 pub fn genotype_repeat_multithreaded(
-    repeat: &crate::repeats::RepeatInterval,
+    repeat: &mut crate::repeats::RepeatInterval,
     args: &Cli,
 ) -> Result<crate::vcf::VCFRecord, String> {
+    if args.debug {
+        repeat.set_time_stamp()
+    }
     let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
     genotype_repeat(repeat, args, &mut bam)
 }
 
 // when running singlethreaded, the indexedreader is created once and simply passed on
 pub fn genotype_repeat_singlethreaded(
-    repeat: &crate::repeats::RepeatInterval,
+    repeat: &mut crate::repeats::RepeatInterval,
     args: &Cli,
     bam: &mut bam::IndexedReader,
 ) -> Result<crate::vcf::VCFRecord, String> {
+    if args.debug {
+        repeat.set_time_stamp()
+    }
     genotype_repeat(repeat, args, bam)
 }
 
@@ -42,18 +48,19 @@ fn genotype_repeat(
                 repeat,
                 "N",
                 ".".to_string(),
+                args
             ))
         }
     };
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
-    if args.debug {
-        // write the repeat compressed reference to a file
-        use std::fs;
-        let header = format!(">{chrom}:{start}-{end}\n", chrom = repeat.chrom, start = repeat.start, end = repeat.end);
-        let fas = String::from_utf8(repeat_compressed_reference.clone()).expect("Unable to convert repeat compressed reference to string");
-        fs::write("repeat_compressed.fa", header + &fas).expect("Unable to write repeat compressed reference to file");
-    }
+    // if args.debug {
+    //     // write the repeat compressed reference to a file
+    //     use std::fs;
+    //     let header = format!(">{chrom}:{start}-{end}\n", chrom = repeat.chrom, start = repeat.start, end = repeat.end);
+    //     let fas = String::from_utf8(repeat_compressed_reference.clone()).expect("Unable to convert repeat compressed reference to string");
+    //     fs::write("repeat_compressed.fa", header + &fas).expect("Unable to write repeat compressed reference to file");
+    // }
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
@@ -69,6 +76,7 @@ fn genotype_repeat(
                 repeat,
                 &repeat_ref_seq,
                 0.to_string(),
+                args
             ));
         }
     };
@@ -119,6 +127,7 @@ fn genotype_repeat(
                 repeat,
                 &repeat_ref_seq,
                 insertions.len().to_string(),
+                args
             ));
         }
         // there is only one haplotype, haploid, so this gets duplicated for reporting in the VCF module
@@ -144,6 +153,7 @@ fn genotype_repeat(
                 repeat,
                 &repeat_ref_seq,
                 insertions.len().to_string(),
+                args
             ));
         }
         // handle the special case where there is only 1 read for the repeat (but minimal support is 1 so it passes)
@@ -156,6 +166,7 @@ fn genotype_repeat(
                 all_insertions,
                 reads.ps,
                 flags,
+                args
             ));
         }
 
@@ -231,6 +242,7 @@ fn genotype_repeat(
         repeat,
         reads.ps,
         flags,
+        args
     ))
 }
 
@@ -344,6 +356,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
+            created: None
         };
         let flanking = 2000;
         let minlen = 5;
@@ -383,6 +396,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
+            created: None
         };
         let args = Cli {
             bam: String::from("test_data/small-test-phased.bam"),
@@ -412,6 +426,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
+            created: None
         };
         let args = Cli {
             bam: String::from("test_data/small-test-phased.bam"),
@@ -458,6 +473,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
+            created: None
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -487,6 +503,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
+            created: None
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -517,6 +534,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
+            created: None
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);

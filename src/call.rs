@@ -21,8 +21,8 @@ pub fn genotype_repeats(args: Cli) {
         // The indexedreader is created once and passed on to the function
         let num_intervals = repeats.num_intervals;
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
-        for repeat in repeats.progress_count(num_intervals as u64) {
-            if let Ok(output) = genotype::genotype_repeat_singlethreaded(&repeat, &args, &mut bam) {
+        for mut repeat in repeats.progress_count(num_intervals as u64) {
+            if let Ok(output) = genotype::genotype_repeat_singlethreaded(&mut repeat, &args, &mut bam) {
                 writeln!(handle, "{output}").expect("Failed writing the result.");
             }
         }
@@ -39,8 +39,8 @@ pub fn genotype_repeats(args: Cli) {
         repeats
             .par_bridge()
             .progress_count(num_intervals as u64)
-            .for_each(|repeat| {
-                if let Ok(output) = genotype::genotype_repeat_multithreaded(&repeat, &args) {
+            .for_each(|mut repeat| {
+                if let Ok(output) = genotype::genotype_repeat_multithreaded(&mut repeat, &args) {
                     let mut geno = genotypes.lock().expect("Unable to lock genotypes mutex");
                     geno.push(output);
                 } else {
@@ -66,8 +66,8 @@ pub fn genotype_repeats(args: Cli) {
         repeats
             .par_bridge()
             .progress_count(num_intervals as u64)
-            .for_each(|repeat| {
-                if let Ok(output) = genotype::genotype_repeat_multithreaded(&repeat, &args) {
+            .for_each(|mut repeat| {
+                if let Ok(output) = genotype::genotype_repeat_multithreaded(&mut repeat, &args) {
                     println!("{output}");
                 }
             });
