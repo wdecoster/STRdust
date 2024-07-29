@@ -25,7 +25,7 @@ pub fn reader(filename: &str) -> Box<dyn BufRead> {
 }
 
 pub fn check_files_exist(args: &crate::Cli) {
-    if !Path::new(&args.bam).exists() {
+    if !Path::new(&args.bam).exists() && !args.bam.starts_with("s3") && !args.bam.starts_with("https://") {
         error!("Alignment file not found: {}", args.bam);
         std::process::exit(1);
     }
