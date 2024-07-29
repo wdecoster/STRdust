@@ -25,19 +25,26 @@ pub fn reader(filename: &str) -> Box<dyn BufRead> {
 }
 
 pub fn check_files_exist(args: &crate::Cli) {
-    if !Path::new(&args.bam).exists() && !args.bam.starts_with("s3") && !args.bam.starts_with("https://") {
-        error!("Alignment file not found: {}", args.bam);
-        std::process::exit(1);
-    }
-    let index_extension = if args.bam.ends_with(".cram") {
-        "crai"
-    } else {
-        "bai"
-    };
-    let index = format!("{}.{}", args.bam, index_extension);
-    if !Path::new(&index).exists() {
-        error!("Index file not found: {}", index);
-        std::process::exit(1);
+    // check if the input files exist, and if not, exit gracefully
+
+    if !args.bam.starts_with("s3") && !args.bam.starts_with("https://") {
+        // TODO: We don't check for existence of remote files or their indexes
+        // TODO: this could lead to nastier errors later, if the file happens to be unreachable
+        // TODO: so maybe some time this should be properly implemented
+        if !Path::new(&args.bam).exists() {
+            error!("Alignment file not found: {}", args.bam);
+            std::process::exit(1);
+        }
+        let index_extension = if args.bam.ends_with(".cram") {
+            "crai"
+        } else {
+            "bai"
+        };
+        let index = format!("{}.{}", args.bam, index_extension);
+        if !Path::new(&index).exists() {
+            error!("Index file not found: {}", index);
+            std::process::exit(1);
+        }
     }
     if !Path::new(&args.fasta).exists() {
         error!("FASTA file not found: {}", args.fasta);
