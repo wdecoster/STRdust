@@ -89,32 +89,10 @@ impl VCFRecord {
             "Genotyping {repeat}:{repeat_ref_sequence} with {} and {}",
             allele1.seq, allele2.seq,
         );
-        // if the consensus is very similar to the reference the variant is considered ref
-        // for this I use a threshold of 5% of the length of the repeat sequence in the reference
-        // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
-        // not sure if these numbers require further tuning
-        // note that is an integer division, i.e. floor division
-        // the next_alt variable dictates which genotype code the genotype2 can be in the case it is not the same as genotype1
-        // this avoids a 0/2 genotype
-        let (genotype1, next_alt) = if allele1.seq == "." {
-            (".", "1")
-        } else if levenshtein(&allele1.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
-            ("0", "1")
-        } else {
-            ("1", "2")
-        };
+        let (genotype1, genotype2) =
+            determine_genotypes(&repeat_ref_sequence, &allele1.seq, &allele2.seq);
 
-        let genotype2 = if allele2.seq == "." {
-            "."
-        } else if levenshtein(&allele2.seq, &repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
-            "0"
-        } else if allele2.seq == allele1.seq || levenshtein(&allele2.seq, &allele1.seq) < allele1.seq.len() / 20 {
-            genotype1
-        } else {
-            next_alt
-        };
-
-        let alts = match (genotype1, genotype2) {
+        let alts = match (genotype1.as_str(), genotype2.as_str()) {
             ("1", "0") | ("1", ".") | ("1", "1") => allele1.seq, // if both alleles are the same, only report one
             ("0", "1") | (".", "1") => allele2.seq,
             ("1", "2") => allele1.seq + "," + &allele2.seq,
@@ -145,7 +123,10 @@ impl VCFRecord {
             format!("{};", flag.join(";"))
         };
         let time_taken = if args.debug {
-            format!(";TIME={}", chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp") )
+            format!(
+                ";TIME={}",
+                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
+            )
         } else {
             "".to_string()
         };
@@ -176,7 +157,10 @@ impl VCFRecord {
         args: &crate::Cli,
     ) -> VCFRecord {
         let time_taken = if args.debug {
-            format!(";TIME={}", chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp") )
+            format!(
+                ";TIME={}",
+                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
+            )
         } else {
             "".to_string()
         };
@@ -207,16 +191,19 @@ impl VCFRecord {
         all_insertions: Option<Vec<String>>,
         ps: Option<u32>,
         flag: Vec<String>,
-        args: &crate::Cli,  
+        args: &crate::Cli,
     ) -> VCFRecord {
-                let somatic_info_field = match all_insertions {
+        let somatic_info_field = match all_insertions {
             Some(somatic_insertions) => {
                 format!(";SEQS={}", somatic_insertions.join(","))
             }
             None => "".to_string(),
         };
         let time_taken = if args.debug {
-            format!(";TIME={}", chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp") )
+            format!(
+                ";TIME={}",
+                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
+            )
         } else {
             "".to_string()
         };
@@ -226,7 +213,10 @@ impl VCFRecord {
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
             alt_seq: Some(seq.to_string()),
-            length: ((seq.len() as u32 - (repeat.end - repeat.start)).to_string(), ".".to_string()),
+            length: (
+                (seq.len() as u32 - (repeat.end - repeat.start)).to_string(),
+                ".".to_string(),
+            ),
             full_length: ((seq.len() as u32).to_string(), ".".to_string()),
             support: ("1".to_string(), ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
@@ -235,15 +225,87 @@ impl VCFRecord {
             outliers: "".to_string(),
             time_taken,
             ps,
-            flags : if flag.is_empty() {
+            flags: if flag.is_empty() {
                 "".to_string()
             } else {
                 format!("{};", flag.join(";"))
             },
             allele: (".".to_string(), ".".to_string()),
         }
-    
     }
+}
+
+fn length_ratio(seq1: &str, seq2: &str) -> f32 {
+    let length1 = seq1.len();
+    let length2 = seq2.len();
+    length1.min(length2) as f32 / length1.max(length2) as f32
+}
+
+fn determine_genotypes(
+    repeat_ref_sequence: &str,
+    allele1: &str,
+    allele2: &str,
+) -> (String, String) {
+    // if the consensus is very similar to the reference the variant is considered ref
+    // for this I use a threshold of 5% of the length of the repeat sequence in the reference
+    // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
+    // not sure if these numbers require further tuning
+    // note that is an integer division, i.e. floor division
+    // the next_alt variable dictates which genotype code the genotype2 can be in the case it is not the same as genotype1
+    // this avoids a 0/2 genotype
+    // the levenshtein distance should not be calculated if there is a large difference in length between the sequences, as this is computationally expensive and unnecessary
+    // the ratio is used to determine if the sequences are similar enough to be considered the same allele
+    let (genotype1, next_alt) = if allele1 == "." {
+        (".", "1")
+    // if the length ratio is less than 0.9, there is a large difference in length between the sequences
+    // therefore the allele is considered different from the reference
+    } else if length_ratio(allele1, repeat_ref_sequence) < 0.9 {
+        ("1", "2")
+    // if the length ratio is between 0.9 and 1 (with the latter indicating the same length) then we check the edit distance
+    // if the edit distance is less than 5% of the length of the repeat sequence in the reference, the allele is considered the same as the reference
+    } else if repeat_ref_sequence == allele1
+        || levenshtein(allele1, repeat_ref_sequence) < repeat_ref_sequence.len() / 20
+    {
+        ("0", "1")
+    // if the edit distance is larger than the threshold, the allele is considered different from the reference
+    } else {
+        ("1", "2")
+    };
+
+    let genotype2 = if allele2 == "." {
+        "."
+    // first check if the alt alleles are the same. if so, they have the same genotype
+    } else if allele2 == allele1 {
+        genotype1
+    // if the length ratio is less than 0.9, there is a large difference between the sequence and they cannot be the same allele
+    // but then we still have to check if the allele is the same as the reference
+    } else if length_ratio(allele1, allele2) < 0.9 {
+        // if the allele is different from the reference and from the first allele, we pick the next_alt value
+        if length_ratio(allele2, repeat_ref_sequence) < 0.9 {
+            next_alt
+        // if the allele is similar to the reference, we pick the 0 value
+        } else if levenshtein(allele2, repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
+            "0"
+        // if the allele is different from the reference, we pick the next_alt value
+        } else {
+            next_alt
+        }
+    // if the length_ratio of allele1 and allele2 was not less than 0.9, we check the edit distance
+    // if the edit distance is less that 5%, we considered the alleles the same
+    } else if levenshtein(allele2, allele1) < allele1.len() / 20 {
+        genotype1
+    // if the edit distance is larger than the threshold, the allele is compared with the reference
+    } else if length_ratio(allele2, repeat_ref_sequence) < 0.9 {
+        next_alt
+    // if the allele is not too different in length from the reference, we check its edit distance
+    // the threshold is the same as for the first allele, 5% of the length of the repeat sequence in the reference
+    } else if levenshtein(allele2, repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
+        "0"
+    // if the allele is actualy different from the reference, we pick the next_alt value
+    } else {
+        next_alt
+    };
+    (String::from(genotype1), String::from(genotype2))
 }
 
 impl fmt::Display for VCFRecord {
@@ -404,4 +466,74 @@ fn test_write_vcf_header_from_name() {
         "test_data/small-test-phased.bam",
         &Some("test_sample".to_string()),
     );
+}
+
+#[test]
+fn test_determine_genotypes() {
+    let repeat_ref_sequence = "ATCATCATCATC";
+    let allele1 = "ATCATCATCATC";
+    let allele2 = "ATCATCATCATC";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "0");
+    assert_eq!(genotype2, "0");
+}
+
+#[test]
+fn test_determine_genotypes2() {
+    let repeat_ref_sequence = "ATCATCATCATC";
+    let allele1 = "ATCATCATCATC";
+    let allele2 = "ATCATCATCATG";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "0");
+    assert_eq!(genotype2, "1");
+}
+
+#[test]
+fn test_determine_genotypes3() {
+    let repeat_ref_sequence = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
+    let allele1 = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
+    let allele2 = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATG";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "1");
+    assert_eq!(genotype2, "0");
+}
+
+#[test]
+fn test_determine_genotypes4() {
+    let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
+    let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGA";
+    let allele2 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "1");
+    assert_eq!(genotype2, "2");
+}
+
+#[test]
+fn test_determine_genotypes5() {
+    let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
+    let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
+    let allele2 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "1");
+    assert_eq!(genotype2, "1");
+}
+
+#[test]
+fn test_determine_genotypes6() {
+    let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
+    let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
+    let allele2 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGTA";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "1");
+    assert_eq!(genotype2, "1");
+}
+
+#[test]
+fn test_determine_genotypes7() {
+    let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
+    let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
+    let allele2 = ".";
+    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    assert_eq!(genotype1, "1");
+    assert_eq!(genotype2, ".");
 }
