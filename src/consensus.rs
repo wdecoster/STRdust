@@ -99,15 +99,18 @@ pub fn consensus(
         // I empirically determined the following parameters to be suitable,
         // but further testing on other repeats would be good
         // mainly have to make sure the consensus does not get longer than the individual insertions
+        log::info!("Creating consensus for {repeat}");
         let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
         let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
         for seq in seqs_bytes.iter().skip(1) {
             aligner.global(seq).add_to_graph();
         }
+        debug!("Added all sequences to graph");
 
         let consensus = aligner.consensus();
+        debug!("Created consensus");
         let score = aligner.global(&consensus).alignment().score;
-
+        debug!("Calculated score");
         Consensus {
             seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
             support: num_reads,
