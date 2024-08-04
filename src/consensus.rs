@@ -39,6 +39,7 @@ impl fmt::Display for Consensus {
 pub fn consensus(
     seqs: &[String],
     support: usize,
+    consensus_reads: usize,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Consensus {
     if seqs.is_empty() {
@@ -66,36 +67,18 @@ pub fn consensus(
     } else {
         // if there are more than 20 reads, downsample to 20 before taking the consensus
         // for performance and memory reasons
-        let seqs = if num_reads > 20 {
-            debug!("{repeat}: Too many reads, downsampling to 20");
-            seqs.choose_multiple(&mut rand::thread_rng(), 20)
+        let seqs = if num_reads > consensus_reads {
+            debug!("{repeat}: Too many reads, downsampling to {consensus_reads}");
+            seqs.choose_multiple(&mut rand::thread_rng(), consensus_reads)
                 .cloned()
                 .collect::<Vec<&String>>()
         } else {
             seqs
         };
         let mut seqs_bytes = vec![];
-        // code below is for rust-bio, but going back to rust-spoa now to avoid errors
-        // hopefully able to revert back to rust-bio as soon as those errors are patched
         for seq in seqs.iter() {
             seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
         }
-        
-        // let consensus_max_length = seqs.iter().map(|x| x.len()).max().unwrap_or(0);
-        // for seq in seqs.iter() {
-        //     seqs_bytes.push(format!("{seq}\0").bytes().collect::<Vec<u8>>());
-        // }
-        // let consensus = poa_consensus(
-        //     &seqs_bytes,
-        //     consensus_max_length,
-        //     1,   // 0 = local, 1 = global, 2 = gapped
-        //     3,   // match_score,
-        //     -4,  // mismatch_score,
-        //     -12, // gap_open,
-        //     -6,  // gap_extend,
-        // );    
-
-        // code below is again for rust-bio poa
         // I empirically determined the following parameters to be suitable,
         // but further testing on other repeats would be good
         // mainly have to make sure the consensus does not get longer than the individual insertions
@@ -196,6 +179,7 @@ mod tests {
         let cons = consensus(
             &seqs,
             10,
+            20,   
             &crate::repeats::RepeatInterval {
                 chrom: "chr1".to_string(),
                 start: 1,

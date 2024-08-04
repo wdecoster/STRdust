@@ -78,6 +78,10 @@ pub struct Cli {
     /// Sort output by chrom, start and end
     #[clap(long, value_parser, default_value_t = false)]
     sorted: bool,
+
+    /// Max number of reads to use to generate consensus alt sequence
+    #[clap(long, value_parser, default_value_t = 20)]
+    consensus_reads: usize,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {

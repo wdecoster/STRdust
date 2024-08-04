@@ -48,7 +48,7 @@ fn genotype_repeat(
                 repeat,
                 "N",
                 ".".to_string(),
-                args
+                args,
             ))
         }
     };
@@ -76,7 +76,7 @@ fn genotype_repeat(
                 repeat,
                 &repeat_ref_seq,
                 0.to_string(),
-                args
+                args,
             ));
         }
     };
@@ -127,12 +127,12 @@ fn genotype_repeat(
                 repeat,
                 &repeat_ref_seq,
                 insertions.len().to_string(),
-                args
+                args,
             ));
         }
         // there is only one haplotype, haploid, so this gets duplicated for reporting in the VCF module
         // Ideally vcf.rs would explicitly handle haploid chromosomes
-        let consensus = crate::consensus::consensus(&insertions, args.support, repeat);
+        let consensus = crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
         consenses.push(consensus.clone());
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
@@ -148,12 +148,15 @@ fn genotype_repeat(
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
-            debug!("{repeat}: Not enough insertions found: {}", insertions.len());
+            debug!(
+                "{repeat}: Not enough insertions found: {}",
+                insertions.len()
+            );
             return Ok(crate::vcf::VCFRecord::missing_genotype(
                 repeat,
                 &repeat_ref_seq,
                 insertions.len().to_string(),
-                args
+                args,
             ));
         }
         // handle the special case where there is only 1 read for the repeat (but minimal support is 1 so it passes)
@@ -166,7 +169,7 @@ fn genotype_repeat(
                 all_insertions,
                 reads.ps,
                 flags,
-                args
+                args,
             ));
         }
 
@@ -177,9 +180,10 @@ fn genotype_repeat(
                 consenses.push(crate::consensus::consensus(
                     &phased.hap1,
                     args.support,
+                    args.consensus_reads,
                     repeat,
                 ));
-                consenses.push(crate::consensus::consensus(&phase2, args.support, repeat));
+                consenses.push(crate::consensus::consensus(&phase2, args.support, args.consensus_reads, repeat));
                 // store all inserted sequences for identifying somatic variation
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.extend([phased.hap1.join(":"), phase2.join(":")]);
@@ -189,7 +193,7 @@ fn genotype_repeat(
                 // there was only one haplotype, homozygous, so this gets duplicated for reporting
                 // not sure if cloning is the best approach here, but this is only the case for unphased data
                 // and therefore is typically for small datasets obtained through capture methods
-                let consensus = crate::consensus::consensus(&phased.hap1, args.support, repeat);
+                let consensus = crate::consensus::consensus(&phased.hap1, args.support, args.consensus_reads, repeat);
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
                 // store all inserted sequences for identifying somatic variation
@@ -225,6 +229,7 @@ fn genotype_repeat(
             consenses.push(crate::consensus::consensus(
                 &insertions,
                 args.support,
+                args.consensus_reads,
                 repeat,
             ));
 
@@ -242,7 +247,7 @@ fn genotype_repeat(
         repeat,
         reads.ps,
         flags,
-        args
+        args,
     ))
 }
 
@@ -356,7 +361,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
-            created: None
+            created: None,
         };
         let flanking = 2000;
         let minlen = 5;
@@ -396,7 +401,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
-            created: None
+            created: None,
         };
         let args = Cli {
             bam: String::from("test_data/small-test-phased.bam"),
@@ -414,6 +419,7 @@ mod tests {
             haploid: None,
             debug: false,
             sorted: false,
+            consensus_reads: 20,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -426,7 +432,7 @@ mod tests {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
-            created: None
+            created: None,
         };
         let args = Cli {
             bam: String::from("test_data/small-test-phased.bam"),
@@ -443,7 +449,8 @@ mod tests {
             sample: None,
             haploid: Some(String::from("chr7")),
             debug: false,
-            sorted: false
+            sorted: false,
+            consensus_reads: 20,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -467,13 +474,14 @@ mod tests {
             sample: None,
             haploid: None,
             debug: false,
-            sorted: false
+            sorted: false,
+            consensus_reads: 20,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
-            created: None
+            created: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -497,13 +505,14 @@ mod tests {
             sample: None,
             haploid: None,
             debug: false,
-            sorted: false
+            sorted: false,
+            consensus_reads: 20,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
-            created: None
+            created: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -527,14 +536,15 @@ mod tests {
             sample: None,
             haploid: None,
             debug: false,
-            sorted: false
+            sorted: false,
+            consensus_reads: 20
         };
 
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
             start: 154654404,
             end: 154654432,
-            created: None
+            created: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
