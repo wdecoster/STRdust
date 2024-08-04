@@ -65,20 +65,17 @@ pub fn consensus(
             score: -1,
         }
     } else {
-        // if there are more than 20 reads, downsample to 20 before taking the consensus
+        // if there are more than <consensus_reads> reads, downsample before taking the consensus
         // for performance and memory reasons
-        let seqs = if num_reads > consensus_reads {
+        let seqs_bytes = if num_reads > consensus_reads {
             debug!("{repeat}: Too many reads, downsampling to {consensus_reads}");
             seqs.choose_multiple(&mut rand::thread_rng(), consensus_reads)
-                .cloned()
-                .collect::<Vec<&String>>()
+            .cloned()
+            .map(|seq| seq.bytes().collect::<Vec<u8>>())
+            .collect::<Vec<Vec<u8>>>()
         } else {
-            seqs
+            seqs.iter().map(|seq| seq.bytes().collect::<Vec<u8>>()).collect::<Vec<Vec<u8>>>()
         };
-        let mut seqs_bytes = vec![];
-        for seq in seqs.iter() {
-            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
-        }
         // I empirically determined the following parameters to be suitable,
         // but further testing on other repeats would be good
         // mainly have to make sure the consensus does not get longer than the individual insertions

@@ -52,11 +52,17 @@ OPTIONS:
         --sample <SAMPLE>              Sample name to use in VCF header, if not provided, the bam file name is used
         --somatic                      Print information on somatic variability
         --unphased                     Reads are not phased, will use hierarchical clustering to phase expansions
+        --consensus-reads              Maximum number of reads to use to build the consensus sequence [default: 20]
         --find-outliers                Identify poorly supported outlier expansions (only with --unphased)
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
     -h, --help                         Print help information
     -V, --version                      Print version information
 ```
+
+## Notes
+
+- Lowering the number of consensus reads may lead to lesser accurate alternative allele sequences (selecting randomly from the reads), but may greatly improve speed. Note that in the case of somatic length variation, a small number of randomly selected reads may lead to a bias and not be representative of the true repeat length.
+- Genotyping known pathogenic repeats with the `--pathogenic` flag will return a VCF with the pathogenic STRs from STRchive, but currently only for the GRCh38 reference.
 
 ## Output format
 
