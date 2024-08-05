@@ -64,17 +64,16 @@ pub fn consensus(
             std_dev,
             score: -1,
         }
-    } else {
-        if consensus_reads == 1 {
+    } else if consensus_reads == 1 {
             // if only on read should be used to generate the consensus, the consensus is a randomly selected read
             let seq = seqs.choose(&mut rand::thread_rng()).unwrap();
-            return Consensus {
+            Consensus {
                 seq: Some(seq.to_string()),
                 support: num_reads,
                 std_dev,
                 score: 0,
             }
-        }
+    } else {
         // if there are more than <consensus_reads> reads, downsample before taking the consensus
         // for performance and memory reasons
         let seqs_bytes = if num_reads > consensus_reads {
@@ -107,12 +106,6 @@ pub fn consensus(
             std_dev,
             score,
         }
-        // Consensus {
-        //     seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
-        //     support: num_reads,
-        //     std_dev,
-        //     score: 0,
-        // }
     }
 }
 
