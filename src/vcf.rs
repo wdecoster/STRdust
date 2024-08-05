@@ -6,6 +6,8 @@ use rust_htslib::faidx;
 use std::cmp::Ordering;
 use std::fmt;
 use std::io::Read;
+use crate::Cli;
+
 
 pub struct Allele {
     pub length: String, // length of the consensus sequence minus the length of the repeat sequence
@@ -67,7 +69,7 @@ impl VCFRecord {
         repeat: &crate::repeats::RepeatInterval,
         ps: Option<u32>,
         flag: Vec<String>,
-        args: &crate::Cli,
+        args: &Cli,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
         let allele2 = Allele::from_consensus(
@@ -381,10 +383,10 @@ impl PartialEq for VCFRecord {
 
 impl Eq for VCFRecord {}
 
-pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
+pub fn write_vcf_header(args: &Cli) {
     println!(r#"##fileformat=VCFv4.2"#);
     // get absolute path to fasta file
-    let path = std::fs::canonicalize(fasta)
+    let path = std::fs::canonicalize(&args.fasta)
         .unwrap_or_else(|err| panic!("Failed getting absolute path to fasta: {err}"));
     println!(
         r#"##reference={}"#,
@@ -393,11 +395,16 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     // get the version of this crate
     let version = env!("CARGO_PKG_VERSION");
     println!(r#"##source=STRdust v{}"#, version);
+    // write all arguments to the header
+    println!(
+        r#"##command=STRdust {}"#,
+        std::env::args().collect::<Vec<String>>().join(" ")
+    );
     // call faidx to make sure the fasta index exists, we'll need this anyway when genotyping
     let _ =
-        faidx::Reader::from_path(fasta).unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
-
-    let mut fai_file = std::fs::File::open(format!("{fasta}.fai")).expect("Can't open .fai file");
+        faidx::Reader::from_path(&args.fasta).unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
+    
+    let mut fai_file = std::fs::File::open(format!("{0}.fai", args.fasta)).expect("Can't open .fai file");
     // parse the fasta index file
     let mut buf = String::new();
     fai_file
@@ -424,6 +431,9 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     println!(
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
     );
+    if args.debug {
+        println!(r#"##INFO=<ID=TIME,Number=1,Type=String,Description="Time taken to genotype the repeat">"#);
+    }
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(
         r#"##FORMAT=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases relative to reference">"#
@@ -434,11 +444,11 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
     println!(r#"##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">"#);
     println!(r#"##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Consensus score per allele">"#);
-    let name = match sample {
+    let name = match &args.sample {
         Some(name) => name,
         None => {
             // use basename of bam and remove file extension
-            let name = std::path::Path::new(&bam)
+            let name = std::path::Path::new(&args.bam)
                 .file_stem()
                 .unwrap()
                 .to_str()
@@ -452,20 +462,48 @@ pub fn write_vcf_header(fasta: &str, bam: &str, sample: &Option<String>) {
 #[cfg(test)]
 #[test]
 fn test_write_vcf_header_from_bam() {
-    write_vcf_header(
-        "test_data/chr7.fa.gz",
-        "test_data/small-test-phased.bam",
-        &None,
-    );
+    let args = Cli {
+            bam: String::from("test_data/small-test-phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            pathogenic: false,
+            minlen: 5,
+            support: 1,
+            somatic: false,
+            unphased: true,
+            find_outliers: false,
+            threads: 1,
+            sample: None,
+            haploid: Some(String::from("chr7")),
+            debug: false,
+            sorted: false,
+            consensus_reads: 20,
+        };
+    write_vcf_header(&args);
 }
 
 #[test]
 fn test_write_vcf_header_from_name() {
-    write_vcf_header(
-        "test_data/chr7.fa.gz",
-        "test_data/small-test-phased.bam",
-        &Some("test_sample".to_string()),
-    );
+    let args = Cli {
+            bam: String::from("test_data/small-test-phased.bam"),
+            fasta: String::from("test_data/chr7.fa.gz"),
+            region: None,
+            region_file: None,
+            pathogenic: false,
+            minlen: 5,
+            support: 1,
+            somatic: false,
+            unphased: true,
+            find_outliers: false,
+            threads: 1,
+            sample: Some("test_sample".to_string()),
+            haploid: Some(String::from("chr7")),
+            debug: false,
+            sorted: false,
+            consensus_reads: 20,
+        };
+    write_vcf_header(&args);
 }
 
 #[test]

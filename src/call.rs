@@ -12,7 +12,7 @@ pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
     check_files_exist(&args);
     let repeats = get_targets(&args);
-    crate::vcf::write_vcf_header(&args.fasta, &args.bam, &args.sample);
+    crate::vcf::write_vcf_header(&args);
     let stdout = io::stdout(); // get the global stdout entity
     let mut handle = io::BufWriter::new(stdout); // wrap that handle in a buffer
     if args.threads == 1 {
