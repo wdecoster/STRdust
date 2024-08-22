@@ -243,7 +243,7 @@ fn find_roots(
 fn find_cluster_members(
     cluster: &usize,
     cluster_to_subclusters: &HashMap<usize, (usize, usize)>,
-    insertions: &Vec<String>,
+    insertions: &[String],
 ) -> Vec<String> {
     let mut search_cluster = vec![*cluster];
     let mut insertions_of_this_cluster = vec![];

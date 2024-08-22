@@ -6,6 +6,7 @@ use rust_htslib::bam::Read;
 use std::collections::HashMap;
 use std::env;
 use url::Url;
+use rand::seq::SliceRandom;
 
 pub struct Reads {
     // could consider not to use a hashmap here and use an attribute per phase
@@ -42,6 +43,7 @@ pub fn get_overlapping_reads(
     bam: &mut bam::IndexedReader,
     repeat: &crate::repeats::RepeatInterval,
     unphased: bool,
+    max_number_reads: usize
 ) -> Option<Reads> {
     let tid = bam
         .header()
@@ -85,7 +87,26 @@ pub fn get_overlapping_reads(
         }
         None
     } else {
-        Some(Reads { seqs, ps })
+        // if more than <max_number_reads> spanning reads are found in seqs, randomly select just <max_number_reads> items from the vector
+        // if unphased, just select <max_number_reads> reads from phase 0
+        // if phased, select <max_number_reads>/2 reads from each phase
+        let mut rng = rand::thread_rng();
+        let mut seqs_filtered = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
+        let max_reads_per_phase = HashMap::from([(0, max_number_reads), (1, max_number_reads/2), (2, max_number_reads/2)]);
+        for (phase, seqs_phase) in seqs.iter() {
+            let n_reads = seqs_phase.len();
+            let n_reads_to_select = if n_reads > max_reads_per_phase[&phase] {
+                max_reads_per_phase[&phase]
+            } else {
+                n_reads
+            };
+            let selected_reads = seqs_phase.choose_multiple(&mut rng, n_reads_to_select);
+            for read in selected_reads {
+                seqs_filtered.get_mut(phase).unwrap().push(read.to_vec());
+            }
+        }
+
+        Some(Reads { seqs: seqs_filtered, ps })
     }
 }
 
@@ -128,7 +149,7 @@ fn test_get_overlapping_reads() {
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60);
 }
 
 #[test]
@@ -143,7 +164,7 @@ fn test_get_overlapping_reads_url() {
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60);
 }
 
 #[test]

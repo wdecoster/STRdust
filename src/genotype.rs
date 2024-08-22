@@ -68,7 +68,7 @@ fn genotype_repeat(
         && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
         || args.unphased;
 
-    let reads = match crate::parse_bam::get_overlapping_reads(bam, repeat, unphased) {
+    let reads = match crate::parse_bam::get_overlapping_reads(bam, repeat, unphased, args.max_number_reads) {
         Some(seqs) => seqs,
         None => {
             // Return a missing genotype if no (phased) reads overlap the repeat
@@ -369,7 +369,7 @@ mod tests {
         let unphased = false;
         let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
         let mut bam = parse_bam::create_bam_reader(&bam, &fasta);
-        let binding = crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased).unwrap();
+        let binding = crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased, 60).unwrap();
         let read = binding
             .seqs
             .get(&1)
@@ -420,6 +420,7 @@ mod tests {
             debug: false,
             sorted: false,
             consensus_reads: 20,
+            max_number_reads: 60
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -451,6 +452,7 @@ mod tests {
             debug: false,
             sorted: false,
             consensus_reads: 20,
+            max_number_reads: 60
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -476,6 +478,7 @@ mod tests {
             debug: false,
             sorted: false,
             consensus_reads: 20,
+            max_number_reads: 60
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -507,6 +510,7 @@ mod tests {
             debug: false,
             sorted: false,
             consensus_reads: 20,
+            max_number_reads: 60
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -537,7 +541,8 @@ mod tests {
             haploid: None,
             debug: false,
             sorted: false,
-            consensus_reads: 20
+            consensus_reads: 20,
+            max_number_reads: 60,
         };
 
         let repeat = crate::repeats::RepeatInterval {

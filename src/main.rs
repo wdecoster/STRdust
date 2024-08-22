@@ -82,6 +82,10 @@ pub struct Cli {
     /// Max number of reads to use to generate consensus alt sequence
     #[clap(long, value_parser, default_value_t = 20)]
     consensus_reads: usize,
+
+    // Max number of reads to extract per locus from the bam file for genotyping
+    #[clap(long, value_parser, default_value_t = 60)]
+    max_number_reads: usize,
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
