@@ -179,17 +179,13 @@ impl RepeatInterval {
                 (self.end + flanking - 2) as usize,
             )
             .expect("Failed to extract fas_right sequence from fasta for {chrom}:{start}-{end}");
-
-        let newref = [fas_left, fas_right].concat();
-        unsafe { libc::free(fas_left.as_ptr() as *mut std::ffi::c_void) }; // Free up memory (https://github.com/rust-bio/rust-htslib/issues/401#issuecomment-1704290171)
-        unsafe { libc::free(fas_right.as_ptr() as *mut std::ffi::c_void) }; // Free up memory
-        newref
+        [fas_left, fas_right].concat()
     }
 
     pub fn reference_repeat_sequence(&self, fasta: &String) -> Option<String> {
         let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
         let repeat_ref_sequence = std::str::from_utf8(
-            fas.fetch_seq(&self.chrom, self.start as usize - 1, self.end as usize)
+            &fas.fetch_seq(&self.chrom, self.start as usize - 1, self.end as usize)
                 .expect("Failed to extract repeat sequence from fasta for {chrom}:{start}-{end}"),
         )
         .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")

@@ -54,13 +54,6 @@ fn genotype_repeat(
     };
 
     let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&args.fasta, flanking);
-    // if args.debug {
-    //     // write the repeat compressed reference to a file
-    //     use std::fs;
-    //     let header = format!(">{chrom}:{start}-{end}\n", chrom = repeat.chrom, start = repeat.start, end = repeat.end);
-    //     let fas = String::from_utf8(repeat_compressed_reference.clone()).expect("Unable to convert repeat compressed reference to string");
-    //     fs::write("repeat_compressed.fa", header + &fas).expect("Unable to write repeat compressed reference to file");
-    // }
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
@@ -113,7 +106,7 @@ fn genotype_repeat(
             .collect::<Vec<&str>>()
             .contains(&repeat.chrom.as_str())
     {
-        // if the chromosome is haploid, all reads are put in phase 0
+        // if the chromosome is haploid, all reads were put in phase 0
         let seq = reads.seqs.get(&0).unwrap();
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
@@ -254,7 +247,7 @@ fn genotype_repeat(
 // may adapt the function below to allow for multiple alignment methods later
 fn find_insertions(
     seq: &Vec<Vec<u8>>,
-    aligner: &Aligner,
+    aligner: &Aligner<Built>,
     minlen: usize,
     flanking: u32,
     repeat: &crate::repeats::RepeatInterval,
@@ -263,7 +256,7 @@ fn find_insertions(
 
     // align the reads to the new repeat-compressed reference
     for s in seq {
-        let mapping = aligner.map(s.as_slice(), true, false, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
+        let mapping = aligner.map(s.as_slice(), true, false, None, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
         for read in mapping {
             if let Some(s) = parse_cs(read, minlen, flanking, repeat) {
                 // slice out inserted sequences from the CS tag
@@ -382,7 +375,7 @@ mod tests {
             .with_cigar()
             .with_seq(&repeat_compressed_reference)
             .expect("Unable to build index");
-        let mapping = aligner.map(read.as_slice(), true, false, None, None).unwrap_or_else(|_| panic!("Unable to align read with seq {read:?} to repeat-compressed reference for {repeat}", read=read.to_ascii_uppercase()));
+        let mapping = aligner.map(read.as_slice(), true, false, None, None, None).unwrap_or_else(|_| panic!("Unable to align read with seq {read:?} to repeat-compressed reference for {repeat}", read=read.to_ascii_uppercase()));
 
         let _insertion = parse_cs(
             mapping

@@ -96,7 +96,7 @@ pub fn get_overlapping_reads(
         for (phase, seqs_phase) in seqs.iter() {
             let n_reads = seqs_phase.len();
             let n_reads_to_select = if n_reads > max_reads_per_phase[&phase] {
-                max_reads_per_phase[&phase]
+                max_reads_per_phase[phase]
             } else {
                 n_reads
             };
