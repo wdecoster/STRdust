@@ -13,7 +13,7 @@ flate2 = "1.0.35"
 log = "0.4.25"
 rayon = "1.5.3"
 rust-htslib = { version = "0.49.0", features = ["s3", "curl"] }
-bio = { git = "https://github.com/lorewar2/rust-bio.git", branch = "reverse_edge_fix" }
+bio = "2.0.3"
 human-sort = "0.2.2"
 minimap2 = { version = "0.1.20", features = ["htslib"] }
 kodama = "0.3.0"
