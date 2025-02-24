@@ -53,7 +53,7 @@ impl RepeatIntervalIterator {
     }
 
     pub fn pathogenic(fasta: &str) -> Self {
-        let url = "https://raw.githubusercontent.com/hdashnow/STRchive/main/data/hg38.STRchive-disease-loci.TRGT.bed";
+        let url = "https://github.com/dashnowlab/STRchive/raw/refs/heads/main/data/STRchive-disease-loci.hg38.TRGT.bed";
         let resp = reqwest::blocking::get(url).expect("request to STRchive failed");
         let body = resp.text().expect("body invalid");
         let mut reader = io::BufReader::new(body.as_bytes());
