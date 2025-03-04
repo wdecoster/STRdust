@@ -6,7 +6,7 @@ use rust_htslib::bam::Read;
 use std::collections::HashMap;
 use std::env;
 use url::Url;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 
 pub struct Reads {
     // could consider not to use a hashmap here and use an attribute per phase
@@ -90,12 +90,12 @@ pub fn get_overlapping_reads(
         // if more than <max_number_reads> spanning reads are found in seqs, randomly select just <max_number_reads> items from the vector
         // if unphased, just select <max_number_reads> reads from phase 0
         // if phased, select <max_number_reads>/2 reads from each phase
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut seqs_filtered = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
         let max_reads_per_phase = HashMap::from([(0, max_number_reads), (1, max_number_reads/2), (2, max_number_reads/2)]);
         for (phase, seqs_phase) in seqs.iter() {
             let n_reads = seqs_phase.len();
-            let n_reads_to_select = if n_reads > max_reads_per_phase[&phase] {
+            let n_reads_to_select = if n_reads > max_reads_per_phase[phase] {
                 max_reads_per_phase[phase]
             } else {
                 n_reads

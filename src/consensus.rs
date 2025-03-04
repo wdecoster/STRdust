@@ -1,8 +1,7 @@
 use std::fmt;
 use bio::alignment::{pairwise::Scoring, poa::Aligner};
 use log::debug;
-use rand::seq::SliceRandom;
-
+use rand::seq::IteratorRandom;
 
 #[derive(Clone)]
 pub struct Consensus {
@@ -66,7 +65,7 @@ pub fn consensus(
         }
     } else if consensus_reads == 1 {
             // if only on read should be used to generate the consensus, the consensus is a randomly selected read
-            let seq = seqs.choose(&mut rand::thread_rng()).unwrap();
+            let seq = seqs.into_iter().choose(&mut rand::rng()).unwrap();
             Consensus {
                 seq: Some(seq.to_string()),
                 support: num_reads,
@@ -78,8 +77,8 @@ pub fn consensus(
         // for performance and memory reasons
         let seqs_bytes = if num_reads > consensus_reads {
             debug!("{repeat}: Too many reads, downsampling to {consensus_reads}");
-            seqs.choose_multiple(&mut rand::thread_rng(), consensus_reads)
-            .cloned()
+            seqs.into_iter().choose_multiple(&mut rand::rng(), consensus_reads)
+            .into_iter().cloned()
             .map(|seq| seq.bytes().collect::<Vec<u8>>())
             .collect::<Vec<Vec<u8>>>()
         } else {

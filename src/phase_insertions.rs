@@ -324,7 +324,7 @@ mod tests {
         ];
         // shuffle the insertions in a random order
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         insertions.shuffle(&mut rng);
         let splitseqs = split(
             &insertions,
@@ -365,7 +365,7 @@ mod tests {
         ];
         // shuffle the insertions in a random order
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         insertions.shuffle(&mut rng);
         let splitseqs = split(
             &insertions,
@@ -405,7 +405,7 @@ mod tests {
         ];
         // shuffle the insertions in a random order
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         insertions.shuffle(&mut rng);
         let splitseqs = split(
             &insertions,
@@ -448,7 +448,7 @@ mod tests {
         ];
         // shuffle the insertions in a random order
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         insertions.shuffle(&mut rng);
         let splitseqs = split(
             &insertions,
@@ -489,7 +489,7 @@ mod tests {
         ];
         // shuffle the insertions in a random order
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         insertions.shuffle(&mut rng);
         let splitseqs = split(
             &insertions,
@@ -561,7 +561,7 @@ mod tests {
         ];
         // shuffle the insertions in a random order
         use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         insertions.shuffle(&mut rng);
         let splitseqs = split(
             &insertions,
