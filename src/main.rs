@@ -23,11 +23,11 @@ pub struct Cli {
     #[clap(validator=is_file)]
     fasta: String,
 
-    /// bam file to call STRs in
+    /// BAM or CRAM file to call STRs in
     #[clap(validator=is_file)]
     bam: String,
 
-    /// region string to genotype expansion in (format: chr:start-end)
+    /// Region string to genotype expansion in (format: chr:start-end)
     #[clap(short, long, value_parser)]
     region: Option<String>,
 
