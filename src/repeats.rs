@@ -14,22 +14,57 @@ pub struct RepeatIntervalIterator {
 impl RepeatIntervalIterator {
     // parse a region string
     pub fn from_string(reg: &str, fasta: &str) -> Self {
-        let chrom = reg.split(':').collect::<Vec<&str>>()[0].to_string();
-        let interval = reg.split(':').collect::<Vec<&str>>()[1];
-        let start: u32 = interval.split('-').collect::<Vec<&str>>()[0]
-            .parse()
-            .unwrap();
-        let end: u32 = interval.split('-').collect::<Vec<&str>>()[1]
-            .parse()
-            .unwrap();
-        let repeat = RepeatInterval::new_interval(chrom, start, end, fasta)
-            .expect("Failed to create repeat interval");
+        // Split by colon first to get chromosome
+        let parts: Vec<&str> = reg.split(':').collect();
+        if parts.len() != 2 {
+            error!("Invalid region format: '{}'. Expected format is 'chr:start-end'", reg);
+            std::process::exit(1);
+        }
+        
+        let chrom = parts[0].to_string();
+        let interval = parts[1];
+        
+        // Split interval by hyphen to get start and end
+        let coords: Vec<&str> = interval.split('-').collect();
+        if coords.len() != 2 {
+            error!("Invalid interval format: '{}'. Expected format is 'chr:start-end'", interval);
+            error!("Example of a valid region: 'chr15:34419425-34419450'");
+            std::process::exit(1);
+        }
+        
+        // Parse start and end coordinates with error handling
+        let start: u32 = match coords[0].parse() {
+            Ok(val) => val,
+            Err(_) => {
+                error!("Could not parse start coordinate '{}' as a number", coords[0]);
+                std::process::exit(1);
+            }
+        };
+        
+        let end: u32 = match coords[1].parse() {
+            Ok(val) => val,
+            Err(_) => {
+                error!("Could not parse end coordinate '{}' as a number", coords[1]);
+                std::process::exit(1);
+            }
+        };
+        
+        // Create the repeat interval with validation
+        let repeat = match RepeatInterval::new_interval(chrom, start, end, fasta) {
+            Some(interval) => interval,
+            None => {
+                error!("Failed to create repeat interval for region: '{}'", reg);
+                std::process::exit(1);
+            }
+        };
+        
         RepeatIntervalIterator {
             current_index: 0,
             data: vec![repeat],
             num_intervals: 1,
         }
     }
+
     pub fn from_bed(region_file: &String, fasta: &str) -> Self {
         // check if the bed file exists
         if !std::path::Path::new(region_file).exists() {
