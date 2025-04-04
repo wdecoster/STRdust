@@ -14,11 +14,43 @@ pub struct Reads {
     pub ps: Option<u32>,
 }
 
+/// Sets up the CURL_CA_BUNDLE environment variable for HTTPS/S3 access
+/// Tries to use a CA bundle from standard locations, with appropriate fallbacks
+fn setup_ssl_certificates() {
+    // Only configure if not already set by the user
+    if env::var("CURL_CA_BUNDLE").is_ok() {
+        return;
+    }
+    
+    // Common CA bundle locations across different systems
+    let possible_paths = vec![
+        "/etc/ssl/certs/ca-certificates.crt",     // Debian/Ubuntu
+        "/etc/pki/tls/certs/ca-bundle.crt",       // RHEL/CentOS/Amazon Linux
+        "/etc/ssl/ca-bundle.pem",                 // SUSE
+        "/usr/local/share/certs/ca-root-nss.crt", // FreeBSD
+        "/usr/local/etc/openssl/cert.pem",        // macOS Homebrew
+        "/etc/ssl/cert.pem"                       // macOS/OpenBSD
+    ];
+    
+    // Try each path in order
+    for path in possible_paths {
+        if std::path::Path::new(path).exists() {
+            env::set_var("CURL_CA_BUNDLE", path);
+            return;
+        }
+    }
+    
+    // None of the paths exist, warn the user
+    warn!(
+        "Could not find a valid CA certificate bundle for HTTPS/S3 access. \
+        HTTPS/S3 connections may fail. Set the CURL_CA_BUNDLE environment \
+        variable to the path of your system's CA certificate bundle."
+    );
+}
+
 pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
     let mut bam = if bamf.starts_with("s3") || bamf.starts_with("https://") {
-        if env::var("CURL_CA_BUNDLE").is_err() {
-            env::set_var("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt");
-        }
+        setup_ssl_certificates();
         bam::IndexedReader::from_url(&Url::parse(bamf).expect("Failed to parse URL"))
             .unwrap_or_else(|err| panic!("Error opening remote BAM: {err}"))
     } else {

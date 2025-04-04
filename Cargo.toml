@@ -1,6 +1,6 @@
 [package]
 name = "STRdust"
-version = "0.11.3"
+version = "0.11.4"
 edition = "2021"
 
 
@@ -8,9 +8,9 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "3.2.6", features = ["derive"] }
-env_logger = "0.11.7"
-flate2 = "1.1.0"
-log = "0.4.26"
+env_logger = "0.11.8"
+flate2 = "1.1.1"
+log = "0.4.27"
 rayon = "1.5.3"
 rust-htslib = { version = "0.49.0", features = ["s3", "curl"] }
 bio = "2.2.0"
@@ -26,7 +26,7 @@ libz-sys = "1.1.21"
 libc = "0.2.171"
 petgraph = "0.7.1"
 hts-sys = "2.1.1"
-reqwest = { version = "0.12.13", features = ["blocking", "json"] }
+reqwest = { version = "0.12.15", features = ["blocking", "json"] }
 indicatif = { version = "0.17.11", features = ["rayon"] }
 chrono = "0.4.40"
 
