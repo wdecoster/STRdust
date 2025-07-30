@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-use clap::AppSettings::DeriveDisplayOrder;
 use clap::Parser;
 use log::{info, warn};
 use std::path::PathBuf;
@@ -16,75 +15,74 @@ pub mod vcf;
 
 // The arguments end up in the Cli struct
 #[derive(Parser, Debug)]
-#[structopt(global_settings=&[DeriveDisplayOrder])]
-#[clap(author, version, about="Tool to genotype STRs from long reads", long_about = None)]
+#[command(author, version, about = "Tool to genotype STRs from long reads", long_about = None)]
 pub struct Cli {
     /// reference genome
-    #[clap(validator=is_file)]
+    #[arg(value_parser = is_file)]
     fasta: String,
 
     /// BAM or CRAM file to call STRs in
-    #[clap(validator=is_file)]
+    #[arg(value_parser = is_file)]
     bam: String,
 
     /// Region string to genotype expansion in (format: chr:start-end)
-    #[clap(short, long, value_parser)]
+    #[arg(short, long)]
     region: Option<String>,
 
     /// Bed file with region(s) to genotype expansion(s) in
-    #[clap(short = 'R', long, value_parser, validator=is_file)]
+    #[arg(short = 'R', long, value_parser = is_file)]
     region_file: Option<String>,
 
     /// Genotype the pathogenic STRs from STRchive
-    #[clap(long, value_parser, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     pathogenic: bool,
 
     /// minimal length of insertion/deletion operation
-    #[clap(short, long, value_parser, default_value_t = 5)]
+    #[arg(short, long, default_value_t = 5)]
     minlen: usize,
 
     /// minimal number of supporting reads per haplotype
-    #[clap(short, long, value_parser, default_value_t = 3)]
+    #[arg(short, long, default_value_t = 3)]
     support: usize,
 
     /// Number of parallel threads to use
-    #[clap(short, long, value_parser, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 1)]
     threads: usize,
 
     /// Sample name to use in VCF header, if not provided, the bam file name is used
-    #[clap(long, value_parser)]
+    #[arg(long)]
     sample: Option<String>,
 
     /// Print information on somatic variability
-    #[clap(long, value_parser, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     somatic: bool,
 
     /// Reads are not phased
-    #[clap(long, value_parser, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     unphased: bool,
 
     /// Identify poorly supported outlier expansions (only with --unphased)
-    #[clap(long, value_parser, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     find_outliers: bool,
 
     /// comma-separated list of haploid (sex) chromosomes
-    #[clap(long, value_parser)]
+    #[arg(long)]
     haploid: Option<String>,
 
     /// Debug mode
-    #[clap(long, value_parser, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     debug: bool,
 
     /// Sort output by chrom, start and end
-    #[clap(long, value_parser, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     sorted: bool,
 
     /// Max number of reads to use to generate consensus alt sequence
-    #[clap(long, value_parser, default_value_t = 20)]
+    #[arg(long, default_value_t = 20)]
     consensus_reads: usize,
 
-    // Max number of reads to extract per locus from the bam file for genotyping
-    #[clap(long, value_parser, default_value_t = 60)]
+    /// Max number of reads to extract per locus from the bam file for genotyping
+    #[arg(long, default_value_t = 60)]
     max_number_reads: usize,
 }
 
