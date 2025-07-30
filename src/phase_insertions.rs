@@ -47,7 +47,7 @@ pub fn split(
     let mut haplotype_clusters = vec![];
     // clusters have to represent at least 10% of the reads, but never less than 1
     let min_cluster_size = max((insertions.len() as f32 / 10.0) as usize, 1);
-    debug!("{repeat}: Minimum cluster size: {}", min_cluster_size);
+    debug!("{repeat}: Minimum cluster size: {} reads", min_cluster_size);
 
     for (index, step) in dend.steps().iter().enumerate() {
         // insert the new label with the clusters it contains
@@ -163,10 +163,10 @@ pub fn split(
         }
         2 => {
             debug!("{repeat}: Found two haplotype clusters");
-            let hap1 =
-                find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions);
-            let hap2 =
-                find_cluster_members(&haplotype_clusters[1], &cluster_to_subclusters, insertions);
+            let hap1_refs = find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions);
+            let hap1: Vec<String> = hap1_refs.iter().map(|s| (*s).clone()).collect();
+            let hap2_refs = find_cluster_members(&haplotype_clusters[1], &cluster_to_subclusters, insertions);
+            let hap2: Vec<String> = hap2_refs.iter().map(|s| (*s).clone()).collect();
             let larger_median = if check_outliers {
                 let hap1_median = find_median(&hap1);
                 let hap2_median = find_median(&hap2);
@@ -240,30 +240,32 @@ fn find_roots(
     roots
 }
 
-fn find_cluster_members(
+
+fn find_cluster_members<'a>(
     cluster: &usize,
     cluster_to_subclusters: &HashMap<usize, (usize, usize)>,
-    insertions: &[String],
-) -> Vec<String> {
-    let mut search_cluster = vec![*cluster];
-    let mut insertions_of_this_cluster = vec![];
-    loop {
-        let (cluster1, cluster2) = cluster_to_subclusters
-            .get(&search_cluster.pop().unwrap())
-            .unwrap_or_else(|| panic!("Cluster not in hashmap"));
-        for cl in &[cluster1, cluster2] {
-            if cl < &&insertions.len() {
-                insertions_of_this_cluster.push(insertions[**cl].clone());
+    insertions: &'a [String],
+) -> Vec<&'a String> {
+    let mut result = Vec::with_capacity(insertions.len() / 2);
+    let mut to_process = vec![*cluster];
+    
+    while let Some(current) = to_process.pop() {
+        if let Some(&(c1, c2)) = cluster_to_subclusters.get(&current) {
+            if c1 < insertions.len() {
+                result.push(&insertions[c1]);
             } else {
-                search_cluster.push(**cl);
+                to_process.push(c1);
+            }
+            
+            if c2 < insertions.len() {
+                result.push(&insertions[c2]);
+            } else {
+                to_process.push(c2);
             }
         }
-        if search_cluster.is_empty() {
-            break;
-        }
     }
-
-    insertions_of_this_cluster
+    
+    result
 }
 
 fn find_median(seqs: &Vec<String>) -> usize {
@@ -272,7 +274,7 @@ fn find_median(seqs: &Vec<String>) -> usize {
         lengths.push(seq.len());
     }
     // sort the lengths
-    lengths.sort();
+    lengths.sort_unstable();
     // find the median length, but check if there is an even or odd number of lengths
     if lengths.len() % 2 == 0 {
         (lengths[lengths.len() / 2] + lengths[lengths.len() / 2 - 1]) / 2
