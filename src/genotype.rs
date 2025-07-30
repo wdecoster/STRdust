@@ -290,8 +290,7 @@ fn parse_cs(
         ref_pos = ref_pos,
         cs = cs
     );
-    let interval_around_junction = flanking as i32 - 15..=flanking as i32 + 15;
-
+    let interval_around_junction = flanking as i32 - 30..=flanking as i32 + 30;
     for cap in re.captures_iter(&cs) {
         let op = &cap[0].chars().next().unwrap();
         match op {
@@ -325,7 +324,7 @@ fn parse_cs(
                     debug!(
                         "{repeat}: Insertion at {} is too far from the junction to be considered: {}",
                         ref_pos,
-                        cap[0][1..].to_string(),
+                        &cap[0][1..],
                     );
                 }
             }
