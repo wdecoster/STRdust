@@ -24,12 +24,74 @@ pub fn split(
     // this is inspired by the TRGT paper
 
     // Create a condensed (upper triangle) distance matrix
-    let mut condensed = vec![];
-    for row in 0..insertions.len() - 1 {
-        for col in row + 1..insertions.len() {
-            condensed.push(levenshtein(&insertions[row], &insertions[col]) as f32);
+    // Create a cache for sequence lengths to avoid repeated calls to .len()
+    let seq_lengths: Vec<usize> = insertions.iter().map(|s| s.len()).collect();
+
+    // Early optimization: sort sequences by length to potentially exit Levenshtein calculation early
+    let mut condensed = Vec::with_capacity((insertions.len() * (insertions.len() - 1)) / 2);
+
+    // Using rayon for parallel processing
+    use rayon::prelude::*;
+
+    // Generate all pairs (row, col) that need processing
+    let pairs: Vec<(usize, usize)> = (0..insertions.len() - 1)
+        .flat_map(|row| ((row + 1)..insertions.len()).map(move |col| (row, col)))
+        .collect();
+
+    // First calculate the median length of all sequences
+    let median_length = {
+        let mut lengths = seq_lengths.clone();
+        lengths.sort_unstable();
+        if lengths.is_empty() {
+            0 // Handle empty case, though this shouldn't happen
+        } else if lengths.len() % 2 == 0 {
+            (lengths[lengths.len() / 2] + lengths[lengths.len() / 2 - 1]) / 2
+        } else {
+            lengths[lengths.len() / 2]
         }
-    }
+    };
+
+    // Calculate distances in parallel with length-based penalties
+    let distances: Vec<f32> = pairs
+        .par_iter()
+        .map(|(row, col)| {
+            let len1 = seq_lengths[*row];
+            let len2 = seq_lengths[*col];
+
+            // Calculate basic length difference
+            let len_diff = (len1 as i32 - len2 as i32).unsigned_abs() as usize;
+
+            // For very different sequences, use length difference but with moderate scaling
+            if len_diff > 100 {
+                return len_diff as f32 * 1.2; // Apply a modest 20% increase instead of more aggressive scaling
+            }
+
+            // For more similar sequences, calculate Levenshtein distance
+            let base_distance = levenshtein(&insertions[*row], &insertions[*col]) as f32;
+
+            // Apply a gentle penalty based on relative length difference compared to median
+            let longer_len = len1.max(len2);
+
+            // Only apply additional penalty when:
+            // 1. There's a meaningful but not extreme length difference
+            // 2. One sequence is notably larger than median
+            if len_diff > 20 && len_diff <= 100 && (longer_len as f32) > (median_length as f32 * 1.3) {
+                // Calculate how much the longer sequence exceeds median (as a ratio)
+                let expansion_factor = (longer_len as f32 / median_length as f32) - 1.0;
+
+                // Apply a moderate, logarithmic penalty that increases more slowly
+                // This avoids overly aggressive penalties while still separating different haplotypes
+                let penalty_factor = 1.0 + (expansion_factor * 0.5).min(1.0);
+
+                return base_distance * penalty_factor;
+            }
+
+            // For sequences with similar lengths or not significantly expanded, just use Levenshtein
+            base_distance
+        })
+        .collect();
+
+    condensed.extend(distances);
     let dend = linkage(&mut condensed, insertions.len(), Method::Ward);
 
     // maybe these hashmaps could be replaced by some tree-like structure
