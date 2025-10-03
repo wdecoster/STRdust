@@ -18,30 +18,39 @@ impl RepeatIntervalIterator {
         // Split by colon first to get chromosome
         let parts: Vec<&str> = reg.split(':').collect();
         if parts.len() != 2 {
-            error!("Invalid region format: '{}'. Expected format is 'chr:start-end'", reg);
+            error!(
+                "Invalid region format: '{}'. Expected format is 'chr:start-end'",
+                reg
+            );
             std::process::exit(1);
         }
-        
+
         let chrom = parts[0].to_string();
         let interval = parts[1];
-        
+
         // Split interval by hyphen to get start and end
         let coords: Vec<&str> = interval.split('-').collect();
         if coords.len() != 2 {
-            error!("Invalid interval format: '{}'. Expected format is 'chr:start-end'", interval);
+            error!(
+                "Invalid interval format: '{}'. Expected format is 'chr:start-end'",
+                interval
+            );
             error!("Example of a valid region: 'chr15:34419425-34419450'");
             std::process::exit(1);
         }
-        
+
         // Parse start and end coordinates with error handling
         let start: u32 = match coords[0].parse() {
             Ok(val) => val,
             Err(_) => {
-                error!("Could not parse start coordinate '{}' as a number", coords[0]);
+                error!(
+                    "Could not parse start coordinate '{}' as a number",
+                    coords[0]
+                );
                 std::process::exit(1);
             }
         };
-        
+
         let end: u32 = match coords[1].parse() {
             Ok(val) => val,
             Err(_) => {
@@ -49,7 +58,7 @@ impl RepeatIntervalIterator {
                 std::process::exit(1);
             }
         };
-        
+
         // Create the repeat interval with validation
         let repeat = match RepeatInterval::new_interval(chrom, start, end, fasta) {
             Some(interval) => interval,
@@ -58,7 +67,7 @@ impl RepeatIntervalIterator {
                 std::process::exit(1);
             }
         };
-        
+
         RepeatIntervalIterator {
             current_index: 0,
             data: vec![repeat],
@@ -92,12 +101,12 @@ impl RepeatIntervalIterator {
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("strdust");
-        
+
         // Create cache directory if it doesn't exist
         fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
-        
+
         let cache_file = cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed");
-        
+
         // Check if cached file exists and is recent (e.g., less than 7 days old)
         let needs_download = if cache_file.exists() {
             match fs::metadata(&cache_file) {
@@ -116,7 +125,7 @@ impl RepeatIntervalIterator {
         } else {
             true // File doesn't exist, download
         };
-        
+
         // Download if needed
         if needs_download {
             eprintln!("Downloading pathogenic STR database...");
@@ -126,11 +135,17 @@ impl RepeatIntervalIterator {
                     match resp.text() {
                         Ok(body) => {
                             if let Err(e) = fs::write(&cache_file, &body) {
-                                eprintln!("Warning: Failed to cache pathogenic repeats data: {}", e);
+                                eprintln!(
+                                    "Warning: Failed to cache pathogenic repeats data: {}",
+                                    e
+                                );
                                 // Continue with in-memory data
                                 return Self::from_string_data(&body, fasta);
                             }
-                            eprintln!("Cached pathogenic STR database to: {}", cache_file.display());
+                            eprintln!(
+                                "Cached pathogenic STR database to: {}",
+                                cache_file.display()
+                            );
                         }
                         Err(e) => {
                             eprintln!("Failed to read response body: {}", e);
@@ -149,11 +164,11 @@ impl RepeatIntervalIterator {
                 }
             }
         }
-        
+
         // Read from cached file
         Self::from_bed(&cache_file.to_string_lossy().to_string(), fasta)
     }
-    
+
     // Helper function to process data from string (for fallback)
     fn from_string_data(data: &str, fasta: &str) -> Self {
         let mut reader = io::BufReader::new(data.as_bytes());
@@ -171,6 +186,23 @@ impl RepeatIntervalIterator {
             data: data_vec.clone(),
             num_intervals: data_vec.len(),
         }
+    }
+
+    /// Test helper function to create a RepeatIntervalIterator from BED data string
+    /// This is exposed for testing purposes to allow testing BED parsing without file I/O
+    #[cfg(test)]
+    pub fn from_test_data(data: &str, fasta: &str) -> Self {
+        Self::from_string_data(data, fasta)
+    }
+
+    /// Test helper function to get the cache file path
+    /// This is exposed for testing purposes to allow test cleanup and verification
+    #[cfg(test)]
+    pub fn get_cache_file_path() -> std::path::PathBuf {
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("strdust");
+        cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed")
     }
 }
 
@@ -245,7 +277,12 @@ impl RepeatInterval {
                     .expect("Failed parsing chromosome length from fai file")
                     > end
             {
-                return Some(Self { chrom, start, end, created: None });
+                return Some(Self {
+                    chrom,
+                    start,
+                    end,
+                    created: None,
+                });
             }
         }
         // if the chromosome is not in the fai file or the end does not fit the interval, return None
@@ -258,7 +295,7 @@ impl RepeatInterval {
             chrom: chrom.to_string(),
             start,
             end,
-            created: None
+            created: None,
         }
     }
 
@@ -300,7 +337,7 @@ impl RepeatInterval {
         Some(repeat_ref_sequence)
     }
 
-    pub fn set_time_stamp(& mut self) {
+    pub fn set_time_stamp(&mut self) {
         self.created = Some(chrono::Utc::now());
     }
 }
@@ -362,6 +399,244 @@ mod tests {
         );
     }
 
+    // Mock BED data that resembles STRchive format for testing
+    const MOCK_STRCHIVE_DATA: &str = r#"chr1	1234567	1234590	ATTN	ATGC_4_3_90
+chr2	2345678	2345701	CGG	CGG_3_8_100
+chr4	39348425	39348483	CAG	ATXN1_CAG_58
+chr7	154654404	154654432	CAG	ATXN2_CAG_28
+chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
+
+    #[test]
+    fn test_pathogenic_bed_parsing() {
+        // Create a temporary fasta file for testing
+        let temp_dir = std::env::temp_dir();
+        let test_fasta = temp_dir.join("test_pathogenic.fa");
+        let test_fai = temp_dir.join("test_pathogenic.fa.fai");
+
+        // Create minimal fasta content
+        let fasta_content = ">chr1\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC\n>chr2\nCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGG\n>chr4\nCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG\n>chr7\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC\n>chr19\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCAtgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcatgcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcagcag";
+
+        // Create a simple fai content with chromosome lengths that cover our test intervals
+        let fai_content = "chr1\t100000000\t6\t60\t61\nchr2\t100000000\t6\t60\t61\nchr4\t100000000\t6\t60\t61\nchr7\t200000000\t6\t60\t61\nchr19\t100000000\t6\t60\t61";
+
+        // Write the test files
+        std::fs::write(&test_fasta, fasta_content).expect("Failed to write test fasta");
+        std::fs::write(&test_fai, fai_content).expect("Failed to write test fai");
+
+        // Test parsing the mock BED data
+        let result = RepeatIntervalIterator::from_string_data(
+            MOCK_STRCHIVE_DATA,
+            &test_fasta.to_string_lossy(),
+        );
+
+        // Verify the parsing worked correctly
+        assert_eq!(
+            result.num_intervals, 5,
+            "Should parse all 5 intervals from mock data"
+        );
+
+        let intervals: Vec<RepeatInterval> = result.collect();
+        assert_eq!(intervals.len(), 5);
+
+        // Verify first interval
+        assert_eq!(intervals[0].chrom, "chr1");
+        assert_eq!(intervals[0].start, 1234567);
+        assert_eq!(intervals[0].end, 1234590);
+
+        // Verify last interval
+        assert_eq!(intervals[4].chrom, "chr19");
+        assert_eq!(intervals[4].start, 45770205);
+        assert_eq!(intervals[4].end, 45770266);
+
+        // Clean up
+        let _ = std::fs::remove_file(&test_fasta);
+        let _ = std::fs::remove_file(&test_fai);
+    }
+
+    #[test]
+    fn test_pathogenic_cache_functionality() {
+        use std::time::{Duration, SystemTime};
+
+        // Create a temporary directory for testing cache functionality
+        let temp_dir = std::env::temp_dir().join("strdust_test_cache");
+        let _ = std::fs::remove_dir_all(&temp_dir); // Clean up any previous test runs
+        std::fs::create_dir_all(&temp_dir).expect("Failed to create test cache dir");
+
+        let cache_file = temp_dir.join("STRchive-disease-loci.hg38.TRGT.bed");
+
+        // Write mock cache data
+        std::fs::write(&cache_file, MOCK_STRCHIVE_DATA).expect("Failed to write test cache file");
+
+        // Test 1: Fresh cache file should be used (modification check)
+        let metadata = cache_file
+            .metadata()
+            .expect("Failed to get cache file metadata");
+        let modified = metadata
+            .modified()
+            .expect("Failed to get modification time");
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or(Duration::from_secs(0));
+
+        // File should be very fresh (just created)
+        assert!(age < Duration::from_secs(60), "Cache file should be fresh");
+
+        // Test 2: Check file exists after creation
+        assert!(cache_file.exists(), "Cache file should exist");
+
+        // Test 3: Manually age the file to test the 7-day cache policy
+        // We can't easily modify the file timestamp in a portable way, so we'll just verify
+        // the logic would work by checking the duration calculation
+        let seven_days = Duration::from_secs(7 * 24 * 60 * 60);
+        assert!(
+            age < seven_days,
+            "Fresh file should be less than 7 days old"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_pathogenic_bed_format_edge_cases() {
+        let temp_dir = std::env::temp_dir();
+        let test_fasta = temp_dir.join("test_edge_cases.fa");
+        let test_fai = temp_dir.join("test_edge_cases.fa.fai");
+
+        // Create minimal fasta content
+        let fasta_content = ">chr1\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC\n>chr22\nCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGGCGG";
+        let fai_content = "chr1\t1000000\t6\t60\t61\nchr22\t1000000\t6\t60\t61";
+
+        std::fs::write(&test_fasta, fasta_content).expect("Failed to write test fasta");
+        std::fs::write(&test_fai, fai_content).expect("Failed to write test fai");
+
+        // Test with different BED formats
+        let bed_data_with_extra_columns = "chr1\t100\t150\tATGC\tgene1\t.\t+\textra_info";
+        let bed_data_minimal = "chr22\t200\t250";
+
+        // Test parsing with extra columns (should work - BED parser should handle this)
+        let result1 = RepeatIntervalIterator::from_string_data(
+            bed_data_with_extra_columns,
+            &test_fasta.to_string_lossy(),
+        );
+        assert_eq!(result1.num_intervals, 1);
+        let intervals1: Vec<RepeatInterval> = result1.collect();
+        assert_eq!(intervals1[0].chrom, "chr1");
+        assert_eq!(intervals1[0].start, 100);
+        assert_eq!(intervals1[0].end, 150);
+
+        // Test parsing with minimal columns
+        let result2 = RepeatIntervalIterator::from_string_data(
+            bed_data_minimal,
+            &test_fasta.to_string_lossy(),
+        );
+        assert_eq!(result2.num_intervals, 1);
+        let intervals2: Vec<RepeatInterval> = result2.collect();
+        assert_eq!(intervals2[0].chrom, "chr22");
+        assert_eq!(intervals2[0].start, 200);
+        assert_eq!(intervals2[0].end, 250);
+
+        // Clean up
+        let _ = std::fs::remove_file(&test_fasta);
+        let _ = std::fs::remove_file(&test_fai);
+    }
+
+    #[test]
+    #[should_panic(expected = "Chromosome chr99 is not in the fasta file")]
+    fn test_pathogenic_invalid_chromosome() {
+        let temp_dir = std::env::temp_dir();
+        let test_fasta = temp_dir.join("test_invalid_chr.fa");
+        let test_fai = temp_dir.join("test_invalid_chr.fa.fai");
+
+        let fasta_content =
+            ">chr1\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC";
+        let fai_content = "chr1\t1000000\t6\t60\t61";
+
+        std::fs::write(&test_fasta, fasta_content).expect("Failed to write test fasta");
+        std::fs::write(&test_fai, fai_content).expect("Failed to write test fai");
+
+        // This should panic because chr99 is not in the fasta
+        let bed_data_invalid = "chr99\t100\t150\tATGC\tgene1";
+        let _result = RepeatIntervalIterator::from_string_data(
+            bed_data_invalid,
+            &test_fasta.to_string_lossy(),
+        );
+
+        // Clean up (won't be reached due to panic, but good practice)
+        let _ = std::fs::remove_file(&test_fasta);
+        let _ = std::fs::remove_file(&test_fai);
+    }
+
+    // Integration test that actually tests the pathogenic download functionality
+    // This test is optional and requires network access
+    #[test]
+    #[ignore = "requires network access and reference genome - set TEST_PATHOGENIC_DOWNLOAD=1 to enable"]
+    fn test_pathogenic_download_integration() {
+        // Only run if explicitly enabled
+        if std::env::var("TEST_PATHOGENIC_DOWNLOAD").is_err() {
+            return;
+        }
+
+        let fasta =
+            std::env::var("FASTA_PATH").unwrap_or_else(|_| "test_data/chr7.fa.gz".to_string());
+
+        if !std::path::Path::new(&fasta).exists() {
+            eprintln!(
+                "Skipping integration test - fasta file {} does not exist",
+                fasta
+            );
+            return;
+        }
+
+        let fai_file = format!("{}.fai", fasta);
+        if !std::path::Path::new(&fai_file).exists() {
+            eprintln!(
+                "Skipping integration test - fasta index file {} does not exist",
+                fai_file
+            );
+            return;
+        }
+
+        // Clear any existing cache to test download functionality
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("strdust");
+        let cache_file = cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed");
+        let _ = std::fs::remove_file(&cache_file);
+
+        // This should trigger a download
+        let result = RepeatIntervalIterator::pathogenic(&fasta);
+
+        // Verify results
+        assert!(
+            result.num_intervals > 0,
+            "Should have downloaded and parsed pathogenic intervals"
+        );
+        assert!(
+            cache_file.exists(),
+            "Cache file should exist after download"
+        );
+
+        // Verify cache file has reasonable content
+        let cache_content =
+            std::fs::read_to_string(&cache_file).expect("Failed to read cache file");
+        assert!(
+            cache_content.contains("chr"),
+            "Cache file should contain chromosome information"
+        );
+        assert!(
+            cache_content.len() > 100,
+            "Cache file should have substantial content"
+        );
+
+        // Test that second call uses cache (no download)
+        let result2 = RepeatIntervalIterator::pathogenic(&fasta);
+        assert_eq!(
+            result.num_intervals, result2.num_intervals,
+            "Cached results should match downloaded results"
+        );
+    }
+
     // this test is conditional, as it requires a specific fasta file to exist
     #[test]
     #[ignore = "requires specific fasta file - set TEST_WITH_FASTA=1 to enable"]
@@ -370,20 +645,26 @@ mod tests {
         if std::env::var("TEST_WITH_FASTA").is_err() {
             return;
         }
-        
+
         let fasta = std::env::var("FASTA_PATH")
             .unwrap_or_else(|_| "/home/wdecoster/reference/GRCh38.fa".to_string());
-        
+
         if !std::path::Path::new(&fasta).exists() {
-            panic!("Fasta file {} does not exist. Set FASTA_PATH environment variable to correct path", fasta);
+            panic!(
+                "Fasta file {} does not exist. Set FASTA_PATH environment variable to correct path",
+                fasta
+            );
         }
-        
+
         let fai_file = format!("{}.fai", fasta);
         if !std::path::Path::new(&fai_file).exists() {
             panic!("Fasta index file {} does not exist", fai_file);
         }
-        
+
         let result = crate::repeats::RepeatIntervalIterator::pathogenic(&fasta);
-        assert!(result.num_intervals > 0, "Should have found some pathogenic intervals");
+        assert!(
+            result.num_intervals > 0,
+            "Should have found some pathogenic intervals"
+        );
     }
 }

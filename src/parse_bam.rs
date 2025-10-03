@@ -1,4 +1,5 @@
 use log::warn;
+use rand::seq::IndexedRandom;
 use rust_htslib::bam;
 use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
@@ -6,7 +7,6 @@ use rust_htslib::bam::Read;
 use std::collections::HashMap;
 use std::env;
 use url::Url;
-use rand::seq::IndexedRandom;
 
 pub struct Reads {
     // could consider not to use a hashmap here and use an attribute per phase
@@ -21,7 +21,7 @@ fn setup_ssl_certificates() {
     if env::var("CURL_CA_BUNDLE").is_ok() {
         return;
     }
-    
+
     // Common CA bundle locations across different systems
     let possible_paths = vec![
         "/etc/ssl/certs/ca-certificates.crt",     // Debian/Ubuntu
@@ -29,9 +29,9 @@ fn setup_ssl_certificates() {
         "/etc/ssl/ca-bundle.pem",                 // SUSE
         "/usr/local/share/certs/ca-root-nss.crt", // FreeBSD
         "/usr/local/etc/openssl/cert.pem",        // macOS Homebrew
-        "/etc/ssl/cert.pem"                       // macOS/OpenBSD
+        "/etc/ssl/cert.pem",                      // macOS/OpenBSD
     ];
-    
+
     // Try each path in order
     for path in possible_paths {
         if std::path::Path::new(path).exists() {
@@ -39,7 +39,7 @@ fn setup_ssl_certificates() {
             return;
         }
     }
-    
+
     // None of the paths exist, warn the user
     warn!(
         "Could not find a valid CA certificate bundle for HTTPS/S3 access. \
@@ -75,7 +75,7 @@ pub fn get_overlapping_reads(
     bam: &mut bam::IndexedReader,
     repeat: &crate::repeats::RepeatInterval,
     unphased: bool,
-    max_number_reads: usize
+    max_number_reads: usize,
 ) -> Option<Reads> {
     let tid = bam
         .header()
@@ -124,7 +124,11 @@ pub fn get_overlapping_reads(
         // if phased, select <max_number_reads>/2 reads from each phase
         let mut rng = rand::rng();
         let mut seqs_filtered = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
-        let max_reads_per_phase = HashMap::from([(0, max_number_reads), (1, max_number_reads/2), (2, max_number_reads/2)]);
+        let max_reads_per_phase = HashMap::from([
+            (0, max_number_reads),
+            (1, max_number_reads / 2),
+            (2, max_number_reads / 2),
+        ]);
         for (phase, seqs_phase) in seqs.iter() {
             let n_reads = seqs_phase.len();
             let n_reads_to_select = if n_reads > max_reads_per_phase[phase] {
@@ -138,37 +142,42 @@ pub fn get_overlapping_reads(
             }
         }
 
-        Some(Reads { seqs: seqs_filtered, ps })
+        Some(Reads {
+            seqs: seqs_filtered,
+            ps,
+        })
     }
 }
 
 fn get_phase(record: &bam::Record) -> u8 {
     match record.aux(b"HP") {
-        Ok(value) => {
-            match value {
-                Aux::U8(v) => v,
-                Aux::U16(v) => u8::try_from(v).expect("Unexpected phase identifier for HP: {v:?}"),
-                Aux::I32(v) => u8::try_from(v).expect("Unexpected phase identifier for HP: {v:?}"),
-                _ => panic!("Unexpected type of Aux {value:?} for HP"),
-            }
-        }
+        Ok(value) => match value {
+            Aux::U8(v) => v,
+            Aux::U16(v) => u8::try_from(v).expect("Unexpected phase identifier for HP: {v:?}"),
+            Aux::I32(v) => u8::try_from(v).expect("Unexpected phase identifier for HP: {v:?}"),
+            _ => panic!("Unexpected type of Aux {value:?} for HP"),
+        },
         Err(_e) => 0,
     }
 }
 
 fn get_phase_set(record: &bam::Record) -> Option<u32> {
     match record.aux(b"PS") {
-        Ok(value) => {
-            match value {
-                Aux::U32(v) => Some(v),
-                Aux::I8(v) => Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}")),
-                Aux::I16(v) => Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}")),
-                Aux::I32(v) => Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}")),
-                Aux::U8(v) => Some(u32::from(v)),
-                Aux::U16(v) => Some(u32::from(v)),
-                _ => panic!("Unexpected type of Aux {value:?} for PS"),
+        Ok(value) => match value {
+            Aux::U32(v) => Some(v),
+            Aux::I8(v) => {
+                Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}"))
             }
-        }
+            Aux::I16(v) => {
+                Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}"))
+            }
+            Aux::I32(v) => {
+                Some(u32::try_from(v).expect("Unexpected phase set identifier for PS: {v:?}"))
+            }
+            Aux::U8(v) => Some(u32::from(v)),
+            Aux::U16(v) => Some(u32::from(v)),
+            _ => panic!("Unexpected type of Aux {value:?} for PS"),
+        },
         Err(_e) => None,
     }
 }
@@ -196,7 +205,7 @@ fn test_get_overlapping_reads_url() {
         chrom: String::from("chr20"),
         start: 154654404,
         end: 154654432,
-        created: None
+        created: None,
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);

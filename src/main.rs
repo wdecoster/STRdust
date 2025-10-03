@@ -87,10 +87,13 @@ pub struct Cli {
 }
 
 fn is_file(pathname: &str) -> Result<(), String> {
-    if pathname.starts_with("http") || pathname.starts_with("https://") || pathname.starts_with("s3") {
+    if pathname.starts_with("http")
+        || pathname.starts_with("https://")
+        || pathname.starts_with("s3")
+    {
         return Ok(());
     }
-    
+
     let path = PathBuf::from(pathname);
     if path.is_file() {
         Ok(())

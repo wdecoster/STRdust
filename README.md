@@ -90,6 +90,45 @@ chr1    1435798 .       TGGCGCGGAGCGGCGCGGAGCG  GCTGGCGCGGAGCGGCGCGGA,GCGGGCGCGC
 chr1    57367044        .       AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAAT     AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAA,AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAA        .       .       END=57367125;STDEV=3,0 GT:RB:FRB:SUP:SC 1|2:-9,-34:72,47:17,12:216,141
 ```
 
+## Development
+
+### Testing
+
+STRdust includes comprehensive tests, including specific tests for the `--pathogenic` functionality. Run tests with:
+
+```bash
+cargo test
+```
+
+For network-dependent tests (testing STRchive download functionality):
+
+```bash
+TEST_PATHOGENIC_NETWORK=1 cargo test
+```
+
+See [PATHOGENIC_TESTING.md](PATHOGENIC_TESTING.md) for detailed information about the pathogenic flag testing.
+
+### Dependency Management
+
+This project uses [Dependabot](https://github.com/dependabot) to automatically keep dependencies up to date. Dependabot is configured to:
+
+- Check for Cargo dependency updates weekly on Mondays
+- Check for GitHub Actions updates weekly
+- Automatically create pull requests for dependency updates
+- Group minor and patch updates together for easier review
+- Auto-merge patch updates after tests pass
+- Require manual review for major version updates
+
+The Dependabot configuration can be found in [`.github/dependabot.yml`](.github/dependabot.yml).
+
+### Continuous Integration
+
+The project uses GitHub Actions for CI/CD:
+
+- **Test workflow**: Runs on all pushes and pull requests, testing on stable and beta Rust
+- **Dependabot workflow**: Automatically tests and merges safe dependency updates
+- **Publish workflow**: Creates releases for Linux and macOS when tags are pushed
+
 ## CITATION
 
 If you use this tool, please consider citing our [publication](https://genome.cshlp.org/content/early/2024/08/15/gr.279265.124).

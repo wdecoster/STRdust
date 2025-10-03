@@ -1,4 +1,5 @@
 use crate::consensus::Consensus;
+use crate::Cli;
 use distance::levenshtein;
 use human_sort::compare as human_compare;
 use log::debug;
@@ -6,8 +7,6 @@ use rust_htslib::faidx;
 use std::cmp::Ordering;
 use std::fmt;
 use std::io::Read;
-use crate::Cli;
-
 
 pub struct Allele {
     pub length: String, // length of the consensus sequence minus the length of the repeat sequence
@@ -401,10 +400,11 @@ pub fn write_vcf_header(args: &Cli) {
         std::env::args().collect::<Vec<String>>().join(" ")
     );
     // call faidx to make sure the fasta index exists, we'll need this anyway when genotyping
-    let _ =
-        faidx::Reader::from_path(&args.fasta).unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
-    
-    let mut fai_file = std::fs::File::open(format!("{0}.fai", args.fasta)).expect("Can't open .fai file");
+    let _ = faidx::Reader::from_path(&args.fasta)
+        .unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));
+
+    let mut fai_file =
+        std::fs::File::open(format!("{0}.fai", args.fasta)).expect("Can't open .fai file");
     // parse the fasta index file
     let mut buf = String::new();
     fai_file
@@ -432,7 +432,9 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
     );
     if args.debug {
-        println!(r#"##INFO=<ID=TIME,Number=1,Type=String,Description="Time taken to genotype the repeat">"#);
+        println!(
+            r#"##INFO=<ID=TIME,Number=1,Type=String,Description="Time taken to genotype the repeat">"#
+        );
     }
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(
@@ -463,48 +465,48 @@ pub fn write_vcf_header(args: &Cli) {
 #[test]
 fn test_write_vcf_header_from_bam() {
     let args = Cli {
-            bam: String::from("test_data/small-test-phased.bam"),
-            fasta: String::from("test_data/chr7.fa.gz"),
-            region: None,
-            region_file: None,
-            pathogenic: false,
-            minlen: 5,
-            support: 1,
-            somatic: false,
-            unphased: true,
-            find_outliers: false,
-            threads: 1,
-            sample: None,
-            haploid: Some(String::from("chr7")),
-            debug: false,
-            sorted: false,
-            consensus_reads: 20,
-            max_number_reads: 60,
-        };
+        bam: String::from("test_data/small-test-phased.bam"),
+        fasta: String::from("test_data/chr7.fa.gz"),
+        region: None,
+        region_file: None,
+        pathogenic: false,
+        minlen: 5,
+        support: 1,
+        somatic: false,
+        unphased: true,
+        find_outliers: false,
+        threads: 1,
+        sample: None,
+        haploid: Some(String::from("chr7")),
+        debug: false,
+        sorted: false,
+        consensus_reads: 20,
+        max_number_reads: 60,
+    };
     write_vcf_header(&args);
 }
 
 #[test]
 fn test_write_vcf_header_from_name() {
     let args = Cli {
-            bam: String::from("test_data/small-test-phased.bam"),
-            fasta: String::from("test_data/chr7.fa.gz"),
-            region: None,
-            region_file: None,
-            pathogenic: false,
-            minlen: 5,
-            support: 1,
-            somatic: false,
-            unphased: true,
-            find_outliers: false,
-            threads: 1,
-            sample: Some("test_sample".to_string()),
-            haploid: Some(String::from("chr7")),
-            debug: false,
-            sorted: false,
-            consensus_reads: 20,
-            max_number_reads: 60,
-        };
+        bam: String::from("test_data/small-test-phased.bam"),
+        fasta: String::from("test_data/chr7.fa.gz"),
+        region: None,
+        region_file: None,
+        pathogenic: false,
+        minlen: 5,
+        support: 1,
+        somatic: false,
+        unphased: true,
+        find_outliers: false,
+        threads: 1,
+        sample: Some("test_sample".to_string()),
+        haploid: Some(String::from("chr7")),
+        debug: false,
+        sorted: false,
+        consensus_reads: 20,
+        max_number_reads: 60,
+    };
     write_vcf_header(&args);
 }
 

@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use std::io::Write;
 use std::{io, sync::Mutex};
 
-use crate::{genotype, parse_bam, Cli, utils::check_files_exist};
+use crate::{genotype, parse_bam, utils::check_files_exist, Cli};
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
@@ -22,7 +22,9 @@ pub fn genotype_repeats(args: Cli) {
         let num_intervals = repeats.num_intervals;
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         for mut repeat in repeats.progress_count(num_intervals as u64) {
-            if let Ok(output) = genotype::genotype_repeat_singlethreaded(&mut repeat, &args, &mut bam) {
+            if let Ok(output) =
+                genotype::genotype_repeat_singlethreaded(&mut repeat, &args, &mut bam)
+            {
                 writeln!(handle, "{output}").expect("Failed writing the result.");
             }
         }

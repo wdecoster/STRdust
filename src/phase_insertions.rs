@@ -75,7 +75,10 @@ pub fn split(
             // Only apply additional penalty when:
             // 1. There's a meaningful but not extreme length difference
             // 2. One sequence is notably larger than median
-            if len_diff > 20 && len_diff <= 100 && (longer_len as f32) > (median_length as f32 * 1.3) {
+            if len_diff > 20
+                && len_diff <= 100
+                && (longer_len as f32) > (median_length as f32 * 1.3)
+            {
                 // Calculate how much the longer sequence exceeds median (as a ratio)
                 let expansion_factor = (longer_len as f32 / median_length as f32) - 1.0;
 
@@ -225,9 +228,11 @@ pub fn split(
         }
         2 => {
             debug!("{repeat}: Found two haplotype clusters");
-            let hap1_refs = find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions);
+            let hap1_refs =
+                find_cluster_members(&haplotype_clusters[0], &cluster_to_subclusters, insertions);
             let hap1: Vec<String> = hap1_refs.iter().map(|s| (*s).clone()).collect();
-            let hap2_refs = find_cluster_members(&haplotype_clusters[1], &cluster_to_subclusters, insertions);
+            let hap2_refs =
+                find_cluster_members(&haplotype_clusters[1], &cluster_to_subclusters, insertions);
             let hap2: Vec<String> = hap2_refs.iter().map(|s| (*s).clone()).collect();
             let larger_median = if check_outliers {
                 let hap1_median = find_median(&hap1);
@@ -302,7 +307,6 @@ fn find_roots(
     roots
 }
 
-
 fn find_cluster_members<'a>(
     cluster: &usize,
     cluster_to_subclusters: &HashMap<usize, (usize, usize)>,
@@ -310,7 +314,7 @@ fn find_cluster_members<'a>(
 ) -> Vec<&'a String> {
     let mut result = Vec::with_capacity(insertions.len() / 2);
     let mut to_process = vec![*cluster];
-    
+
     while let Some(current) = to_process.pop() {
         if let Some(&(c1, c2)) = cluster_to_subclusters.get(&current) {
             if c1 < insertions.len() {
@@ -318,7 +322,7 @@ fn find_cluster_members<'a>(
             } else {
                 to_process.push(c1);
             }
-            
+
             if c2 < insertions.len() {
                 result.push(&insertions[c2]);
             } else {
@@ -326,7 +330,7 @@ fn find_cluster_members<'a>(
             }
         }
     }
-    
+
     result
 }
 
@@ -396,7 +400,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
-                created: None
+                created: None,
             },
             false,
         );
@@ -437,7 +441,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
-                created: None
+                created: None,
             },
             false,
         );
@@ -477,7 +481,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
-                created: None
+                created: None,
             },
             false,
         );
@@ -520,7 +524,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
-                created: None
+                created: None,
             },
             false,
         );
@@ -561,7 +565,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
-                created: None
+                created: None,
             },
             false,
         );
@@ -633,7 +637,7 @@ mod tests {
                 chrom: "chr7".to_string(),
                 start: 154654404,
                 end: 154654432,
-                created: None
+                created: None,
             },
             false,
         );

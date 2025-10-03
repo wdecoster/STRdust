@@ -1,7 +1,7 @@
-use std::fmt;
 use bio::alignment::{pairwise::Scoring, poa::Aligner};
 use log::debug;
 use rand::seq::IteratorRandom;
+use std::fmt;
 
 #[derive(Clone)]
 pub struct Consensus {
@@ -64,25 +64,29 @@ pub fn consensus(
             score: -1,
         }
     } else if consensus_reads == 1 {
-            // if only on read should be used to generate the consensus, the consensus is a randomly selected read
-            let seq = seqs.into_iter().choose(&mut rand::rng()).unwrap();
-            Consensus {
-                seq: Some(seq.to_string()),
-                support: num_reads,
-                std_dev,
-                score: 0,
-            }
+        // if only on read should be used to generate the consensus, the consensus is a randomly selected read
+        let seq = seqs.into_iter().choose(&mut rand::rng()).unwrap();
+        Consensus {
+            seq: Some(seq.to_string()),
+            support: num_reads,
+            std_dev,
+            score: 0,
+        }
     } else {
         // if there are more than <consensus_reads> reads, downsample before taking the consensus
         // for performance and memory reasons
         let seqs_bytes = if num_reads > consensus_reads {
             debug!("{repeat}: Too many reads, downsampling to {consensus_reads}");
-            seqs.into_iter().choose_multiple(&mut rand::rng(), consensus_reads)
-            .into_iter().cloned()
-            .map(|seq| seq.bytes().collect::<Vec<u8>>())
-            .collect::<Vec<Vec<u8>>>()
+            seqs.into_iter()
+                .choose_multiple(&mut rand::rng(), consensus_reads)
+                .into_iter()
+                .cloned()
+                .map(|seq| seq.bytes().collect::<Vec<u8>>())
+                .collect::<Vec<Vec<u8>>>()
         } else {
-            seqs.iter().map(|seq| seq.bytes().collect::<Vec<u8>>()).collect::<Vec<Vec<u8>>>()
+            seqs.iter()
+                .map(|seq| seq.bytes().collect::<Vec<u8>>())
+                .collect::<Vec<Vec<u8>>>()
         };
         // I empirically determined the following parameters to be suitable,
         // but further testing on other repeats would be good
@@ -178,12 +182,12 @@ mod tests {
         let cons = consensus(
             &seqs,
             10,
-            20,   
+            20,
             &crate::repeats::RepeatInterval {
                 chrom: "chr1".to_string(),
                 start: 1,
                 end: 100,
-                created: None
+                created: None,
             },
         );
         println!("Consensus: {}", cons.seq.unwrap());
@@ -194,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_consensus_2() {
-        let seqs = vec![        
+        let seqs = vec![
             "GGGGGGAGGAGGGGGGAGGAGGGGGGAGGAGGACAGGCAAGGAGGCCTCGAAGAGGGAAGACCAGAGAAGGAGGGGAAGGGGAGAGCGGAGGGAAAGAGGTGGGATAAGGAAGAGAAGGAGGAGGAAGGGGAAGAGGGAGG".to_string(),
             "GGGGGGAGGAGGGGGGAGGAGGGGGGAGGAGGACAGGCAAGGAGGCCTCGAAGAGGGAAGACCAGAGAAGGAGGGGAAGGGGAGAGCGGAGGGAAAGAGGTGGGATAAGGAAGAGAAGGAGGAGGAAGGGGAAGAGGGAGG".to_string(),
             "AGGAGGAGGGAGGCGGGGGGAGGAGGGGGGAGGAGGGGGGAGGAAGGACAGGCAAGGAGGCCTCGAAGAGGGAAGACCAGAGAAGGAGGGGAAGGGGAGAGCGAGAAGAAGGTGGGATGAGGAAGGAAAGGAGC".to_string(),
@@ -229,10 +233,8 @@ mod tests {
         let consensus = aligner.consensus();
         let score = aligner.global(&consensus).alignment().score;
 
-
         println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
         println!("Consensus score: {}", score);
-
     }
 
     #[test]
@@ -252,7 +254,7 @@ mod tests {
             "TCTTTCTTTCTTTCTGCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCTCTCTCTCTCTCTCTCTCTCTCTCTTTCCTCCTCCCTCCCTCCCTCCCTCTCCCTCCCTCTCCCTCCTCCCTCTCCCTCTCCCTCCTCTCCCTCCCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTCCTCTCCCTCCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCTCCCTCTCTCCCACCTCTCCCTCTCCCTCTCCCTCCCTCCCTCTCCTCTCCCTCTCCCTCCCTCCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCTCCTCTCCCCCTCTCCCTCTCCCTCTCCCTCCTCCCTCTCCCCTCTCCCCCACCCCTCTCCCCTCTCCCTCCCTCTCCCTCTCCCCTCTCCCTCTCCCTCTCCCTACTCCCTCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTT".to_string(),
             "TCTTTCTTTCTTTCTTTCCTTCCTTTCCTTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCCTCTCCCTCCCTCTCTCCCTCCCTCTCCCTCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCTCTCTCCCTCCCTCTCCCTCTCCCTCTCTCTCCCTCCCTCTCCCTCCCTCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCTCTCTCTCTCTCCCTCTCCCTCTCTCCCTCCCTCCCTCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCTCTCCCTCTCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTT".to_string(),
             "TCTTTCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCCTCTCCTCTCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTTCTCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCCTCTCCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTT".to_string(),
-            "CTTTCTTTCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCCTCTCCCTCCTCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCCTCCCTCCCTCCCTCTCCCTCTCCCTCCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTTTCCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCCTCTCCCTCTCCTCTCCTCTCCCTCTCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCCTCTCCCTCTCCCCTCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTTCTTTC".to_string(),        
+            "CTTTCTTTCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCCTCTCCCTCCTCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCCTCCCTCCCTCCCTCTCCCTCTCCCTCCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTTTCCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCCTCTCCCTCTCCTCTCCTCTCCCTCTCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCCTCTCCCTCTCCCCTCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTTCTTTC".to_string(),
                 ];
         let mut seqs_bytes = vec![];
         for seq in seqs.iter() {
@@ -270,7 +272,6 @@ mod tests {
 
         let consensus = aligner.consensus();
         let score = aligner.global(&consensus).alignment().score;
-
 
         println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
         println!("Consensus score: {}", score);
@@ -298,7 +299,8 @@ mod tests {
             "TTCTTTCTTTCTTTCTTTTTTTTTC".to_string(),
             "TTTCTTTCTTTCTTTCTTTCTTTCTT".to_string(),
             "TTTCTTTCTTTTTTTTCTTTCTTTCTTTCTTTT".to_string(),
-            "TTTCTTTCTTTCTTTCTTTCTTTCTTTTT".to_string()];
+            "TTTCTTTCTTTCTTTCTTTCTTTCTTTTT".to_string(),
+        ];
         let mut seqs_bytes = vec![];
         for seq in seqs.iter() {
             seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
@@ -315,15 +317,15 @@ mod tests {
 
         let consensus = aligner.consensus();
         let score = aligner.global(&consensus).alignment().score;
-        
+
         println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
         println!("Consensus score: {}", score);
     }
 
-
     #[test]
-    fn test_consensus_5(){
-        let seqs = vec!["TATATATATATAAACATATATTATATATATAAAATATAACATATATAAACATATATATTATATATATA".to_string(),
+    fn test_consensus_5() {
+        let seqs = vec![
+            "TATATATATATAAACATATATTATATATATAAAATATAACATATATAAACATATATATTATATATATA".to_string(),
             "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATA".to_string(),
             "TATATATATATAAACATATATTATATATAATATAAACATATATAAACATATATTATATATATA".to_string(),
             "TATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATA".to_string(),
@@ -339,7 +341,7 @@ mod tests {
             "TATATATATATAAACATATATTATATATGTAATATGTTTTCTATATGTTGCTATATTATACAACATA".to_string(),
             "ATATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATATA".to_string(),
             "TATATATATATAAACATATATTATATATGTAATATAACATATATAAACATATATTATATATATA".to_string(),
-            ];
+        ];
         let mut seqs_bytes = vec![];
         for seq in seqs.iter() {
             seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
@@ -356,9 +358,8 @@ mod tests {
 
         let consensus = aligner.consensus();
         let score = aligner.global(&consensus).alignment().score;
-        
+
         println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
         println!("Consensus score: {}", score);
-}
-
+    }
 }

@@ -1,0 +1,69 @@
+# Dependabot configuration for STRdust
+# This file configures Dependabot to automatically check for dependency updates
+# and create pull requests to keep dependencies up to date.
+
+version: 2
+updates:
+  # Enable updates for Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "wdecoster"
+    assignees:
+      - "wdecoster"
+    commit-message:
+      prefix: "cargo"
+      prefix-development: "cargo"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "rust"
+    # Group related dependency updates together
+    groups:
+      rust-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      rust-dev-dependencies:
+        patterns:
+          - "*"
+        dependency-type: "development"
+    # Allow automatic merging for patch updates of trusted dependencies
+    # (This requires branch protection rules to be configured)
+    allow:
+      - dependency-type: "direct"
+        update-type: "version-update:semver-patch"
+      - dependency-type: "indirect"
+        update-type: "version-update:semver-patch"
+
+  # Enable updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "wdecoster"
+    assignees:
+      - "wdecoster"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
