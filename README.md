@@ -108,6 +108,18 @@ TEST_PATHOGENIC_NETWORK=1 cargo test
 
 See [PATHOGENIC_TESTING.md](PATHOGENIC_TESTING.md) for detailed information about the pathogenic flag testing.
 
+### Code Quality
+
+The project uses `cargo clippy` for linting. Some clippy warnings are configured to be allowed in `Cargo.toml`:
+
+- `too_many_arguments`: Allowed because bioinformatics functions often require many parameters for configuration
+
+Run clippy with:
+
+```bash
+cargo clippy
+```
+
 ### Dependency Management
 
 This project uses [Dependabot](https://github.com/dependabot) to automatically keep dependencies up to date. Dependabot is configured to:

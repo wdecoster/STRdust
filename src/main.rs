@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(short, long)]
     region: Option<String>,
 
-    /// Bed file with region(s) to genotype expansion(s) in
+    /// Bed file with region(s) to genotype expansion(s) in  
     #[arg(short = 'R', long, value_parser = is_file)]
     region_file: Option<String>,
 
@@ -86,17 +86,17 @@ pub struct Cli {
     max_number_reads: usize,
 }
 
-fn is_file(pathname: &str) -> Result<(), String> {
+fn is_file(pathname: &str) -> Result<String, String> {
     if pathname.starts_with("http")
         || pathname.starts_with("https://")
         || pathname.starts_with("s3")
     {
-        return Ok(());
+        return Ok(pathname.to_string());
     }
 
     let path = PathBuf::from(pathname);
     if path.is_file() {
-        Ok(())
+        Ok(pathname.to_string())
     } else {
         Err(format!("Input file {} is invalid", path.display()))
     }

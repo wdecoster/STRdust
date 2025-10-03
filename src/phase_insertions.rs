@@ -44,7 +44,7 @@ pub fn split(
         lengths.sort_unstable();
         if lengths.is_empty() {
             0 // Handle empty case, though this shouldn't happen
-        } else if lengths.len() % 2 == 0 {
+        } else if lengths.len().is_multiple_of(2) {
             (lengths[lengths.len() / 2] + lengths[lengths.len() / 2 - 1]) / 2
         } else {
             lengths[lengths.len() / 2]
