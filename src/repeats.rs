@@ -129,7 +129,7 @@ impl RepeatIntervalIterator {
         // Download if needed
         if needs_download {
             eprintln!("Downloading pathogenic STR database...");
-            let url = "https://github.com/dashnowlab/STRchive/raw/refs/heads/main/data/STRchive-disease-loci.hg38.TRGT.bed";
+            let url = "https://raw.githubusercontent.com/dashnowlab/STRchive/refs/heads/main/data/catalogs/STRchive-disease-loci.hg38.longTR.bed";
             match reqwest::blocking::get(url) {
                 Ok(resp) => {
                     match resp.text() {

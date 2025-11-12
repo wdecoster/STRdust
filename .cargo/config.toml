@@ -1,0 +1,5 @@
+[target.x86_64-unknown-linux-musl]
+# Use musl-gcc as the linker to avoid glibc when building a static binary
+linker = "musl-gcc"
+# Ensure static C runtime when targeting musl
+rustflags = ["-C", "target-feature=+crt-static"]

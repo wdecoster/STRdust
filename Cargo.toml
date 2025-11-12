@@ -1,6 +1,6 @@
 [package]
 name = "STRdust"
-version = "0.11.9"
+version = "0.11.10"
 edition = "2021"
 
 
