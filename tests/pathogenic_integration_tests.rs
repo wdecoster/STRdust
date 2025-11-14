@@ -1,16 +1,20 @@
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Integration tests for STRdust --pathogenic functionality
 /// These tests verify the end-to-end behavior of downloading and processing STRchive data
+/// Get the project root directory
+fn get_project_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
 
 #[test]
 fn test_pathogenic_flag_help_output() {
     // Test that the --pathogenic flag is correctly recognized in help output
     let output = Command::new("cargo")
-        .args(&["run", "--", "--help"])
-        .current_dir("/home/wdecoster/wsl-repos/STRdust")
+        .args(["run", "--", "--help"])
+        .current_dir(get_project_dir())
         .output()
         .expect("Failed to execute STRdust --help");
 
@@ -29,14 +33,14 @@ fn test_pathogenic_flag_help_output() {
 fn test_pathogenic_requires_fasta() {
     // Test that --pathogenic flag requires a valid fasta file
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--",
             "nonexistent.fa",
             "nonexistent.bam",
             "--pathogenic",
         ])
-        .current_dir("/home/wdecoster/wsl-repos/STRdust")
+        .current_dir(get_project_dir())
         .output()
         .expect("Failed to execute STRdust with nonexistent files");
 
@@ -50,27 +54,28 @@ fn test_pathogenic_requires_fasta() {
 #[test]
 fn test_pathogenic_exclusive_with_region() {
     // Use existing test data that we know is valid
-    let test_fasta = "/home/wdecoster/wsl-repos/STRdust/test_data/chr7.fa.gz";
-    let test_bam = "/home/wdecoster/wsl-repos/STRdust/test_data/small-test-phased.bam";
+    let project_dir = get_project_dir();
+    let test_fasta = project_dir.join("test_data/chr7.fa.gz");
+    let test_bam = project_dir.join("test_data/small-test-phased.bam");
 
     // Skip test if files don't exist
-    if !Path::new(test_fasta).exists() || !Path::new(test_bam).exists() {
+    if !test_fasta.exists() || !test_bam.exists() {
         eprintln!("Skipping test - test files don't exist");
         return;
     }
 
     // Test that --pathogenic and --region are mutually exclusive
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--",
-            test_fasta,
-            test_bam,
+            test_fasta.to_str().unwrap(),
+            test_bam.to_str().unwrap(),
             "--pathogenic",
             "--region",
             "chr7:100-200",
         ])
-        .current_dir("/home/wdecoster/wsl-repos/STRdust")
+        .current_dir(get_project_dir())
         .output()
         .expect("Failed to execute STRdust with conflicting flags");
 
@@ -139,7 +144,7 @@ ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
 
     // First run should download the file
     let output1 = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--",
             temp_fasta.to_str().unwrap(),
@@ -148,11 +153,11 @@ ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
             "--threads",
             "1",
         ])
-        .current_dir("/home/wdecoster/wsl-repos/STRdust")
+        .current_dir(get_project_dir())
         .output()
         .expect("Failed to execute STRdust --pathogenic first time");
 
-    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+    let _stderr1 = String::from_utf8_lossy(&output1.stderr);
 
     // Should show download message on first run
     // Note: This might not always be true if cache already exists from other tests
@@ -178,7 +183,7 @@ ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
 
     // Second run should use cache (no download message)
     let output2 = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--",
             temp_fasta.to_str().unwrap(),
@@ -187,7 +192,7 @@ ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
             "--threads",
             "1",
         ])
-        .current_dir("/home/wdecoster/wsl-repos/STRdust")
+        .current_dir(get_project_dir())
         .output()
         .expect("Failed to execute STRdust --pathogenic second time");
 
@@ -214,11 +219,12 @@ fn test_pathogenic_full_workflow() {
     }
 
     // Use the test data that already exists
-    let test_fasta = "/home/wdecoster/wsl-repos/STRdust/test_data/chr7.fa.gz";
-    let test_bam = "/home/wdecoster/wsl-repos/STRdust/test_data/small-test-phased.bam";
+    let project_dir = get_project_dir();
+    let test_fasta = project_dir.join("test_data/chr7.fa.gz");
+    let test_bam = project_dir.join("test_data/small-test-phased.bam");
 
     // Skip if test files don't exist
-    if !Path::new(test_fasta).exists() || !Path::new(test_bam).exists() {
+    if !test_fasta.exists() || !test_bam.exists() {
         eprintln!("Skipping full workflow test - test files don't exist");
         return;
     }
@@ -232,16 +238,16 @@ fn test_pathogenic_full_workflow() {
 
     // Run with --pathogenic flag
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--",
-            test_fasta,
-            test_bam,
+            test_fasta.to_str().unwrap(),
+            test_bam.to_str().unwrap(),
             "--pathogenic",
             "--threads",
             "1",
         ])
-        .current_dir("/home/wdecoster/wsl-repos/STRdust")
+        .current_dir(get_project_dir())
         .output()
         .expect("Failed to execute STRdust --pathogenic full workflow");
 
@@ -290,10 +296,6 @@ fn test_pathogenic_full_workflow() {
 
 #[cfg(test)]
 mod mock_server_tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-    use std::thread;
-    use std::time::Duration;
 
     /// Test with a mock HTTP server to verify download behavior without external dependencies
     #[test]
@@ -304,7 +306,7 @@ mod mock_server_tests {
         // in isolation from the actual STRchive service
 
         // Mock BED data that would be served by our mock server
-        let mock_bed_data = r#"chr1	1000000	1000050	CAG	TEST_LOCUS_1
+        let _mock_bed_data = r#"chr1	1000000	1000050	CAG	TEST_LOCUS_1
 chr2	2000000	2000100	CGG	TEST_LOCUS_2"#;
 
         // TODO: Implement mock HTTP server setup
