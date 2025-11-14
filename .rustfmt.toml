@@ -1,0 +1,17 @@
+# Rust formatting configuration
+# https://rust-lang.github.io/rustfmt/
+
+# Edition to format code for (2015, 2018, 2021)
+edition = "2021"
+
+# Maximum width of each line
+max_width = 100
+
+# Maximum width of the args of function call before falling back to vertical formatting
+fn_call_width = 80
+
+# Maximum width of struct literal before falling back to vertical formatting  
+struct_lit_width = 80
+
+# Use field init shorthand if possible
+use_field_init_shorthand = true

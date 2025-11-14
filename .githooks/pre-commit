@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[STRdust] Running pre-commit checks..."
+
+# Ensure Cargo is available in PATH (handles shells where hooks get a minimal env)
+if ! command -v cargo >/dev/null 2>&1; then
+  # rustup installs cargo here by default
+  if [ -f "$HOME/.cargo/env" ]; then
+    # shellcheck disable=SC1090
+    . "$HOME/.cargo/env"
+  fi
+  export PATH="$HOME/.cargo/bin:${PATH:-}"
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "[STRdust] ❌ Cargo not found in PATH."
+  echo "           Make sure Rust is installed and ~/.cargo/bin is on PATH."
+  echo "           You can run: make setup    (installs rustfmt & clippy after rustup)"
+  exit 1
+fi
+
+# Use Makefile target to keep logic in one place
+if ! make -s pre-commit; then
+  echo "[STRdust] ❌ Pre-commit checks failed. Fix the issues above and try again."
+  exit 1
+fi
+
+echo "[STRdust] ✅ Pre-commit checks passed."

@@ -18,10 +18,7 @@ impl RepeatIntervalIterator {
         // Split by colon first to get chromosome
         let parts: Vec<&str> = reg.split(':').collect();
         if parts.len() != 2 {
-            error!(
-                "Invalid region format: '{}'. Expected format is 'chr:start-end'",
-                reg
-            );
+            error!("Invalid region format: '{}'. Expected format is 'chr:start-end'", reg);
             std::process::exit(1);
         }
 
@@ -31,10 +28,7 @@ impl RepeatIntervalIterator {
         // Split interval by hyphen to get start and end
         let coords: Vec<&str> = interval.split('-').collect();
         if coords.len() != 2 {
-            error!(
-                "Invalid interval format: '{}'. Expected format is 'chr:start-end'",
-                interval
-            );
+            error!("Invalid interval format: '{}'. Expected format is 'chr:start-end'", interval);
             error!("Example of a valid region: 'chr15:34419425-34419450'");
             std::process::exit(1);
         }
@@ -43,10 +37,7 @@ impl RepeatIntervalIterator {
         let start: u32 = match coords[0].parse() {
             Ok(val) => val,
             Err(_) => {
-                error!(
-                    "Could not parse start coordinate '{}' as a number",
-                    coords[0]
-                );
+                error!("Could not parse start coordinate '{}' as a number", coords[0]);
                 std::process::exit(1);
             }
         };
@@ -68,11 +59,7 @@ impl RepeatIntervalIterator {
             }
         };
 
-        RepeatIntervalIterator {
-            current_index: 0,
-            data: vec![repeat],
-            num_intervals: 1,
-        }
+        RepeatIntervalIterator { current_index: 0, data: vec![repeat], num_intervals: 1 }
     }
 
     pub fn from_bed(region_file: &String, fasta: &str) -> Self {
@@ -90,11 +77,7 @@ impl RepeatIntervalIterator {
                 data.push(repeat);
             }
         }
-        RepeatIntervalIterator {
-            current_index: 0,
-            data: data.clone(),
-            num_intervals: data.len(),
-        }
+        RepeatIntervalIterator { current_index: 0, data: data.clone(), num_intervals: data.len() }
     }
 
     pub fn pathogenic(fasta: &str) -> Self {
@@ -277,12 +260,7 @@ impl RepeatInterval {
                     .expect("Failed parsing chromosome length from fai file")
                     > end
             {
-                return Some(Self {
-                    chrom,
-                    start,
-                    end,
-                    created: None,
-                });
+                return Some(Self { chrom, start, end, created: None });
             }
         }
         // if the chromosome is not in the fai file or the end does not fit the interval, return None
@@ -291,12 +269,7 @@ impl RepeatInterval {
         );
     }
     pub fn new(chrom: &str, start: u32, end: u32) -> Self {
-        Self {
-            chrom: chrom.to_string(),
-            start,
-            end,
-            created: None,
-        }
+        Self { chrom: chrom.to_string(), start, end, created: None }
     }
 
     pub fn make_repeat_compressed_sequence(&self, fasta: &String, flanking: u32) -> Vec<u8> {
@@ -309,11 +282,7 @@ impl RepeatInterval {
             )
             .expect("Failed to extract fas_left sequence from fasta for {chrom}:{start}-{end}");
         let fas_right = fas
-            .fetch_seq(
-                &self.chrom,
-                self.end as usize,
-                (self.end + flanking - 2) as usize,
-            )
+            .fetch_seq(&self.chrom, self.end as usize, (self.end + flanking - 2) as usize)
             .expect("Failed to extract fas_right sequence from fasta for {chrom}:{start}-{end}");
         [fas_left, fas_right].concat()
     }
@@ -430,10 +399,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         );
 
         // Verify the parsing worked correctly
-        assert_eq!(
-            result.num_intervals, 5,
-            "Should parse all 5 intervals from mock data"
-        );
+        assert_eq!(result.num_intervals, 5, "Should parse all 5 intervals from mock data");
 
         let intervals: Vec<RepeatInterval> = result.collect();
         assert_eq!(intervals.len(), 5);
@@ -488,10 +454,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         // We can't easily modify the file timestamp in a portable way, so we'll just verify
         // the logic would work by checking the duration calculation
         let seven_days = Duration::from_secs(7 * 24 * 60 * 60);
-        assert!(
-            age < seven_days,
-            "Fresh file should be less than 7 days old"
-        );
+        assert!(age < seven_days, "Fresh file should be less than 7 days old");
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -581,19 +544,13 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
             std::env::var("FASTA_PATH").unwrap_or_else(|_| "test_data/chr7.fa.gz".to_string());
 
         if !std::path::Path::new(&fasta).exists() {
-            eprintln!(
-                "Skipping integration test - fasta file {} does not exist",
-                fasta
-            );
+            eprintln!("Skipping integration test - fasta file {} does not exist", fasta);
             return;
         }
 
         let fai_file = format!("{}.fai", fasta);
         if !std::path::Path::new(&fai_file).exists() {
-            eprintln!(
-                "Skipping integration test - fasta index file {} does not exist",
-                fai_file
-            );
+            eprintln!("Skipping integration test - fasta index file {} does not exist", fai_file);
             return;
         }
 
@@ -612,10 +569,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
             result.num_intervals > 0,
             "Should have downloaded and parsed pathogenic intervals"
         );
-        assert!(
-            cache_file.exists(),
-            "Cache file should exist after download"
-        );
+        assert!(cache_file.exists(), "Cache file should exist after download");
 
         // Verify cache file has reasonable content
         let cache_content =
@@ -624,10 +578,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
             cache_content.contains("chr"),
             "Cache file should contain chromosome information"
         );
-        assert!(
-            cache_content.len() > 100,
-            "Cache file should have substantial content"
-        );
+        assert!(cache_content.len() > 100, "Cache file should have substantial content");
 
         // Test that second call uses cache (no download)
         let result2 = RepeatIntervalIterator::pathogenic(&fasta);
@@ -662,9 +613,6 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         }
 
         let result = crate::repeats::RepeatIntervalIterator::pathogenic(&fasta);
-        assert!(
-            result.num_intervals > 0,
-            "Should have found some pathogenic intervals"
-        );
+        assert!(result.num_intervals > 0, "Should have found some pathogenic intervals");
     }
 }

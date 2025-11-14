@@ -13,12 +13,7 @@ pub struct Consensus {
 
 impl Default for Consensus {
     fn default() -> Consensus {
-        Consensus {
-            seq: None,
-            support: 0,
-            std_dev: 0,
-            score: -1,
-        }
+        Consensus { seq: None, support: 0, std_dev: 0, score: -1 }
     }
 }
 
@@ -42,36 +37,18 @@ pub fn consensus(
     repeat: &crate::repeats::RepeatInterval,
 ) -> Consensus {
     if seqs.is_empty() {
-        return Consensus {
-            seq: None,
-            support: 0,
-            std_dev: 0,
-            score: -1,
-        };
+        return Consensus { seq: None, support: 0, std_dev: 0, score: -1 };
     }
     let num_reads_ = seqs.len();
     let (seqs, std_dev) = remove_outliers(seqs, repeat);
     let num_reads = seqs.len();
-    debug!(
-        "{repeat}: Kept {}/{} reads after dropping outliers",
-        num_reads, num_reads_
-    );
+    debug!("{repeat}: Kept {}/{} reads after dropping outliers", num_reads, num_reads_);
     if num_reads < support {
-        Consensus {
-            seq: None,
-            support: num_reads,
-            std_dev,
-            score: -1,
-        }
+        Consensus { seq: None, support: num_reads, std_dev, score: -1 }
     } else if consensus_reads == 1 {
         // if only on read should be used to generate the consensus, the consensus is a randomly selected read
         let seq = seqs.into_iter().choose(&mut rand::rng()).unwrap();
-        Consensus {
-            seq: Some(seq.to_string()),
-            support: num_reads,
-            std_dev,
-            score: 0,
-        }
+        Consensus { seq: Some(seq.to_string()), support: num_reads, std_dev, score: 0 }
     } else {
         // if there are more than <consensus_reads> reads, downsample before taking the consensus
         // for performance and memory reasons

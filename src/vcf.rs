@@ -214,10 +214,7 @@ impl VCFRecord {
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
             alt_seq: Some(seq.to_string()),
-            length: (
-                (seq.len() as u32 - (repeat.end - repeat.start)).to_string(),
-                ".".to_string(),
-            ),
+            length: ((seq.len() as u32 - (repeat.end - repeat.start)).to_string(), ".".to_string()),
             full_length: ((seq.len() as u32).to_string(), ".".to_string()),
             support: ("1".to_string(), ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
@@ -387,18 +384,12 @@ pub fn write_vcf_header(args: &Cli) {
     // get absolute path to fasta file
     let path = std::fs::canonicalize(&args.fasta)
         .unwrap_or_else(|err| panic!("Failed getting absolute path to fasta: {err}"));
-    println!(
-        r#"##reference={}"#,
-        path.to_str().expect("Failed converting path to string")
-    );
+    println!(r#"##reference={}"#, path.to_str().expect("Failed converting path to string"));
     // get the version of this crate
     let version = env!("CARGO_PKG_VERSION");
     println!(r#"##source=STRdust v{}"#, version);
     // write all arguments to the header
-    println!(
-        r#"##command=STRdust {}"#,
-        std::env::args().collect::<Vec<String>>().join(" ")
-    );
+    println!(r#"##command=STRdust {}"#, std::env::args().collect::<Vec<String>>().join(" "));
     // call faidx to make sure the fasta index exists, we'll need this anyway when genotyping
     let _ = faidx::Reader::from_path(&args.fasta)
         .unwrap_or_else(|err| panic!("Failed opening fasta: {err}"));

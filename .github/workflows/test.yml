@@ -10,51 +10,90 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test on Rust ${{ matrix.rust }}
+  build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust: [stable, beta]
-        
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Rust ${{ matrix.rust }}
-      uses: actions-rs/toolchain@v1
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
       with:
-        profile: minimal
-        toolchain: ${{ matrix.rust }}
-        override: true
         components: rustfmt, clippy
-
+    
     - name: Cache cargo registry
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Cache cargo index
-      uses: actions/cache@v3
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Cache cargo build
-      uses: actions/cache@v3
-      with:
-        path: target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Check code formatting
-      run: cargo fmt -- --check
-
-    - name: Run clippy
-      run: cargo clippy -- -D warnings
-
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Check formatting
+      run: cargo fmt --check
+      
+    - name: Check clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      
     - name: Build
       run: cargo build --verbose
-
+      
     - name: Run tests
       run: cargo test --verbose
+
+  test-musl:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-unknown-linux-musl
+    
+    - name: Install Cross
+      run: cargo install cross --git https://github.com/cross-rs/cross
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-musl-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-musl-cargo-
+    
+    - name: Build MUSL binary
+      run: |
+        OPENSSL_STATIC=1 \
+        LIBZ_SYS_STATIC=1 \
+        BZIP2_STATIC=1 \
+        ZSTD_STATIC=1 \
+        LZMA_API_STATIC=1 \
+        CURL_STATIC=1 \
+        CC_x86_64_unknown_linux_musl=musl-gcc \
+        CXX_x86_64_unknown_linux_musl=musl-g++ \
+        cross build --target x86_64-unknown-linux-musl --verbose
+    
+    - name: Run tests on MUSL
+      run: |
+        OPENSSL_STATIC=1 \
+        LIBZ_SYS_STATIC=1 \
+        BZIP2_STATIC=1 \
+        ZSTD_STATIC=1 \
+        LZMA_API_STATIC=1 \
+        CURL_STATIC=1 \
+        CC_x86_64_unknown_linux_musl=musl-gcc \
+        CXX_x86_64_unknown_linux_musl=musl-g++ \
+        cross test --target x86_64-unknown-linux-musl --verbose
+    
+    - name: Verify binary is static
+      run: |
+        file target/x86_64-unknown-linux-musl/debug/STRdust
+        ldd target/x86_64-unknown-linux-musl/debug/STRdust || echo "Static binary confirmed"

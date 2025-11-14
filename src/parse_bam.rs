@@ -142,10 +142,7 @@ pub fn get_overlapping_reads(
             }
         }
 
-        Some(Reads {
-            seqs: seqs_filtered,
-            ps,
-        })
+        Some(Reads { seqs: seqs_filtered, ps })
     }
 }
 

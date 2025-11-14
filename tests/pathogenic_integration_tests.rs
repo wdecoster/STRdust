@@ -19,14 +19,8 @@ fn test_pathogenic_flag_help_output() {
         .expect("Failed to execute STRdust --help");
 
     let help_text = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        help_text.contains("--pathogenic"),
-        "Help should mention --pathogenic flag"
-    );
-    assert!(
-        help_text.contains("STRchive"),
-        "Help should mention STRchive"
-    );
+    assert!(help_text.contains("--pathogenic"), "Help should mention --pathogenic flag");
+    assert!(help_text.contains("STRchive"), "Help should mention STRchive");
 }
 
 #[test]
@@ -45,10 +39,7 @@ fn test_pathogenic_requires_fasta() {
         .expect("Failed to execute STRdust with nonexistent files");
 
     // Should fail due to invalid input files
-    assert!(
-        !output.status.success(),
-        "Should fail with nonexistent files"
-    );
+    assert!(!output.status.success(), "Should fail with nonexistent files");
 }
 
 #[test]
@@ -165,21 +156,12 @@ ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
     //         "First run should show download message");
 
     // Cache file should exist after first run
-    assert!(
-        cache_file.exists(),
-        "Cache file should exist after first run"
-    );
+    assert!(cache_file.exists(), "Cache file should exist after first run");
 
     // Verify cache file has reasonable content
     let cache_content = fs::read_to_string(&cache_file).expect("Failed to read cache file");
-    assert!(
-        cache_content.len() > 100,
-        "Cache file should have substantial content"
-    );
-    assert!(
-        cache_content.contains("chr"),
-        "Cache file should contain chromosome data"
-    );
+    assert!(cache_content.len() > 100, "Cache file should have substantial content");
+    assert!(cache_content.contains("chr"), "Cache file should contain chromosome data");
 
     // Second run should use cache (no download message)
     let output2 = Command::new("cargo")
@@ -287,10 +269,7 @@ fn test_pathogenic_full_workflow() {
         }
 
         // Cache file should exist
-        assert!(
-            cache_file.exists(),
-            "Cache file should exist after successful run"
-        );
+        assert!(cache_file.exists(), "Cache file should exist after successful run");
     }
 }
 

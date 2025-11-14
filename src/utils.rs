@@ -15,10 +15,7 @@ pub fn reader(filename: &str) -> Box<dyn BufRead> {
     };
 
     if path.extension() == Some(OsStr::new("gz")) {
-        Box::new(BufReader::with_capacity(
-            128 * 1024,
-            read::GzDecoder::new(file),
-        ))
+        Box::new(BufReader::with_capacity(128 * 1024, read::GzDecoder::new(file)))
     } else {
         Box::new(BufReader::with_capacity(128 * 1024, file))
     }

@@ -13,9 +13,6 @@ mod tests {
     #[test]
     #[ignore]
     fn test_create_motif() {
-        assert_eq!(
-            create_motif("CAGCAGCAGCAGCGGCGGCGGCAGCAGCAG"),
-            "(CAG)4(CGG)3(CAG)3"
-        );
+        assert_eq!(create_motif("CAGCAGCAGCAGCGGCGGCGGCAGCAGCAG"), "(CAG)4(CGG)3(CAG)3");
     }
 }

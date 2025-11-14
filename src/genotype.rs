@@ -44,12 +44,7 @@ fn genotype_repeat(
         Some(seq) => seq,
         // Return a missing genotype if the repeat is not found in the fasta file
         None => {
-            return Ok(crate::vcf::VCFRecord::missing_genotype(
-                repeat,
-                "N",
-                ".".to_string(),
-                args,
-            ))
+            return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args))
         }
     };
 
@@ -112,10 +107,7 @@ fn genotype_repeat(
         let seq = reads.seqs.get(&0).unwrap();
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
-        debug!(
-            "{repeat}: Haploid: Creating consensus from {} insertions",
-            insertions.len(),
-        );
+        debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len(),);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             return Ok(crate::vcf::VCFRecord::missing_genotype(
@@ -144,10 +136,7 @@ fn genotype_repeat(
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
-            debug!(
-                "{repeat}: Not enough insertions found: {}",
-                insertions.len()
-            );
+            debug!("{repeat}: Not enough insertions found: {}", insertions.len());
             return Ok(crate::vcf::VCFRecord::missing_genotype(
                 repeat,
                 &repeat_ref_seq,
@@ -170,7 +159,12 @@ fn genotype_repeat(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(&insertions, repeat, args.find_outliers, args.min_haplotype_fraction);
+        let phased = crate::phase_insertions::split(
+            &insertions,
+            repeat,
+            args.find_outliers,
+            args.min_haplotype_fraction,
+        );
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(

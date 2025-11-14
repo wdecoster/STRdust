@@ -113,7 +113,12 @@ pub fn split(
     let mut haplotype_clusters = vec![];
     // clusters have to represent at least min_haplotype_fraction of the reads, but never less than 1
     let min_cluster_size = max((insertions.len() as f32 * min_haplotype_fraction) as usize, 1);
-    debug!("{repeat}: Minimum cluster size: {} reads ({}% of {} total)", min_cluster_size, min_haplotype_fraction * 100.0, insertions.len());
+    debug!(
+        "{repeat}: Minimum cluster size: {} reads ({}% of {} total)",
+        min_cluster_size,
+        min_haplotype_fraction * 100.0,
+        insertions.len()
+    );
 
     for (index, step) in dend.steps().iter().enumerate() {
         // insert the new label with the clusters it contains
@@ -186,10 +191,7 @@ pub fn split(
             // as such we only get sufficiently large independent clusters
             if !large_cluster_seen.contains(parent) {
                 haplotype_clusters.push(*cluster);
-                debug!(
-                    "{repeat}: Adding cluster {} to candidate haplotype clusters",
-                    cluster
-                );
+                debug!("{repeat}: Adding cluster {} to candidate haplotype clusters", cluster);
             }
             large_cluster_seen.push(*cluster);
         }
