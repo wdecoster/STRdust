@@ -170,7 +170,7 @@ fn genotype_repeat(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(&insertions, repeat, args.find_outliers);
+        let phased = crate::phase_insertions::split(&insertions, repeat, args.find_outliers, args.min_haplotype_fraction);
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(
@@ -420,6 +420,7 @@ mod tests {
             somatic: false,
             unphased: false,
             find_outliers: false,
+            min_haplotype_fraction: 0.1,
             threads: 1,
             sample: None,
             haploid: None,
@@ -452,6 +453,7 @@ mod tests {
             somatic: false,
             unphased: true,
             find_outliers: false,
+            min_haplotype_fraction: 0.1,
             threads: 1,
             sample: None,
             haploid: Some(String::from("chr7")),
@@ -478,6 +480,7 @@ mod tests {
             somatic: false,
             unphased: true,
             find_outliers: false,
+            min_haplotype_fraction: 0.1,
             threads: 1,
             sample: None,
             haploid: None,
@@ -510,6 +513,7 @@ mod tests {
             somatic: true,
             unphased: false,
             find_outliers: false,
+            min_haplotype_fraction: 0.1,
             threads: 1,
             sample: None,
             haploid: None,
@@ -542,6 +546,7 @@ mod tests {
             somatic: true,
             unphased: false,
             find_outliers: false,
+            min_haplotype_fraction: 0.1,
             threads: 1,
             sample: None,
             haploid: None,

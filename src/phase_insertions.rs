@@ -14,6 +14,7 @@ pub fn split(
     insertions: &Vec<String>,
     repeat: &crate::repeats::RepeatInterval,
     check_outliers: bool,
+    min_haplotype_fraction: f32,
 ) -> SplitSequences {
     // the insertions are from an unphased experiment
     // and should be split in one (if homozygous) or two haplotypes
@@ -110,9 +111,9 @@ pub fn split(
     let mut clusters = vec![];
     // create a vector with candidate haplotype-clusters
     let mut haplotype_clusters = vec![];
-    // clusters have to represent at least 10% of the reads, but never less than 1
-    let min_cluster_size = max((insertions.len() as f32 / 10.0) as usize, 1);
-    debug!("{repeat}: Minimum cluster size: {} reads", min_cluster_size);
+    // clusters have to represent at least min_haplotype_fraction of the reads, but never less than 1
+    let min_cluster_size = max((insertions.len() as f32 * min_haplotype_fraction) as usize, 1);
+    debug!("{repeat}: Minimum cluster size: {} reads ({}% of {} total)", min_cluster_size, min_haplotype_fraction * 100.0, insertions.len());
 
     for (index, step) in dend.steps().iter().enumerate() {
         // insert the new label with the clusters it contains
@@ -403,6 +404,7 @@ mod tests {
                 created: None,
             },
             false,
+            0.1,
         );
         assert!(splitseqs.hap1.len() == splitseqs.hap2.unwrap().len());
         // check that all sequences in hap1 are the same length
@@ -444,6 +446,7 @@ mod tests {
                 created: None,
             },
             false,
+            0.1,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
@@ -484,6 +487,7 @@ mod tests {
                 created: None,
             },
             false,
+            0.1,
         );
         assert!(splitseqs.hap1.len() + splitseqs.hap2.unwrap().len() == insertions.len());
     }
@@ -527,6 +531,7 @@ mod tests {
                 created: None,
             },
             false,
+            0.1,
         );
         assert!(splitseqs.hap2.is_none());
         println!("hap1: {:?}", splitseqs.hap1);
@@ -568,6 +573,7 @@ mod tests {
                 created: None,
             },
             false,
+            0.1,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
@@ -640,6 +646,7 @@ mod tests {
                 created: None,
             },
             false,
+            0.1,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();

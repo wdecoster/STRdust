@@ -38,7 +38,7 @@ pub struct Cli {
     pathogenic: bool,
 
     /// minimal length of insertion/deletion operation
-    #[arg(short, long, default_value_t = 5)]
+    #[arg(short, long, default_value_t = 1)]
     minlen: usize,
 
     /// minimal number of supporting reads per haplotype
@@ -64,6 +64,10 @@ pub struct Cli {
     /// Identify poorly supported outlier expansions (only with --unphased)
     #[arg(long, default_value_t = false)]
     find_outliers: bool,
+
+    /// Minimum fraction of reads required for a cluster to be considered a haplotype (only with --unphased)
+    #[arg(long, default_value_t = 0.1)]
+    min_haplotype_fraction: f32,
 
     /// comma-separated list of haploid (sex) chromosomes
     #[arg(long)]
