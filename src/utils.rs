@@ -35,15 +35,25 @@ pub fn check_files_exist(args: &crate::Cli) {
             error!("Alignment file not found: {}", args.bam);
             std::process::exit(1);
         }
-        let index_extension = if args.bam.ends_with(".cram") {
-            "crai"
+
+        // Check for index file - support both .bai/.csi for BAM and .crai for CRAM
+        if args.bam.ends_with(".cram") {
+            let index = format!("{}.crai", args.bam);
+            if !Path::new(&index).exists() {
+                error!("Index file not found: {}", index);
+                std::process::exit(1);
+            }
         } else {
-            "bai"
-        };
-        let index = format!("{}.{}", args.bam, index_extension);
-        if !Path::new(&index).exists() {
-            error!("Index file not found: {}", index);
-            std::process::exit(1);
+            // For BAM files, check for .bai first, then .csi as fallback
+            let bai_index = format!("{}.bai", args.bam);
+            let csi_index = format!("{}.csi", args.bam);
+            if !Path::new(&bai_index).exists() && !Path::new(&csi_index).exists() {
+                error!(
+                    "Index file not found: {} or {}. Please create an index with 'samtools index'",
+                    bai_index, csi_index
+                );
+                std::process::exit(1);
+            }
         }
     }
     if !Path::new(&args.fasta).exists() {
