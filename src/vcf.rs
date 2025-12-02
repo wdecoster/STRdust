@@ -1,5 +1,5 @@
-use crate::consensus::Consensus;
 use crate::Cli;
+use crate::consensus::Consensus;
 use distance::levenshtein;
 use human_sort::compare as human_compare;
 use log::debug;
@@ -441,12 +441,12 @@ pub fn write_vcf_header(args: &Cli) {
         Some(name) => name,
         None => {
             // use basename of bam and remove file extension
-            let name = std::path::Path::new(&args.bam)
+
+            std::path::Path::new(&args.bam)
                 .file_stem()
                 .unwrap()
                 .to_str()
-                .unwrap();
-            name
+                .unwrap()
         }
     };
     println!("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{name}",);

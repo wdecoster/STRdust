@@ -1,6 +1,6 @@
-use kodama::{linkage, Method};
+use kodama::{Method, linkage};
 use levenshtein::levenshtein;
-use log::{debug, error, log_enabled, Level};
+use log::{Level, debug, error, log_enabled};
 use std::{cmp::max, collections::HashMap};
 
 pub struct SplitSequences {
@@ -198,7 +198,9 @@ pub fn split(
     }
     match haplotype_clusters.len() {
         0 => {
-            debug!("{repeat}: No haplotype clusters found! Treating this as homozygous, but here could be dragons");
+            debug!(
+                "{repeat}: No haplotype clusters found! Treating this as homozygous, but here could be dragons"
+            );
             SplitSequences {
                 hap1: insertions.clone(),
                 hap2: None,
@@ -410,10 +412,12 @@ mod tests {
         );
         assert!(splitseqs.hap1.len() == splitseqs.hap2.unwrap().len());
         // check that all sequences in hap1 are the same length
-        assert!(splitseqs
-            .hap1
-            .iter()
-            .all(|x| x.len() == splitseqs.hap1[0].len()));
+        assert!(
+            splitseqs
+                .hap1
+                .iter()
+                .all(|x| x.len() == splitseqs.hap1[0].len())
+        );
     }
 
     #[test]

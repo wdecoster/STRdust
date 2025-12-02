@@ -120,7 +120,7 @@ fn remove_outliers<'a>(
         let filtered_seqs = seqs
             .iter()
             .zip(lengths.iter())
-            .filter(|(_, &len)| len > min_val && len < max_val)
+            .filter(|(_, len)| **len > min_val && **len < max_val)
             .map(|(seq, _)| seq)
             .collect::<Vec<&String>>();
         (filtered_seqs, std_dev)

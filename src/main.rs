@@ -85,9 +85,9 @@ pub struct Cli {
     #[arg(long, default_value_t = 20)]
     consensus_reads: usize,
 
-    /// Max number of reads to extract per locus from the bam file for genotyping
-    #[arg(long, default_value_t = 60)]
-    max_number_reads: usize,
+    /// Max number of reads to extract per locus from the bam file for genotyping (use -1 for all reads)
+    #[arg(long, default_value_t = 60, allow_hyphen_values = true)]
+    max_number_reads: isize,
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {

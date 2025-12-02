@@ -16,3 +16,4 @@ Cargo.lock
 .vscode/sftp.json
 HG00096.hg38.cram.crai
 GM18501.LSK110.R9.guppy646.sup.with5mC.pass.phased.bam.bai
+.vscode/sftp_megalon.json

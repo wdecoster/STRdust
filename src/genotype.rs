@@ -1,4 +1,4 @@
-use crate::{parse_bam, Cli};
+use crate::{Cli, parse_bam};
 use log::debug;
 use minimap2::*;
 use regex::Regex;
@@ -44,7 +44,7 @@ fn genotype_repeat(
         Some(seq) => seq,
         // Return a missing genotype if the repeat is not found in the fasta file
         None => {
-            return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args))
+            return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args));
         }
     };
 
@@ -208,10 +208,10 @@ fn genotype_repeat(
                 }
             }
         }
-        if let Some(ref mut outliers_vec) = outliers {
-            if let Some(outliers_found) = phased.outliers {
-                outliers_vec.push(outliers_found.join(","));
-            }
+        if let Some(ref mut outliers_vec) = outliers
+            && let Some(outliers_found) = phased.outliers
+        {
+            outliers_vec.push(outliers_found.join(","));
         }
     } else {
         // input alignments are already phased
@@ -530,7 +530,9 @@ mod tests {
     #[test]
     fn test_genotype_repeat_url() {
         let args = Cli {
-            bam: String::from("https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram"),
+            bam: String::from(
+                "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram",
+            ),
             fasta: String::from("test_data/chr7.fa.gz"),
             region: None,
             region_file: None,

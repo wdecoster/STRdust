@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use std::io::Write;
 use std::{io, sync::Mutex};
 
-use crate::{genotype, parse_bam, utils::check_files_exist, Cli};
+use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);

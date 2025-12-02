@@ -1,7 +1,7 @@
 [package]
 name = "STRdust"
-version = "0.11.10"
-edition = "2021"
+version = "0.12.0"
+edition = "2024"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -12,8 +12,8 @@ env_logger = "0.11.8"
 flate2 = "1.1.2"
 log = "0.4.27"
 rayon = "1.5.3"
-rust-htslib = { version = "0.50.0", features = ["s3", "curl"] }
-bio = "2.2.0"
+rust-htslib = { version = "0.51.0", features = ["s3", "curl"] }
+bio = "3.0.0"
 minimap2 = { version = "0.1.20", features = ["htslib"] }
 kodama = "0.3.0"
 regex = "1.11.1"

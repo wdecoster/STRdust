@@ -1,9 +1,9 @@
 use log::warn;
 use rand::seq::IndexedRandom;
 use rust_htslib::bam;
+use rust_htslib::bam::Read;
 use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
-use rust_htslib::bam::Read;
 use std::collections::HashMap;
 use std::env;
 use url::Url;
@@ -35,7 +35,7 @@ fn setup_ssl_certificates() {
     // Try each path in order
     for path in possible_paths {
         if std::path::Path::new(path).exists() {
-            env::set_var("CURL_CA_BUNDLE", path);
+            unsafe { env::set_var("CURL_CA_BUNDLE", path) };
             return;
         }
     }
@@ -75,7 +75,7 @@ pub fn get_overlapping_reads(
     bam: &mut bam::IndexedReader,
     repeat: &crate::repeats::RepeatInterval,
     unphased: bool,
-    max_number_reads: usize,
+    max_number_reads: isize,
 ) -> Option<Reads> {
     let tid = bam
         .header()
@@ -115,13 +115,19 @@ pub fn get_overlapping_reads(
         if unphased {
             warn!("Cannot genotype {repeat}: no reads found");
         } else {
-            warn!("Cannot genotype {repeat}: no phased reads found. Use --unphased to genotype unphased reads.");
+            warn!(
+                "Cannot genotype {repeat}: no phased reads found. Use --unphased to genotype unphased reads."
+            );
         }
         None
+    } else if max_number_reads == -1 {
+        // if max_number_reads is -1, use all reads without downsampling
+        Some(Reads { seqs, ps })
     } else {
         // if more than <max_number_reads> spanning reads are found in seqs, randomly select just <max_number_reads> items from the vector
         // if unphased, just select <max_number_reads> reads from phase 0
         // if phased, select <max_number_reads>/2 reads from each phase
+        let max_number_reads = max_number_reads as usize;
         let mut rng = rand::rng();
         let mut seqs_filtered = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
         let max_reads_per_phase = HashMap::from([
@@ -196,7 +202,9 @@ fn test_get_overlapping_reads() {
 
 #[test]
 fn test_get_overlapping_reads_url() {
-    let bam = String::from("https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram");
+    let bam = String::from(
+        "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram",
+    );
     let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
         chrom: String::from("chr20"),
