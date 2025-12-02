@@ -1,6 +1,6 @@
 # Makefile for STRdust development
 
-.PHONY: all build test clean fmt clippy build-musl help install-hooks pre-push pre-commit ci setup audit outdated fmt-check docs install bench
+.PHONY: all build test clean fmt clippy build-musl musl help install-hooks pre-push pre-commit ci setup audit outdated fmt-check docs install bench
 
 # Default target
 all: fmt clippy test build
@@ -25,6 +25,9 @@ build-musl:
 		cargo build --release --target x86_64-unknown-linux-musl; \
 	fi
 	@echo "Binary: target/x86_64-unknown-linux-musl/release/STRdust"
+
+# Alias for build-musl
+musl: build-musl
 
 # Run tests
 test:
