@@ -49,7 +49,7 @@ jobs:
     # Standard build for non-musl targets
     - name: Build (Standard)
       if: '!matrix.use_cross'
-      run: cargo build --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --locked
+      run: cargo build --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
     # Cross build for musl target
     - name: Build (Cross)
@@ -61,7 +61,7 @@ jobs:
         ZSTD_STATIC=1 \
         LZMA_API_STATIC=1 \
         CURL_STATIC=1 \
-        cross build --target ${{ matrix.target }} --release --locked
+        cross build --target ${{ matrix.target }} --release
 
     - name: Verify MUSL binary is static
       if: matrix.use_cross
