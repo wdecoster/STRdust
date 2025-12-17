@@ -160,7 +160,6 @@ For network-dependent tests (testing STRchive download functionality):
 TEST_PATHOGENIC_NETWORK=1 cargo test
 ```
 
-See [PATHOGENIC_TESTING.md](PATHOGENIC_TESTING.md) for detailed information about the pathogenic flag testing.
 
 ### Code Quality Standards
 
