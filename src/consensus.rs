@@ -57,7 +57,6 @@ pub fn consensus(
             seqs.into_iter()
                 .choose_multiple(&mut rand::rng(), consensus_reads)
                 .into_iter()
-                .cloned()
                 .map(|seq| seq.bytes().collect::<Vec<u8>>())
                 .collect::<Vec<Vec<u8>>>()
         } else {
