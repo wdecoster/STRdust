@@ -3,10 +3,17 @@ use indicatif::ParallelProgressIterator;
 use indicatif::ProgressIterator;
 use log::{debug, error};
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::io::Write;
 use std::{io, sync::Mutex};
 
 use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
+
+// Thread-local storage for BAM readers to avoid creating a new reader for each locus
+// This dramatically reduces file descriptor usage when processing many loci in parallel
+thread_local! {
+    static BAM_READER: RefCell<Option<rust_htslib::bam::IndexedReader>> = const { RefCell::new(None) };
+}
 
 pub fn genotype_repeats(args: Cli) {
     debug!("Genotyping STRs in {}", args.bam);
@@ -35,19 +42,32 @@ pub fn genotype_repeats(args: Cli) {
             .build_global()
             .expect("Failed to create threadpool");
         // genotypes contains the output of the genotyping, a struct instance
-        let genotypes = Mutex::new(Vec::new());
+        // Pre-allocate with exact capacity to avoid reallocation
+        let genotypes = Mutex::new(Vec::with_capacity(repeats.num_intervals));
         // par_bridge does not guarantee that results are returned in order
         let num_intervals = repeats.num_intervals;
         repeats
             .par_bridge()
             .progress_count(num_intervals as u64)
             .for_each(|mut repeat| {
-                if let Ok(output) = genotype::genotype_repeat_multithreaded(&mut repeat, &args) {
-                    let mut geno = genotypes.lock().expect("Unable to lock genotypes mutex");
-                    geno.push(output);
-                } else {
-                    error!("Problem processing {repeat}");
-                }
+                // Use thread-local BAM reader to avoid file descriptor exhaustion
+                // Each thread maintains its own reader and reuses it for all loci
+                BAM_READER.with(|reader_cell| {
+                    let mut reader_opt = reader_cell.borrow_mut();
+                    if reader_opt.is_none() {
+                        // First use in this thread - create a new reader
+                        *reader_opt = Some(parse_bam::create_bam_reader(&args.bam, &args.fasta));
+                    }
+                    let reader = reader_opt.as_mut().unwrap();
+                    if let Ok(output) =
+                        genotype::genotype_repeat_singlethreaded(&mut repeat, &args, reader)
+                    {
+                        let mut geno = genotypes.lock().expect("Unable to lock genotypes mutex");
+                        geno.push(output);
+                    } else {
+                        error!("Problem processing {repeat}");
+                    }
+                });
             });
         let mut genotypes_vec = genotypes.lock().unwrap();
         // The final output is sorted by chrom, start and end
@@ -69,9 +89,21 @@ pub fn genotype_repeats(args: Cli) {
             .par_bridge()
             .progress_count(num_intervals as u64)
             .for_each(|mut repeat| {
-                if let Ok(output) = genotype::genotype_repeat_multithreaded(&mut repeat, &args) {
-                    println!("{output}");
-                }
+                // Use thread-local BAM reader to avoid file descriptor exhaustion
+                // Each thread maintains its own reader and reuses it for all loci
+                BAM_READER.with(|reader_cell| {
+                    let mut reader_opt = reader_cell.borrow_mut();
+                    if reader_opt.is_none() {
+                        // First use in this thread - create a new reader
+                        *reader_opt = Some(parse_bam::create_bam_reader(&args.bam, &args.fasta));
+                    }
+                    let reader = reader_opt.as_mut().unwrap();
+                    if let Ok(output) =
+                        genotype::genotype_repeat_singlethreaded(&mut repeat, &args, reader)
+                    {
+                        println!("{output}");
+                    }
+                });
             });
     }
 }

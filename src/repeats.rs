@@ -274,6 +274,14 @@ impl RepeatInterval {
 
     pub fn make_repeat_compressed_sequence(&self, fasta: &String, flanking: u32) -> Vec<u8> {
         let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
+        self.make_repeat_compressed_sequence_with_reader(&fas, flanking)
+    }
+
+    pub fn make_repeat_compressed_sequence_with_reader(
+        &self,
+        fas: &faidx::Reader,
+        flanking: u32,
+    ) -> Vec<u8> {
         let fas_left = fas
             .fetch_seq(
                 &self.chrom,
@@ -289,6 +297,10 @@ impl RepeatInterval {
 
     pub fn reference_repeat_sequence(&self, fasta: &String) -> Option<String> {
         let fas = faidx::Reader::from_path(fasta).expect("Failed to read fasta");
+        self.reference_repeat_sequence_with_reader(&fas)
+    }
+
+    pub fn reference_repeat_sequence_with_reader(&self, fas: &faidx::Reader) -> Option<String> {
         let repeat_ref_sequence = std::str::from_utf8(
             &fas.fetch_seq(&self.chrom, self.start as usize - 1, self.end as usize)
                 .expect("Failed to extract repeat sequence from fasta for {chrom}:{start}-{end}"),
