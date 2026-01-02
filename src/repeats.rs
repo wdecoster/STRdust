@@ -641,7 +641,9 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         let test_fasta = temp_dir.join("test_bed_boundary.fa");
         let test_fai = temp_dir.join("test_bed_boundary.fa.fai");
 
-        let fasta_content = ">chr1\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC";
+        // Create a sequence of exactly 1000 bp
+        let sequence = "ATGC".repeat(250); // 4 * 250 = 1000 bp
+        let fasta_content = format!(">chr1\n{}", sequence);
         // Chromosome length is 1000
         let fai_content = "chr1\t1000\t6\t60\t61";
 
@@ -672,7 +674,9 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         let test_fasta = temp_dir.join("test_bed_oob.fa");
         let test_fai = temp_dir.join("test_bed_oob.fa.fai");
 
-        let fasta_content = ">chr1\nATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC";
+        // Create a sequence of exactly 1000 bp
+        let sequence = "ATGC".repeat(250); // 4 * 250 = 1000 bp
+        let fasta_content = format!(">chr1\n{}", sequence);
         // Chromosome length is 1000
         let fai_content = "chr1\t1000\t6\t60\t61";
 
