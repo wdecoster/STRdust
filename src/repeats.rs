@@ -254,19 +254,24 @@ impl RepeatInterval {
             .expect("Failed to read fai file")
             .lines()
         {
-            if line.split('\t').collect::<Vec<&str>>()[0] == chrom
-                && line.split('\t').collect::<Vec<&str>>()[1]
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts[0] == chrom {
+                let chrom_length = parts[1]
                     .parse::<u32>()
-                    .expect("Failed parsing chromosome length from fai file")
-                    > end
-            {
-                return Some(Self { chrom, start, end, created: None });
+                    .expect("Failed parsing chromosome length from fai file");
+                // BED format uses 0-based half-open coordinates, so end is exclusive
+                // Therefore, end can equal the chromosome length
+                if chrom_length >= end {
+                    return Some(Self { chrom, start, end, created: None });
+                } else {
+                    panic!(
+                        "End coordinate {end} is out of bounds for chromosome {chrom} (length: {chrom_length})"
+                    );
+                }
             }
         }
-        // if the chromosome is not in the fai file or the end does not fit the interval, return None
-        panic!(
-            "Chromosome {chrom} is not in the fasta file or the end coordinate is out of bounds"
-        );
+        // if the chromosome is not in the fai file, panic with clear message
+        panic!("Chromosome {chrom} is not in the fasta file");
     }
     pub fn new(chrom: &str, start: u32, end: u32) -> Self {
         Self { chrom: chrom.to_string(), start, end, created: None }
@@ -626,5 +631,65 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
 
         let result = crate::repeats::RepeatIntervalIterator::pathogenic(&fasta);
         assert!(result.num_intervals > 0, "Should have found some pathogenic intervals");
+    }
+
+    #[test]
+    fn test_bed_end_coordinate_at_chromosome_boundary() {
+        // Test that BED format end coordinate equal to chromosome length is valid
+        // BED format uses 0-based half-open coordinates, so end is exclusive
+        let temp_dir = std::env::temp_dir();
+        let test_fasta = temp_dir.join("test_bed_boundary.fa");
+        let test_fai = temp_dir.join("test_bed_boundary.fa.fai");
+
+        // Create a sequence of exactly 1000 bp
+        let sequence = "ATGC".repeat(250); // 4 * 250 = 1000 bp
+        let fasta_content = format!(">chr1\n{}", sequence);
+        // Chromosome length is 1000
+        let fai_content = "chr1\t1000\t6\t60\t61";
+
+        std::fs::write(&test_fasta, fasta_content).expect("Failed to write test fasta");
+        std::fs::write(&test_fai, fai_content).expect("Failed to write test fai");
+
+        // Test 1: End coordinate equal to chromosome length should be valid
+        // This represents the region [900, 1000) which includes positions 900-999
+        let bed_data_at_boundary = "chr1\t900\t1000\tATGC\tgene1";
+        let result = RepeatIntervalIterator::from_string_data(
+            bed_data_at_boundary,
+            &test_fasta.to_string_lossy(),
+        );
+        let intervals: Vec<RepeatInterval> = result.collect();
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].end, 1000);
+
+        // Clean up
+        let _ = std::fs::remove_file(&test_fasta);
+        let _ = std::fs::remove_file(&test_fai);
+    }
+
+    #[test]
+    #[should_panic(expected = "End coordinate 1001 is out of bounds for chromosome chr1")]
+    fn test_bed_end_coordinate_beyond_chromosome_boundary() {
+        // Test that end coordinate beyond chromosome length properly fails
+        let temp_dir = std::env::temp_dir();
+        let test_fasta = temp_dir.join("test_bed_oob.fa");
+        let test_fai = temp_dir.join("test_bed_oob.fa.fai");
+
+        // Create a sequence of exactly 1000 bp
+        let sequence = "ATGC".repeat(250); // 4 * 250 = 1000 bp
+        let fasta_content = format!(">chr1\n{}", sequence);
+        // Chromosome length is 1000
+        let fai_content = "chr1\t1000\t6\t60\t61";
+
+        std::fs::write(&test_fasta, fasta_content).expect("Failed to write test fasta");
+        std::fs::write(&test_fai, fai_content).expect("Failed to write test fai");
+
+        // End coordinate beyond chromosome length should panic with clear message
+        let bed_data_oob = "chr1\t900\t1001\tATGC\tgene1";
+        let _result =
+            RepeatIntervalIterator::from_string_data(bed_data_oob, &test_fasta.to_string_lossy());
+
+        // Clean up (won't reach here due to panic, but good practice)
+        let _ = std::fs::remove_file(&test_fasta);
+        let _ = std::fs::remove_file(&test_fai);
     }
 }
