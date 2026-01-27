@@ -93,6 +93,15 @@ impl VCFRecord {
         let (genotype1, genotype2) =
             determine_genotypes(&repeat_ref_sequence, &allele1.seq, &allele2.seq);
 
+        debug!(
+            "Genotype result for {repeat}: {}|{} (ref len: {}, allele1 len: {}, allele2 len: {})",
+            genotype1,
+            genotype2,
+            repeat_ref_sequence.len(),
+            allele1.seq.len(),
+            allele2.seq.len()
+        );
+
         let alts = match (genotype1.as_str(), genotype2.as_str()) {
             ("1", "0") | ("1", ".") | ("1", "1") => allele1.seq, // if both alleles are the same, only report one
             ("0", "1") | (".", "1") => allele2.seq,
@@ -244,66 +253,125 @@ fn determine_genotypes(
     allele1: &str,
     allele2: &str,
 ) -> (String, String) {
-    // if the consensus is very similar to the reference the variant is considered ref
-    // for this I use a threshold of 5% of the length of the repeat sequence in the reference
-    // e.g. if the repeat is 300bp in the reference this will allow an edit distance of 15
-    // not sure if these numbers require further tuning
-    // note that is an integer division, i.e. floor division
-    // the next_alt variable dictates which genotype code the genotype2 can be in the case it is not the same as genotype1
-    // this avoids a 0/2 genotype
-    // the levenshtein distance should not be calculated if there is a large difference in length between the sequences, as this is computationally expensive and unnecessary
-    // the ratio is used to determine if the sequences are similar enough to be considered the same allele
-    let (genotype1, next_alt) = if allele1 == "." {
-        (".", "1")
-    // if the length ratio is less than 0.9, there is a large difference in length between the sequences
-    // therefore the allele is considered different from the reference
-    } else if length_ratio(allele1, repeat_ref_sequence) < 0.9 {
-        ("1", "2")
-    // if the length ratio is between 0.9 and 1 (with the latter indicating the same length) then we check the edit distance
-    // if the edit distance is less than 5% of the length of the repeat sequence in the reference, the allele is considered the same as the reference
-    } else if repeat_ref_sequence == allele1
-        || levenshtein(allele1, repeat_ref_sequence) < repeat_ref_sequence.len() / 20
-    {
-        ("0", "1")
-    // if the edit distance is larger than the threshold, the allele is considered different from the reference
-    } else {
-        ("1", "2")
+    // STR genotyping logic with clear decision matrix
+    //
+    // Strategy:
+    // 1. Check if each allele is similar enough to reference (5% edit distance threshold)
+    // 2. Check if alleles are similar to each other (for homozygous calls)
+    // 3. Use match statement to handle all combinations explicitly
+    //
+    // Key principle: Both alleles can be called as reference (0|0) if they both
+    // meet the similarity threshold, even if they differ slightly from each other
+
+    // Handle missing alleles
+    if allele1 == "." && allele2 == "." {
+        return (String::from("."), String::from("."));
+    } else if allele1 == "." {
+        let gt2 = if is_similar_to_ref(allele2, repeat_ref_sequence) {
+            "0"
+        } else {
+            "1"
+        };
+        return (String::from("."), String::from(gt2));
+    } else if allele2 == "." {
+        let gt1 = if is_similar_to_ref(allele1, repeat_ref_sequence) {
+            "0"
+        } else {
+            "1"
+        };
+        return (String::from(gt1), String::from("."));
+    }
+
+    // Determine if each allele matches reference
+    let allele1_is_ref = is_similar_to_ref(allele1, repeat_ref_sequence);
+    let allele2_is_ref = is_similar_to_ref(allele2, repeat_ref_sequence);
+
+    // Determine genotypes based on reference matching
+    // Only compute alleles_same if needed (when neither matches ref)
+    let genotypes = match (allele1_is_ref, allele2_is_ref) {
+        // Both match reference -> 0|0
+        (true, true) => ("0", "0"),
+
+        // One matches ref, the other doesn't
+        (true, false) => ("0", "1"),
+        (false, true) => ("1", "0"),
+
+        // Neither matches reference - now we need to check if they're similar to each other
+        (false, false) => {
+            if are_alleles_similar(allele1, allele2) {
+                ("1", "1") // Similar to each other
+            } else {
+                ("1", "2") // Different from each other
+            }
+        }
     };
 
-    let genotype2 = if allele2 == "." {
-        "."
-    // first check if the alt alleles are the same. if so, they have the same genotype
-    } else if allele2 == allele1 {
-        genotype1
-    // if the length ratio is less than 0.9, there is a large difference between the sequence and they cannot be the same allele
-    // but then we still have to check if the allele is the same as the reference
-    } else if length_ratio(allele1, allele2) < 0.9 {
-        // if the allele is different from the reference and from the first allele, we pick the next_alt value
-        if length_ratio(allele2, repeat_ref_sequence) < 0.9 {
-            next_alt
-        // if the allele is similar to the reference, we pick the 0 value
-        } else if levenshtein(allele2, repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
-            "0"
-        // if the allele is different from the reference, we pick the next_alt value
-        } else {
-            next_alt
-        }
-    // if the length_ratio of allele1 and allele2 was not less than 0.9, we check the edit distance
-    // if the edit distance is less that 5%, we considered the alleles the same
-    } else if levenshtein(allele2, allele1) < allele1.len() / 20 {
-        genotype1
-    // if the edit distance is larger than the threshold, the allele is compared with the reference
-    } else if length_ratio(allele2, repeat_ref_sequence) < 0.9 {
-        next_alt
-    // if the allele is not too different in length from the reference, we check its edit distance
-    // the threshold is the same as for the first allele, 5% of the length of the repeat sequence in the reference
-    } else if levenshtein(allele2, repeat_ref_sequence) < repeat_ref_sequence.len() / 20 {
-        "0"
-    // if the allele is actualy different from the reference, we pick the next_alt value
-    } else {
-        next_alt
-    };
-    (String::from(genotype1), String::from(genotype2))
+    (String::from(genotypes.0), String::from(genotypes.1))
+}
+
+// Check if an allele is similar enough to reference to be called as ref (0)
+fn is_similar_to_ref(allele: &str, reference: &str) -> bool {
+    // Exact match
+    if allele == reference {
+        debug!("  is_similar_to_ref: exact match");
+        return true;
+    }
+
+    // Quick length-based filter: if length ratio <0.9, lengths too different
+    // This is consistent with are_alleles_similar()
+    let len_ratio = length_ratio(allele, reference);
+    if len_ratio < 0.9 {
+        debug!("  is_similar_to_ref: length ratio {} < 0.9, rejecting", len_ratio);
+        return false;
+    }
+
+    // Use 5% edit distance threshold (same as original implementation)
+    // Integer division means we're conservative
+    // For 12bp: threshold = 0, so only exact matches pass
+    // For 60bp: threshold = 3, so up to 2bp differences allowed
+    // For 300bp: threshold = 15, so up to 14bp differences allowed
+    let threshold = reference.len() / 20; // 5%, floor division
+
+    // Optimization: if threshold is 0, we already checked for exact match above
+    // No point computing expensive levenshtein distance - result will be false
+    if threshold == 0 {
+        debug!("  is_similar_to_ref: threshold is 0, rejecting");
+        return false;
+    }
+
+    let edit_distance = levenshtein(allele, reference);
+    let result = edit_distance < threshold; // Strictly less than (not <=)
+    debug!(
+        "  is_similar_to_ref: edit_distance {} vs threshold {}, result: {}",
+        edit_distance, threshold, result
+    );
+
+    result
+}
+
+// Check if two alleles should be considered the same allele
+// For STRs, focus on length similarity (same repeat count) rather than exact sequence
+fn are_alleles_similar(allele1: &str, allele2: &str) -> bool {
+    // Exact match
+    if allele1 == allele2 {
+        return true;
+    }
+
+    // For STRs, alleles with same length but different interruptions/SNPs
+    // are often considered the same allele variant
+    // Use length ratio >0.9 AND edit distance <10% as criteria
+    let len_ratio = length_ratio(allele1, allele2);
+    if len_ratio < 0.9 {
+        return false;
+    }
+
+    // If lengths very similar, check edit distance
+    // Allow up to 5% differences (accounts for sequencing errors, SNPs in repeat)
+    let max_len = allele1.len().max(allele2.len());
+    let threshold = std::cmp::max(1, max_len / 20); // 5%
+    let edit_distance = levenshtein(allele1, allele2);
+
+    edit_distance < threshold
 }
 
 impl fmt::Display for VCFRecord {

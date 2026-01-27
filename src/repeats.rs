@@ -237,9 +237,11 @@ impl RepeatInterval {
     // parse a bed record
     pub fn from_bed(rec: &bed::Record, fasta: &str) -> Option<Self> {
         let chrom = rec.chrom().to_string();
-        let start = rec.start().try_into().unwrap();
-        let end = rec.end().try_into().unwrap();
-        RepeatInterval::new_interval(chrom, start, end, fasta)
+        // BED format is 0-based, half-open [start, end)
+        // Convert to 1-based coordinates for VCF output: start + 1
+        let start: u32 = rec.start().try_into().unwrap();
+        let end: u32 = rec.end().try_into().unwrap();
+        RepeatInterval::new_interval(chrom, start + 1, end, fasta)
     }
 
     fn new_interval(chrom: String, start: u32, end: u32, fasta: &str) -> Option<Self> {
@@ -307,7 +309,10 @@ impl RepeatInterval {
 
     pub fn reference_repeat_sequence_with_reader(&self, fas: &faidx::Reader) -> Option<String> {
         let repeat_ref_sequence = std::str::from_utf8(
-            &fas.fetch_seq(&self.chrom, self.start as usize - 1, self.end as usize)
+            // fetch_seq uses 0-based inclusive coordinates
+            // self.start is 1-based, self.end is from BED (exclusive in BED format)
+            // To fetch the correct region: convert start-1 (to 0-based) and end-1 (to make it inclusive)
+            &fas.fetch_seq(&self.chrom, self.start as usize - 1, self.end as usize - 1)
                 .expect("Failed to extract repeat sequence from fasta for {chrom}:{start}-{end}"),
         )
         .expect("Failed to convert repeat sequence to string for {chrom}:{start}-{end}")
@@ -423,12 +428,12 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
 
         // Verify first interval
         assert_eq!(intervals[0].chrom, "chr1");
-        assert_eq!(intervals[0].start, 1234567);
+        assert_eq!(intervals[0].start, 1234568); // BED 0-based 1234567 becomes 1-based 1234568
         assert_eq!(intervals[0].end, 1234590);
 
         // Verify last interval
         assert_eq!(intervals[4].chrom, "chr19");
-        assert_eq!(intervals[4].start, 45770205);
+        assert_eq!(intervals[4].start, 45770206); // BED 0-based 45770205 becomes 1-based 45770206
         assert_eq!(intervals[4].end, 45770266);
 
         // Clean up
@@ -502,7 +507,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         assert_eq!(result1.num_intervals, 1);
         let intervals1: Vec<RepeatInterval> = result1.collect();
         assert_eq!(intervals1[0].chrom, "chr1");
-        assert_eq!(intervals1[0].start, 100);
+        assert_eq!(intervals1[0].start, 101); // BED 0-based 100 becomes 1-based 101
         assert_eq!(intervals1[0].end, 150);
 
         // Test parsing with minimal columns
@@ -513,7 +518,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         assert_eq!(result2.num_intervals, 1);
         let intervals2: Vec<RepeatInterval> = result2.collect();
         assert_eq!(intervals2[0].chrom, "chr22");
-        assert_eq!(intervals2[0].start, 200);
+        assert_eq!(intervals2[0].start, 201); // BED 0-based 200 becomes 1-based 201
         assert_eq!(intervals2[0].end, 250);
 
         // Clean up
