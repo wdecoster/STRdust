@@ -41,7 +41,7 @@ ARGS:
     <BAM>      bam/cram file to call STRs in (local path or URL)
 
 SPECIFY ONE OF:
-    -r, --region <REGION>              region string to genotype expansion in (format: chr:start-end)
+    -r, --region <REGION>              region string to genotype expansion in (format: chr:start-end, 1-based inclusive)
     -R, --region-file <REGION_FILE>    Bed file with region(s) to genotype expansion(s) in
         --pathogenic                   Genotype the pathogenic STRs from STRchive
 
