@@ -1,6 +1,5 @@
 use crate::repeats::RepeatIntervalIterator;
-use indicatif::ParallelProgressIterator;
-use indicatif::ProgressIterator;
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressIterator, ProgressStyle};
 use log::{debug, error};
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -22,13 +21,24 @@ pub fn genotype_repeats(args: Cli) {
     crate::vcf::write_vcf_header(&args);
     let stdout = io::stdout(); // get the global stdout entity
     let mut handle = io::BufWriter::new(stdout); // wrap that handle in a buffer
+    
+    // Setup progress bar with smoothed ETA
+    let num_intervals = repeats.num_intervals;
+    let pb = ProgressBar::new(num_intervals as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} loci ({eta})")
+            .expect("Failed to set progress bar template")
+    );
+    // Enable steady tick for smoothed ETA calculation (updates every 100ms)
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    
     if args.threads == 1 {
         // When running single threaded things become easier and the tool will require less memory
         // Output is returned in the same order as the bed, and therefore not sorted before writing immediately to stdout
         // The indexedreader is created once and passed on to the function
-        let num_intervals = repeats.num_intervals;
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
-        for mut repeat in repeats.progress_count(num_intervals as u64) {
+        for mut repeat in repeats.progress_with(pb.clone()) {
             if let Ok(output) =
                 genotype::genotype_repeat_singlethreaded(&mut repeat, &args, &mut bam)
             {
@@ -43,12 +53,11 @@ pub fn genotype_repeats(args: Cli) {
             .expect("Failed to create threadpool");
         // genotypes contains the output of the genotyping, a struct instance
         // Pre-allocate with exact capacity to avoid reallocation
-        let genotypes = Mutex::new(Vec::with_capacity(repeats.num_intervals));
+        let genotypes = Mutex::new(Vec::with_capacity(num_intervals));
         // par_bridge does not guarantee that results are returned in order
-        let num_intervals = repeats.num_intervals;
         repeats
             .par_bridge()
-            .progress_count(num_intervals as u64)
+            .progress_with(pb.clone())
             .for_each(|mut repeat| {
                 // Use thread-local BAM reader to avoid file descriptor exhaustion
                 // Each thread maintains its own reader and reuses it for all loci
@@ -84,10 +93,9 @@ pub fn genotype_repeats(args: Cli) {
             .num_threads(args.threads)
             .build_global()
             .expect("Failed to create threadpool");
-        let num_intervals = repeats.num_intervals;
         repeats
             .par_bridge()
-            .progress_count(num_intervals as u64)
+            .progress_with(pb)
             .for_each(|mut repeat| {
                 // Use thread-local BAM reader to avoid file descriptor exhaustion
                 // Each thread maintains its own reader and reuses it for all loci
