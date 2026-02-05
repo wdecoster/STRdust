@@ -542,6 +542,7 @@ fn test_write_vcf_header_from_bam() {
         sorted: false,
         consensus_reads: 20,
         max_number_reads: 60,
+        max_locus: None,
     };
     write_vcf_header(&args);
 }
@@ -567,6 +568,7 @@ fn test_write_vcf_header_from_name() {
         sorted: false,
         consensus_reads: 20,
         max_number_reads: 60,
+        max_locus: None,
     };
     write_vcf_header(&args);
 }

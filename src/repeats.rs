@@ -171,6 +171,22 @@ impl RepeatIntervalIterator {
         }
     }
 
+    /// Filter intervals by maximum size
+    /// Returns a new iterator containing only intervals with size <= max_size
+    pub fn filter_by_size(self, max_size: u32) -> Self {
+        let filtered_data: Vec<RepeatInterval> = self
+            .data
+            .into_iter()
+            .filter(|repeat| repeat.end - repeat.start <= max_size)
+            .collect();
+        let num_intervals = filtered_data.len();
+        RepeatIntervalIterator {
+            current_index: 0,
+            data: filtered_data,
+            num_intervals,
+        }
+    }
+
     /// Test helper function to create a RepeatIntervalIterator from BED data string
     /// This is exposed for testing purposes to allow testing BED parsing without file I/O
     #[cfg(test)]

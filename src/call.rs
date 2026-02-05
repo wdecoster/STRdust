@@ -109,7 +109,7 @@ pub fn genotype_repeats(args: Cli) {
 }
 
 fn get_targets(args: &Cli) -> RepeatIntervalIterator {
-    match (&args.region, &args.region_file, args.pathogenic) {
+    let repeats = match (&args.region, &args.region_file, args.pathogenic) {
         // a region string
         (Some(region), None, false) => RepeatIntervalIterator::from_string(region, &args.fasta),
         // a region file
@@ -123,5 +123,12 @@ fn get_targets(args: &Cli) -> RepeatIntervalIterator {
             eprintln!("ERROR: Specify a region string (-r), a region_file (-R) or --pathogenic!\n");
             std::process::exit(1);
         }
+    };
+
+    // Filter by max_locus size if specified
+    if let Some(max_size) = args.max_locus {
+        repeats.filter_by_size(max_size)
+    } else {
+        repeats
     }
 }

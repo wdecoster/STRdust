@@ -88,6 +88,10 @@ pub struct Cli {
     /// Max number of reads to extract per locus from the bam file for genotyping (use -1 for all reads)
     #[arg(long, default_value_t = 60, allow_hyphen_values = true)]
     max_number_reads: isize,
+
+    /// Maximum locus size to consider (intervals larger than this will be filtered out)
+    #[arg(long)]
+    max_locus: Option<u32>,
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {

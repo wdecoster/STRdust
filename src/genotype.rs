@@ -434,6 +434,7 @@ mod tests {
             sorted: false,
             consensus_reads: 20,
             max_number_reads: 60,
+            max_locus: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -467,6 +468,7 @@ mod tests {
             sorted: false,
             consensus_reads: 20,
             max_number_reads: 60,
+            max_locus: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -494,6 +496,7 @@ mod tests {
             sorted: false,
             consensus_reads: 20,
             max_number_reads: 60,
+            max_locus: None,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -527,6 +530,7 @@ mod tests {
             sorted: false,
             consensus_reads: 20,
             max_number_reads: 60,
+            max_locus: None,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -562,6 +566,7 @@ mod tests {
             sorted: false,
             consensus_reads: 20,
             max_number_reads: 60,
+            max_locus: None,
         };
 
         let repeat = crate::repeats::RepeatInterval {

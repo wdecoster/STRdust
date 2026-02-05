@@ -1,6 +1,6 @@
 [package]
 name = "STRdust"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2024"
 
 
@@ -37,3 +37,6 @@ ctor = "*"
 # Allow functions with many arguments - common in systems programming
 # where functions need many parameters for configuration and data processing
 too_many_arguments = "allow"
+
+[profile.release]
+debug = true
