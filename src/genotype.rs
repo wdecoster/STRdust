@@ -546,7 +546,7 @@ mod tests {
         let mut bam = parse_bam::create_bam_reader(&bam, &fasta);
         let binding =
             crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased, 60).unwrap();
-        let read = binding.phase1.iter().next().expect("No reads found");
+        let read = binding.phase1.first().expect("No reads found");
         let aligner = minimap2::Aligner::builder()
             .map_ont()
             .with_cigar()
