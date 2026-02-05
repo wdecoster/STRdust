@@ -71,30 +71,27 @@ impl RepeatIntervalIterator {
             error!("Bed file does not exist");
             std::process::exit(1);
         }
-        
+
         // Read file contents (handles both plain and gzipped files)
         let contents = if region_file.ends_with(".gz") {
-            let file = File::open(region_file)
-                .unwrap_or_else(|e| {
-                    error!("Failed to open gzipped BED file {}: {}", region_file, e);
-                    std::process::exit(1);
-                });
+            let file = File::open(region_file).unwrap_or_else(|e| {
+                error!("Failed to open gzipped BED file {}: {}", region_file, e);
+                std::process::exit(1);
+            });
             let mut decoder = GzDecoder::new(file);
             let mut contents = String::new();
-            decoder.read_to_string(&mut contents)
-                .unwrap_or_else(|e| {
-                    error!("Failed to decompress gzipped BED file {}: {}", region_file, e);
-                    std::process::exit(1);
-                });
+            decoder.read_to_string(&mut contents).unwrap_or_else(|e| {
+                error!("Failed to decompress gzipped BED file {}: {}", region_file, e);
+                std::process::exit(1);
+            });
             contents
         } else {
-            fs::read_to_string(region_file)
-                .unwrap_or_else(|e| {
-                    error!("Failed to read BED file {}: {}", region_file, e);
-                    std::process::exit(1);
-                })
+            fs::read_to_string(region_file).unwrap_or_else(|e| {
+                error!("Failed to read BED file {}: {}", region_file, e);
+                std::process::exit(1);
+            })
         };
-        
+
         // Parse BED data from string
         Self::from_string_data(&contents, fasta)
     }
