@@ -65,7 +65,7 @@ fn check_quick_reference_and_collect_reads(
             };
         }
     };
-    
+
     // Fetch reads spanning the locus
     if bam.fetch((tid, repeat.start - 1, repeat.end)).is_err() {
         return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
@@ -94,26 +94,32 @@ fn check_quick_reference_and_collect_reads(
             // Add 15bp padding to region boundaries to catch indels near edges
             let padded_start = repeat.start.saturating_sub(15);
             let padded_end = repeat.end + 15;
-            let length_diff = parse_bam::calculate_all_length_diff_from_cigar(
-                &r,
-                padded_start,
-                padded_end,
-            );
+            let length_diff =
+                parse_bam::calculate_all_length_diff_from_cigar(&r, padded_start, padded_end);
 
-            debug!("  Read {}: length_diff={}, threshold={}", checked + 1, length_diff.abs(), threshold);
+            debug!(
+                "  Read {}: length_diff={}, threshold={}",
+                checked + 1,
+                length_diff.abs(),
+                threshold
+            );
 
             // If any read shows significant length difference, this is not 0|0
             // Continue collecting all reads for normal genotyping
             if length_diff.abs() > threshold {
                 found_variant = true;
-                debug!("  → Variant detected! length_diff={} > threshold={}", length_diff.abs(), threshold);
+                debug!(
+                    "  → Variant detected! length_diff={} > threshold={}",
+                    length_diff.abs(),
+                    threshold
+                );
                 all_reads.push(r);
                 checked = quick_ref_reads; // Stop checking, just collect
                 continue;
             }
             checked += 1;
         }
-        
+
         all_reads.push(r);
     }
 
@@ -125,15 +131,24 @@ fn check_quick_reference_and_collect_reads(
     // If we checked at least 5 reads and all were reference-like, it's 0|0
     if checked >= 5 && !found_variant {
         // All checked reads were within threshold - this is homozygous reference
-        debug!("Quick reference detected at {}:{}-{}, checked {} reads", 
-               repeat.chrom, repeat.start, repeat.end, checked);
+        debug!(
+            "Quick reference detected at {}:{}-{}, checked {} reads",
+            repeat.chrom, repeat.start, repeat.end, checked
+        );
         return ReadCheckResult::QuickReference;
     }
 
     // Debug why we didn't trigger quick reference
     if !all_reads.is_empty() {
-        debug!("Not quick reference at {}:{}-{}: checked={}, found_variant={}, total_reads={}", 
-               repeat.chrom, repeat.start, repeat.end, checked, found_variant, all_reads.len());
+        debug!(
+            "Not quick reference at {}:{}-{}: checked={}, found_variant={}, total_reads={}",
+            repeat.chrom,
+            repeat.start,
+            repeat.end,
+            checked,
+            found_variant,
+            all_reads.len()
+        );
     }
 
     // Not homozygous reference - process collected reads for genotyping
@@ -190,7 +205,7 @@ fn genotype_repeat(
     // If alignment_all is set, disable quick reference check (set to 0)
     // Otherwise check first 25 reads for quick reference detection
     let quick_ref_reads = if args.alignment_all { 0 } else { 25 };
-    
+
     let read_check = check_quick_reference_and_collect_reads(
         bam,
         repeat,
@@ -209,7 +224,12 @@ fn genotype_repeat(
         let repeat_ref_seq = match repeat.reference_repeat_sequence_with_reader(&fasta_reader) {
             Some(seq) => seq,
             None => {
-                return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args));
+                return Ok(crate::vcf::VCFRecord::missing_genotype(
+                    repeat,
+                    "N",
+                    ".".to_string(),
+                    args,
+                ));
             }
         };
 
@@ -238,12 +258,7 @@ fn genotype_repeat(
     if let ReadCheckResult::QuickReference = read_check {
         debug!("Fast reference check: {repeat} appears to be 0|0, skipping alignment");
         flags.push("QUICKREF".to_string());
-        return Ok(crate::vcf::VCFRecord::quick_reference(
-            repeat,
-            &repeat_ref_seq,
-            flags,
-            args,
-        ));
+        return Ok(crate::vcf::VCFRecord::quick_reference(repeat, &repeat_ref_seq, flags, args));
     }
 
     // Extract reads from the enum

@@ -96,7 +96,6 @@ pub struct Cli {
     /// Always use full alignment (disable fast reference check via CIGAR)
     #[arg(long, default_value_t = false)]
     alignment_all: bool,
-
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {
