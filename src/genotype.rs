@@ -3,10 +3,145 @@ use log::debug;
 use minimap2::*;
 use regex::Regex;
 use rust_htslib::bam;
+use rust_htslib::bam::Read; // For .records() iterator
+use rust_htslib::bam::ext::BamRecordExtensions; // For .reference_end()
 use std::sync::OnceLock;
 
 // Compile regex once and reuse across all CS tag parsing
 static CS_REGEX: OnceLock<Regex> = OnceLock::new();
+
+/// Result of checking reads for quick reference detection
+enum ReadCheckResult {
+    /// No reads found - return missing genotype immediately
+    NoCoverage,
+    /// All checked reads are reference-like - return 0|0 without alignment
+    QuickReference,
+    /// Reads need full alignment
+    NeedsAlignment(parse_bam::Reads),
+}
+
+/// Check if locus appears to be homozygous reference by examining CIGAR of first N reads
+///
+/// This function fetches all spanning reads and checks the first N for quick reference detection.
+/// Returns enum indicating: NoCoverage (.|.), QuickReference (0|0), or NeedsAlignment(reads).
+///
+/// # Arguments
+/// * `bam` - BAM reader
+/// * `repeat` - STR target region
+/// * `minlen` - Minimum indel length to consider
+/// * `quick_ref_reads` - Number of reads to check for quick detection (0 = disabled)
+/// * `unphased` - Whether to collect unphased reads
+/// * `max_number_reads` - Maximum reads to collect per haplotype
+///
+/// # Returns
+/// ReadCheckResult enum indicating next action
+fn check_quick_reference_and_collect_reads(
+    bam: &mut bam::IndexedReader,
+    repeat: &crate::repeats::RepeatInterval,
+    _minlen: usize,
+    quick_ref_reads: usize,
+    unphased: bool,
+    max_number_reads: isize,
+) -> ReadCheckResult {
+    // If quick check disabled, fetch reads normally
+    if quick_ref_reads == 0 {
+        return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
+            Some(reads) => ReadCheckResult::NeedsAlignment(reads),
+            None => ReadCheckResult::NoCoverage,
+        };
+    }
+
+    let threshold = 3; // Allow ±3bp for sequencing noise
+    let mut checked = 0;
+    let mut found_variant = false; // Track if we found any variant read
+    let mut all_reads = Vec::new();
+
+    let tid = match bam.header().tid(repeat.chrom.as_bytes()) {
+        Some(tid) => tid,
+        None => {
+            return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
+                Some(reads) => ReadCheckResult::NeedsAlignment(reads),
+                None => ReadCheckResult::NoCoverage,
+            };
+        }
+    };
+    
+    // Fetch reads spanning the locus
+    if bam.fetch((tid, repeat.start - 1, repeat.end)).is_err() {
+        return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
+            Some(reads) => ReadCheckResult::NeedsAlignment(reads),
+            None => ReadCheckResult::NoCoverage,
+        };
+    }
+
+    // Collect all spanning reads while checking first N for quick reference
+    for r in bam.records() {
+        let r = match r {
+            Ok(record) => record,
+            Err(_) => continue,
+        };
+
+        // Skip low quality reads or reads that don't fully span
+        if r.mapq() == 0
+            || r.reference_start() > repeat.start.into()
+            || r.reference_end() < repeat.end.into()
+        {
+            continue;
+        }
+
+        // Check first N reads for quick reference detection
+        if checked < quick_ref_reads {
+            // Add 15bp padding to region boundaries to catch indels near edges
+            let padded_start = repeat.start.saturating_sub(15);
+            let padded_end = repeat.end + 15;
+            let length_diff = parse_bam::calculate_all_length_diff_from_cigar(
+                &r,
+                padded_start,
+                padded_end,
+            );
+
+            debug!("  Read {}: length_diff={}, threshold={}", checked + 1, length_diff.abs(), threshold);
+
+            // If any read shows significant length difference, this is not 0|0
+            // Continue collecting all reads for normal genotyping
+            if length_diff.abs() > threshold {
+                found_variant = true;
+                debug!("  → Variant detected! length_diff={} > threshold={}", length_diff.abs(), threshold);
+                all_reads.push(r);
+                checked = quick_ref_reads; // Stop checking, just collect
+                continue;
+            }
+            checked += 1;
+        }
+        
+        all_reads.push(r);
+    }
+
+    // Early return for no coverage - avoid expensive processing
+    if all_reads.is_empty() {
+        return ReadCheckResult::NoCoverage;
+    }
+
+    // If we checked at least 5 reads and all were reference-like, it's 0|0
+    if checked >= 5 && !found_variant {
+        // All checked reads were within threshold - this is homozygous reference
+        debug!("Quick reference detected at {}:{}-{}, checked {} reads", 
+               repeat.chrom, repeat.start, repeat.end, checked);
+        return ReadCheckResult::QuickReference;
+    }
+
+    // Debug why we didn't trigger quick reference
+    if !all_reads.is_empty() {
+        debug!("Not quick reference at {}:{}-{}: checked={}, found_variant={}, total_reads={}", 
+               repeat.chrom, repeat.start, repeat.end, checked, found_variant, all_reads.len());
+    }
+
+    // Not homozygous reference - process collected reads for genotyping
+    match parse_bam::process_collected_reads(all_reads, repeat, unphased, max_number_reads) {
+        Some(reads) => ReadCheckResult::NeedsAlignment(reads),
+        None => ReadCheckResult::NoCoverage,
+    }
+}
 
 // when running multithreaded, the indexedreader has to be created every time again
 // this is probably expensive
@@ -43,7 +178,48 @@ fn genotype_repeat(
     bam: &mut bam::IndexedReader,
 ) -> Result<crate::vcf::VCFRecord, String> {
     let flanking = 5000;
-    let mut flags = vec![];
+    let mut flags: Vec<String> = vec![];
+
+    // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
+    // this means that --haploid overrides the phases which could be present in the bam file
+    let unphased = (args.haploid.is_some()
+        && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
+        || args.unphased;
+
+    // Check for quick reference (0|0), no coverage (.|.), or needs alignment
+    // If alignment_all is set, disable quick reference check (set to 0)
+    // Otherwise check first 25 reads for quick reference detection
+    let quick_ref_reads = if args.alignment_all { 0 } else { 25 };
+    
+    let read_check = check_quick_reference_and_collect_reads(
+        bam,
+        repeat,
+        args.minlen,
+        quick_ref_reads,
+        unphased,
+        args.max_number_reads,
+    );
+
+    // Handle no coverage case early - skip all expensive operations
+    if let ReadCheckResult::NoCoverage = read_check {
+        // Open FASTA reader to get reference sequence for missing genotype
+        let fasta_reader = rust_htslib::faidx::Reader::from_path(&args.fasta)
+            .unwrap_or_else(|_| panic!("Failed to open FASTA file: {}", args.fasta));
+
+        let repeat_ref_seq = match repeat.reference_repeat_sequence_with_reader(&fasta_reader) {
+            Some(seq) => seq,
+            None => {
+                return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args));
+            }
+        };
+
+        return Ok(crate::vcf::VCFRecord::missing_genotype(
+            repeat,
+            &repeat_ref_seq,
+            0.to_string(),
+            args,
+        ));
+    }
 
     // Open FASTA reader once and reuse for both reference extraction and compressed sequence
     // This avoids opening the file handle twice per locus (~10-15% speedup)
@@ -58,29 +234,26 @@ fn genotype_repeat(
         }
     };
 
+    // Handle quick reference case - return 0|0 without alignment
+    if let ReadCheckResult::QuickReference = read_check {
+        debug!("Fast reference check: {repeat} appears to be 0|0, skipping alignment");
+        flags.push("QUICKREF".to_string());
+        return Ok(crate::vcf::VCFRecord::quick_reference(
+            repeat,
+            &repeat_ref_seq,
+            flags,
+            args,
+        ));
+    }
+
+    // Extract reads from the enum
+    let reads = match read_check {
+        ReadCheckResult::NeedsAlignment(reads) => reads,
+        _ => unreachable!("Already handled NoCoverage and QuickReference"),
+    };
+
     let repeat_compressed_reference =
         repeat.make_repeat_compressed_sequence_with_reader(&fasta_reader, flanking);
-
-    // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
-    // this means that --haploid overrides the phases which could be present in the bam file
-    let unphased = (args.haploid.is_some()
-        && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
-        || args.unphased;
-
-    let reads =
-        match crate::parse_bam::get_overlapping_reads(bam, repeat, unphased, args.max_number_reads)
-        {
-            Some(seqs) => seqs,
-            None => {
-                // Return a missing genotype if no (phased) reads overlap the repeat
-                return Ok(crate::vcf::VCFRecord::missing_genotype(
-                    repeat,
-                    &repeat_ref_seq,
-                    0.to_string(),
-                    args,
-                ));
-            }
-        };
 
     // Create an index for minimap2 alignment to the artificial reference
     let aligner = minimap2::Aligner::builder()
@@ -299,7 +472,6 @@ fn parse_cs(
     let cs = alignment.cs.expect("Unable to get the cs field");
 
     // Get compiled regex from static storage (compiled once, reused across all calls)
-    // This avoids expensive regex compilation on every read (~20-30% speedup)
     let re = CS_REGEX.get_or_init(|| Regex::new(r"(:\d+)|(\*\w+)|(\+\w+)|(-\w+)").unwrap());
 
     // Build result string directly instead of using Vec + join for better performance
@@ -435,6 +607,7 @@ mod tests {
             consensus_reads: 20,
             max_number_reads: 60,
             max_locus: None,
+            alignment_all: false,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -469,6 +642,7 @@ mod tests {
             consensus_reads: 20,
             max_number_reads: 60,
             max_locus: None,
+            alignment_all: false,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -497,6 +671,7 @@ mod tests {
             consensus_reads: 20,
             max_number_reads: 60,
             max_locus: None,
+            alignment_all: false,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -531,6 +706,7 @@ mod tests {
             consensus_reads: 20,
             max_number_reads: 60,
             max_locus: None,
+            alignment_all: false,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -567,6 +743,7 @@ mod tests {
             consensus_reads: 20,
             max_number_reads: 60,
             max_locus: None,
+            alignment_all: false,
         };
 
         let repeat = crate::repeats::RepeatInterval {

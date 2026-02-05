@@ -8,6 +8,48 @@ use std::collections::HashMap;
 use std::env;
 use url::Url;
 
+/// Calculate length differences from reference for quick reference check
+/// Counts ALL indels/clips regardless of size within the specified region
+/// Used for fast 0|0 detection where even small variants matter
+pub fn calculate_all_length_diff_from_cigar(
+    record: &rust_htslib::bam::Record,
+    start: u32,
+    end: u32,
+) -> i64 {
+    let mut length_diff: i64 = 0;
+    let mut reference_position = record.reference_start() as u32;
+
+    for entry in record.cigar().iter() {
+        match entry {
+            rust_htslib::bam::record::Cigar::Match(len)
+            | rust_htslib::bam::record::Cigar::Equal(len)
+            | rust_htslib::bam::record::Cigar::Diff(len) => {
+                reference_position += *len;
+            }
+            rust_htslib::bam::record::Cigar::Del(len) => {
+                if start < reference_position && reference_position < end {
+                    length_diff -= i64::from(*len);
+                }
+                reference_position += *len;
+            }
+            rust_htslib::bam::record::Cigar::SoftClip(len) => {
+                if start < reference_position && reference_position < end {
+                    length_diff += i64::from(*len);
+                }
+            }
+            rust_htslib::bam::record::Cigar::Ins(len) => {
+                if start < reference_position && reference_position < end {
+                    length_diff += i64::from(*len);
+                }
+            }
+            rust_htslib::bam::record::Cigar::RefSkip(len) => reference_position += *len,
+            _ => (),
+        }
+    }
+
+    length_diff
+}
+
 pub struct Reads {
     // could consider not to use a hashmap here and use an attribute per phase
     pub seqs: HashMap<u8, Vec<Vec<u8>>>,
@@ -69,6 +111,95 @@ pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
             .expect("Failed setting reference for CRAM file");
     }
     bam
+}
+
+/// Process already-collected BAM records into phased read sequences
+///
+/// This function takes a vector of pre-fetched BAM records and extracts their sequences
+/// according to phase, avoiding a second BAM fetch operation. Used by the fast reference
+/// check path to eliminate redundant I/O.
+///
+/// # Arguments
+/// * `records` - Pre-collected BAM records
+/// * `repeat` - STR target region (for logging)
+/// * `unphased` - Whether to treat reads as unphased
+/// * `max_number_reads` - Maximum reads per haplotype (-1 = all reads)
+///
+/// # Returns
+/// Some(Reads) with phased sequences, or None if no reads found
+pub fn process_collected_reads(
+    records: Vec<bam::Record>,
+    repeat: &crate::repeats::RepeatInterval,
+    unphased: bool,
+    max_number_reads: isize,
+) -> Option<Reads> {
+    // Per haplotype the read sequences are kept in a dictionary
+    let mut seqs = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
+    let mut ps = None;
+
+    // Extract sequences from collected records
+    for r in records {
+        if unphased {
+            // if unphased put reads in phase 0
+            seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
+        } else {
+            let phase = get_phase(&r);
+            if phase > 0 {
+                let seq = r.seq().as_bytes();
+                seqs.get_mut(&phase).unwrap().push(seq);
+                ps = get_phase_set(&r);
+            }
+        }
+    }
+
+    if seqs.is_empty() {
+        // error/warning message depends on whether we are looking for phased reads or not
+        if unphased {
+            warn!("Cannot genotype {repeat}: no reads found");
+        } else {
+            warn!(
+                "Cannot genotype {repeat}: no phased reads found. Use --unphased to genotype unphased reads."
+            );
+        }
+        None
+    } else if max_number_reads == -1 {
+        // if max_number_reads is -1, use all reads without downsampling
+        Some(Reads { seqs, ps })
+    } else {
+        // if more than <max_number_reads> spanning reads are found in seqs, randomly select just <max_number_reads> items from the vector
+        // if unphased, just select <max_number_reads> reads from phase 0
+        // if phased, select <max_number_reads>/2 reads from each phase
+        let max_number_reads = max_number_reads as usize;
+        let mut rng = rand::rng();
+
+        // Pre-allocate filtered vectors with exact size needed
+        let mut seqs_filtered = HashMap::from([
+            (0, Vec::with_capacity(max_number_reads)),
+            (1, Vec::with_capacity(max_number_reads / 2)),
+            (2, Vec::with_capacity(max_number_reads / 2)),
+        ]);
+        let max_reads_per_phase = HashMap::from([
+            (0, max_number_reads),
+            (1, max_number_reads / 2),
+            (2, max_number_reads / 2),
+        ]);
+        for (phase, seqs_phase) in seqs.iter() {
+            let n_reads = seqs_phase.len();
+            let n_reads_to_select = n_reads.min(max_reads_per_phase[phase]);
+
+            if n_reads_to_select > 0 {
+                let selected_reads = seqs_phase.choose_multiple(&mut rng, n_reads_to_select);
+                // Reserve exact capacity to avoid reallocation
+                let phase_vec = seqs_filtered.get_mut(phase).unwrap();
+                phase_vec.reserve_exact(n_reads_to_select);
+                for read in selected_reads {
+                    phase_vec.push(read.to_vec());
+                }
+            }
+        }
+
+        Some(Reads { seqs: seqs_filtered, ps })
+    }
 }
 
 pub fn get_overlapping_reads(

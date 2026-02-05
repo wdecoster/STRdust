@@ -92,6 +92,11 @@ pub struct Cli {
     /// Maximum locus size to consider (intervals larger than this will be filtered out)
     #[arg(long)]
     max_locus: Option<u32>,
+
+    /// Always use full alignment (disable fast reference check via CIGAR)
+    #[arg(long, default_value_t = false)]
+    alignment_all: bool,
+
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {

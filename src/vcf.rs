@@ -160,6 +160,45 @@ impl VCFRecord {
         }
     }
 
+    pub fn quick_reference(
+        repeat: &crate::repeats::RepeatInterval,
+        repeat_ref_seq: &str,
+        flags: Vec<String>,
+        args: &crate::Cli,
+    ) -> VCFRecord {
+        let time_taken = if args.debug {
+            format!(
+                ";TIME={}",
+                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
+            )
+        } else {
+            "".to_string()
+        };
+        let flags_str = if flags.is_empty() {
+            "".to_string()
+        } else {
+            format!("{};", flags.join(";"))
+        };
+        VCFRecord {
+            chrom: repeat.chrom.clone(),
+            start: repeat.start,
+            end: repeat.end,
+            ref_seq: repeat_ref_seq.to_string(),
+            alt_seq: None,
+            length: ("0".to_string(), "0".to_string()),
+            full_length: (repeat_ref_seq.len().to_string(), repeat_ref_seq.len().to_string()),
+            support: (".".to_string(), ".".to_string()),
+            std_dev: (".".to_string(), ".".to_string()),
+            score: (".".to_string(), ".".to_string()),
+            somatic_info_field: "".to_string(),
+            outliers: "".to_string(),
+            time_taken,
+            ps: None,
+            flags: flags_str,
+            allele: ("0".to_string(), "0".to_string()),
+        }
+    }
+
     pub fn missing_genotype(
         repeat: &crate::repeats::RepeatInterval,
         repeat_ref_seq: &str,
@@ -411,9 +450,10 @@ impl fmt::Display for VCFRecord {
             None => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\tEND={end};{somatic}\tGT:SUP\t{genotype1}|{genotype2}:{sup1},{sup2}",
+                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\t{flags}END={end};{somatic}\tGT:SUP\t{genotype1}|{genotype2}:{sup1},{sup2}",
                     chrom = self.chrom,
                     start = self.start,
+                    flags = self.flags,
                     end = self.end,
                     ref = self.ref_seq,
                     somatic = self.somatic_info_field,
@@ -490,6 +530,9 @@ pub fn write_vcf_header(args: &Cli) {
     println!(
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
     );
+    println!(
+        r#"##INFO=<ID=QUICKREF,Number=0,Type=Flag,Description="Locus identified as homozygous reference via fast CIGAR check, alignment skipped">"#
+    );
     if args.debug {
         println!(
             r#"##INFO=<ID=TIME,Number=1,Type=String,Description="Time taken to genotype the repeat">"#
@@ -543,6 +586,7 @@ fn test_write_vcf_header_from_bam() {
         consensus_reads: 20,
         max_number_reads: 60,
         max_locus: None,
+        alignment_all: false,
     };
     write_vcf_header(&args);
 }
@@ -569,6 +613,7 @@ fn test_write_vcf_header_from_name() {
         consensus_reads: 20,
         max_number_reads: 60,
         max_locus: None,
+        alignment_all: false,
     };
     write_vcf_header(&args);
 }
