@@ -375,7 +375,7 @@ mod tests {
             created: None,
         };
         let flanking = 2000;
-        let minlen = 5;
+        let minlen = 1;
         let _support = 1;
         let unphased = false;
         let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
@@ -421,7 +421,7 @@ mod tests {
             region: None,
             region_file: None,
             pathogenic: false,
-            minlen: 5,
+            minlen: 1,
             support: 1,
             somatic: false,
             unphased: false,
@@ -454,7 +454,7 @@ mod tests {
             region: None,
             region_file: None,
             pathogenic: false,
-            minlen: 5,
+            minlen: 1,
             support: 1,
             somatic: false,
             unphased: true,
@@ -481,7 +481,7 @@ mod tests {
             region: None,
             region_file: None,
             pathogenic: false,
-            minlen: 5,
+            minlen: 1,
             support: 1,
             somatic: false,
             unphased: true,
@@ -514,7 +514,7 @@ mod tests {
             region: None,
             region_file: None,
             pathogenic: false,
-            minlen: 5,
+            minlen: 1,
             support: 1,
             somatic: true,
             unphased: false,
@@ -549,7 +549,7 @@ mod tests {
             region: None,
             region_file: None,
             pathogenic: false,
-            minlen: 5,
+            minlen: 1,
             support: 1,
             somatic: true,
             unphased: false,
