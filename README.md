@@ -42,7 +42,7 @@ ARGS:
 
 SPECIFY ONE OF:
     -r, --region <REGION>              region string to genotype expansion in (format: chr:start-end, 1-based inclusive)
-    -R, --region-file <REGION_FILE>    Bed file with region(s) to genotype expansion(s) in
+    -R, --region-file <REGION_FILE>    Bed file with region(s) to genotype expansion(s) in (supports .bed and .bed.gz)
         --pathogenic                   Genotype the pathogenic STRs from STRchive
 
 OPTIONS:
@@ -61,6 +61,7 @@ OPTIONS:
 
 ## Notes
 
+- BED files can be provided in plain text or gzipped format (`.bed` or `.bed.gz`)
 - Lowering the number of consensus reads may lead to lesser accurate alternative allele sequences (selecting randomly from the reads), but may greatly improve speed. Note that in the case of somatic length variation, a small number of randomly selected reads may lead to a bias and not be representative of the true repeat length.
 - Genotyping known pathogenic repeats with the `--pathogenic` flag will return a VCF with the pathogenic STRs from STRchive, but currently only for the GRCh38 reference.
 

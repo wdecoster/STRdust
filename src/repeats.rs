@@ -1,9 +1,12 @@
 use bio::io::bed;
+use flate2::read::GzDecoder;
 use log::error;
 use rust_htslib::faidx;
 use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::io;
+use std::io::Read;
 
 #[derive(Debug)]
 pub struct RepeatIntervalIterator {
@@ -68,16 +71,32 @@ impl RepeatIntervalIterator {
             error!("Bed file does not exist");
             std::process::exit(1);
         }
-        let mut reader = bed::Reader::from_file(region_file).expect("Problem reading bed file!");
-        let mut data = Vec::new();
-        for record in reader.records() {
-            let rec = record.expect("Error reading bed record. Please verify bed file is in the correct format and without header.");
-            let repeat = RepeatInterval::from_bed(&rec, fasta);
-            if let Some(repeat) = repeat {
-                data.push(repeat);
-            }
-        }
-        RepeatIntervalIterator { current_index: 0, data: data.clone(), num_intervals: data.len() }
+        
+        // Read file contents (handles both plain and gzipped files)
+        let contents = if region_file.ends_with(".gz") {
+            let file = File::open(region_file)
+                .unwrap_or_else(|e| {
+                    error!("Failed to open gzipped BED file {}: {}", region_file, e);
+                    std::process::exit(1);
+                });
+            let mut decoder = GzDecoder::new(file);
+            let mut contents = String::new();
+            decoder.read_to_string(&mut contents)
+                .unwrap_or_else(|e| {
+                    error!("Failed to decompress gzipped BED file {}: {}", region_file, e);
+                    std::process::exit(1);
+                });
+            contents
+        } else {
+            fs::read_to_string(region_file)
+                .unwrap_or_else(|e| {
+                    error!("Failed to read BED file {}: {}", region_file, e);
+                    std::process::exit(1);
+                })
+        };
+        
+        // Parse BED data from string
+        Self::from_string_data(&contents, fasta)
     }
 
     pub fn pathogenic(fasta: &str) -> Self {
