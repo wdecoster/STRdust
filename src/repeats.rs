@@ -180,11 +180,7 @@ impl RepeatIntervalIterator {
             .filter(|repeat| repeat.end - repeat.start <= max_size)
             .collect();
         let num_intervals = filtered_data.len();
-        RepeatIntervalIterator {
-            current_index: 0,
-            data: filtered_data,
-            num_intervals,
-        }
+        RepeatIntervalIterator { current_index: 0, data: filtered_data, num_intervals }
     }
 
     /// Test helper function to create a RepeatIntervalIterator from BED data string
