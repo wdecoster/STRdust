@@ -81,7 +81,8 @@ pub fn get_overlapping_reads(
         .header()
         .tid(repeat.chrom.as_bytes())
         .unwrap_or_else(|| panic!("Invalid chromosome {}", repeat.chrom));
-    bam.fetch((tid, repeat.start, repeat.end))
+    // repeat.start is 1-based, but bam.fetch expects 0-based half-open coordinates
+    bam.fetch((tid, repeat.start - 1, repeat.end))
         .unwrap_or_else(|err| panic!("Failure to extract reads from bam for {repeat}:\n{err}"));
     // Per haplotype the read sequences are kept in a dictionary
     let mut seqs = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
