@@ -1,10 +1,9 @@
 use log::warn;
-use rand::seq::IndexedRandom;
+use rand::seq::SliceRandom;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
-use std::collections::HashMap;
 use std::env;
 use url::Url;
 
@@ -51,9 +50,17 @@ pub fn calculate_all_length_diff_from_cigar(
 }
 
 pub struct Reads {
-    // could consider not to use a hashmap here and use an attribute per phase
-    pub seqs: HashMap<u8, Vec<Vec<u8>>>,
+    pub phase0: Vec<Vec<u8>>, // Unphased or haploid reads
+    pub phase1: Vec<Vec<u8>>, // Phase 1 reads (phased mode)
+    pub phase2: Vec<Vec<u8>>, // Phase 2 reads (phased mode)
     pub ps: Option<u32>,
+}
+
+impl Reads {
+    /// Returns true if all phase vectors are empty
+    pub fn is_empty(&self) -> bool {
+        self.phase0.is_empty() && self.phase1.is_empty() && self.phase2.is_empty()
+    }
 }
 
 /// Sets up the CURL_CA_BUNDLE environment variable for HTTPS/S3 access
@@ -113,6 +120,22 @@ pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
     bam
 }
 
+/// Downsample a vector of reads to a maximum number in-place
+fn downsample_reads_inplace(phase_reads: &mut Vec<Vec<u8>>, max_reads: usize) {
+    let n_reads = phase_reads.len();
+    if n_reads <= max_reads {
+        return; // No downsampling needed
+    }
+
+    // Use partial_shuffle for efficient random selection
+    // Shuffles the first max_reads elements randomly from the full vector
+    let mut rng = rand::rng();
+    phase_reads.partial_shuffle(&mut rng, max_reads);
+
+    // Keep only the first max_reads elements
+    phase_reads.truncate(max_reads);
+}
+
 /// Process already-collected BAM records into phased read sequences
 ///
 /// This function takes a vector of pre-fetched BAM records and extracts their sequences
@@ -133,26 +156,30 @@ pub fn process_collected_reads(
     unphased: bool,
     max_number_reads: isize,
 ) -> Option<Reads> {
-    // Per haplotype the read sequences are kept in a dictionary
-    let mut seqs = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
-    let mut ps = None;
+    // Create struct and populate directly
+    let mut reads = Reads { phase0: Vec::new(), phase1: Vec::new(), phase2: Vec::new(), ps: None };
 
     // Extract sequences from collected records
     for r in records {
         if unphased {
             // if unphased put reads in phase 0
-            seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
+            reads.phase0.push(r.seq().as_bytes());
         } else {
             let phase = get_phase(&r);
-            if phase > 0 {
-                let seq = r.seq().as_bytes();
-                seqs.get_mut(&phase).unwrap().push(seq);
-                ps = get_phase_set(&r);
+            match phase {
+                1 => {
+                    reads.phase1.push(r.seq().as_bytes());
+                }
+                2 => {
+                    reads.phase2.push(r.seq().as_bytes());
+                }
+                _ => {} // phase 0 or invalid - skip
             }
+            reads.ps = get_phase_set(&r);
         }
     }
 
-    if seqs.is_empty() {
+    if reads.is_empty() {
         // error/warning message depends on whether we are looking for phased reads or not
         if unphased {
             warn!("Cannot genotype {repeat}: no reads found");
@@ -164,41 +191,18 @@ pub fn process_collected_reads(
         None
     } else if max_number_reads == -1 {
         // if max_number_reads is -1, use all reads without downsampling
-        Some(Reads { seqs, ps })
+        Some(reads)
     } else {
-        // if more than <max_number_reads> spanning reads are found in seqs, randomly select just <max_number_reads> items from the vector
+        // if more than <max_number_reads> spanning reads are found, randomly select just <max_number_reads> items
         // if unphased, just select <max_number_reads> reads from phase 0
         // if phased, select <max_number_reads>/2 reads from each phase
         let max_number_reads = max_number_reads as usize;
-        let mut rng = rand::rng();
 
-        // Pre-allocate filtered vectors with exact size needed
-        let mut seqs_filtered = HashMap::from([
-            (0, Vec::with_capacity(max_number_reads)),
-            (1, Vec::with_capacity(max_number_reads / 2)),
-            (2, Vec::with_capacity(max_number_reads / 2)),
-        ]);
-        let max_reads_per_phase = HashMap::from([
-            (0, max_number_reads),
-            (1, max_number_reads / 2),
-            (2, max_number_reads / 2),
-        ]);
-        for (phase, seqs_phase) in seqs.iter() {
-            let n_reads = seqs_phase.len();
-            let n_reads_to_select = n_reads.min(max_reads_per_phase[phase]);
+        downsample_reads_inplace(&mut reads.phase0, max_number_reads);
+        downsample_reads_inplace(&mut reads.phase1, max_number_reads / 2);
+        downsample_reads_inplace(&mut reads.phase2, max_number_reads / 2);
 
-            if n_reads_to_select > 0 {
-                let selected_reads = seqs_phase.choose_multiple(&mut rng, n_reads_to_select);
-                // Reserve exact capacity to avoid reallocation
-                let phase_vec = seqs_filtered.get_mut(phase).unwrap();
-                phase_vec.reserve_exact(n_reads_to_select);
-                for read in selected_reads {
-                    phase_vec.push(read.to_vec());
-                }
-            }
-        }
-
-        Some(Reads { seqs: seqs_filtered, ps })
+        Some(reads)
     }
 }
 
@@ -215,9 +219,10 @@ pub fn get_overlapping_reads(
     // repeat.start is 1-based, but bam.fetch expects 0-based half-open coordinates
     bam.fetch((tid, repeat.start - 1, repeat.end))
         .unwrap_or_else(|err| panic!("Failure to extract reads from bam for {repeat}:\n{err}"));
-    // Per haplotype the read sequences are kept in a dictionary
-    let mut seqs = HashMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]);
-    let mut ps = None;
+
+    // Create struct and populate directly
+    let mut reads = Reads { phase0: Vec::new(), phase1: Vec::new(), phase2: Vec::new(), ps: None };
+
     // extract sequences spanning the repeat locus
     for r in bam.rc_records() {
         let r = r.unwrap_or_else(|err| panic!("Error reading BAM file in region {repeat}:\n{err}"));
@@ -230,19 +235,24 @@ pub fn get_overlapping_reads(
         }
         if unphased {
             // if unphased put reads in phase 0
-            seqs.get_mut(&0).unwrap().push(r.seq().as_bytes());
+            reads.phase0.push(r.seq().as_bytes());
         } else {
             let phase = get_phase(&r);
-            if phase > 0 {
-                let seq = r.seq().as_bytes();
-                seqs.get_mut(&phase).unwrap().push(seq);
-                ps = get_phase_set(&r);
-                // writing fasta to stdout
-                // println!(">read_{}\n{}", phase, std::str::from_utf8(&seq).unwrap());
+            match phase {
+                1 => {
+                    reads.phase1.push(r.seq().as_bytes());
+                    reads.ps = get_phase_set(&r);
+                }
+                2 => {
+                    reads.phase2.push(r.seq().as_bytes());
+                    reads.ps = get_phase_set(&r);
+                }
+                _ => {} // phase 0 or invalid - skip
             }
         }
     }
-    if seqs.is_empty() {
+
+    if reads.is_empty() {
         // error/warning message depends on whether we are looking for phased reads or not
         if unphased {
             warn!("Cannot genotype {repeat}: no reads found");
@@ -254,41 +264,18 @@ pub fn get_overlapping_reads(
         None
     } else if max_number_reads == -1 {
         // if max_number_reads is -1, use all reads without downsampling
-        Some(Reads { seqs, ps })
+        Some(reads)
     } else {
-        // if more than <max_number_reads> spanning reads are found in seqs, randomly select just <max_number_reads> items from the vector
+        // if more than <max_number_reads> spanning reads are found, randomly select just <max_number_reads> items
         // if unphased, just select <max_number_reads> reads from phase 0
         // if phased, select <max_number_reads>/2 reads from each phase
         let max_number_reads = max_number_reads as usize;
-        let mut rng = rand::rng();
 
-        // Pre-allocate filtered vectors with exact size needed
-        let mut seqs_filtered = HashMap::from([
-            (0, Vec::with_capacity(max_number_reads)),
-            (1, Vec::with_capacity(max_number_reads / 2)),
-            (2, Vec::with_capacity(max_number_reads / 2)),
-        ]);
-        let max_reads_per_phase = HashMap::from([
-            (0, max_number_reads),
-            (1, max_number_reads / 2),
-            (2, max_number_reads / 2),
-        ]);
-        for (phase, seqs_phase) in seqs.iter() {
-            let n_reads = seqs_phase.len();
-            let n_reads_to_select = n_reads.min(max_reads_per_phase[phase]);
+        downsample_reads_inplace(&mut reads.phase0, max_number_reads);
+        downsample_reads_inplace(&mut reads.phase1, max_number_reads / 2);
+        downsample_reads_inplace(&mut reads.phase2, max_number_reads / 2);
 
-            if n_reads_to_select > 0 {
-                let selected_reads = seqs_phase.choose_multiple(&mut rng, n_reads_to_select);
-                // Reserve exact capacity to avoid reallocation
-                let phase_vec = seqs_filtered.get_mut(phase).unwrap();
-                phase_vec.reserve_exact(n_reads_to_select);
-                for read in selected_reads {
-                    phase_vec.push(read.to_vec());
-                }
-            }
-        }
-
-        Some(Reads { seqs: seqs_filtered, ps })
+        Some(reads)
     }
 }
 

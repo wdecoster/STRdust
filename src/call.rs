@@ -21,7 +21,7 @@ pub fn genotype_repeats(args: Cli) {
     crate::vcf::write_vcf_header(&args);
     let stdout = io::stdout(); // get the global stdout entity
     let mut handle = io::BufWriter::new(stdout); // wrap that handle in a buffer
-    
+
     // Setup progress bar with smoothed ETA
     let num_intervals = repeats.num_intervals;
     let pb = ProgressBar::new(num_intervals as u64);
@@ -32,7 +32,7 @@ pub fn genotype_repeats(args: Cli) {
     );
     // Enable steady tick for smoothed ETA calculation (updates every 100ms)
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
-    
+
     if args.threads == 1 {
         // When running single threaded things become easier and the tool will require less memory
         // Output is returned in the same order as the bed, and therefore not sorted before writing immediately to stdout

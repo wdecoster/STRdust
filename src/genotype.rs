@@ -56,23 +56,15 @@ fn check_quick_reference_and_collect_reads(
     let mut found_variant = false; // Track if we found any variant read
     let mut all_reads = Vec::new();
 
-    let tid = match bam.header().tid(repeat.chrom.as_bytes()) {
-        Some(tid) => tid,
-        None => {
-            return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
-                Some(reads) => ReadCheckResult::NeedsAlignment(reads),
-                None => ReadCheckResult::NoCoverage,
-            };
-        }
-    };
+    // Resolve chromosome name to tid - panic if invalid (configuration error)
+    let tid = bam
+        .header()
+        .tid(repeat.chrom.as_bytes())
+        .unwrap_or_else(|| panic!("Invalid chromosome {}", repeat.chrom));
 
-    // Fetch reads spanning the locus
-    if bam.fetch((tid, repeat.start - 1, repeat.end)).is_err() {
-        return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
-            Some(reads) => ReadCheckResult::NeedsAlignment(reads),
-            None => ReadCheckResult::NoCoverage,
-        };
-    }
+    // Fetch reads spanning the locus - panic on fetch failure
+    bam.fetch((tid, repeat.start - 1, repeat.end))
+        .unwrap_or_else(|err| panic!("Failure to extract reads from bam for {repeat}:\n{err}"));
 
     // Collect all spanning reads while checking first N for quick reference
     for r in bam.records() {
@@ -136,19 +128,6 @@ fn check_quick_reference_and_collect_reads(
             repeat.chrom, repeat.start, repeat.end, checked
         );
         return ReadCheckResult::QuickReference;
-    }
-
-    // Debug why we didn't trigger quick reference
-    if !all_reads.is_empty() {
-        debug!(
-            "Not quick reference at {}:{}-{}: checked={}, found_variant={}, total_reads={}",
-            repeat.chrom,
-            repeat.start,
-            repeat.end,
-            checked,
-            found_variant,
-            all_reads.len()
-        );
     }
 
     // Not homozygous reference - process collected reads for genotyping
@@ -242,7 +221,6 @@ fn genotype_repeat(
     }
 
     // Open FASTA reader once and reuse for both reference extraction and compressed sequence
-    // This avoids opening the file handle twice per locus (~10-15% speedup)
     let fasta_reader = rust_htslib::faidx::Reader::from_path(&args.fasta)
         .unwrap_or_else(|_| panic!("Failed to open FASTA file: {}", args.fasta));
 
@@ -303,7 +281,7 @@ fn genotype_repeat(
             .contains(&repeat.chrom.as_str())
     {
         // if the chromosome is haploid, all reads were put in phase 0
-        let seq = reads.seqs.get(&0).unwrap();
+        let seq = &reads.phase0;
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
         debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len(),);
@@ -328,7 +306,7 @@ fn genotype_repeat(
         }
     } else if args.unphased {
         // get the sequences
-        let seq = reads.seqs.get(&0).unwrap();
+        let seq = &reads.phase0;
         debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
         let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
@@ -414,9 +392,8 @@ fn genotype_repeat(
         }
     } else {
         // input alignments are already phased
-        for phase in [1, 2] {
+        for (phase, seq) in [(1, &reads.phase1), (2, &reads.phase2)] {
             // get the sequences of this phase
-            let seq = reads.seqs.get(&phase).unwrap();
             debug!("{repeat}: Phase {}: Aligning {} reads", phase, seq.len());
             let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
 
@@ -569,13 +546,7 @@ mod tests {
         let mut bam = parse_bam::create_bam_reader(&bam, &fasta);
         let binding =
             crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased, 60).unwrap();
-        let read = binding
-            .seqs
-            .get(&1)
-            .expect("Could not find phase 1")
-            .iter()
-            .next()
-            .expect("No reads found");
+        let read = binding.phase1.iter().next().expect("No reads found");
         let aligner = minimap2::Aligner::builder()
             .map_ont()
             .with_cigar()
