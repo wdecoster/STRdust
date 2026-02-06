@@ -162,6 +162,221 @@ pub fn genotype_repeat_singlethreaded(
     genotype_repeat(repeat, args, bam)
 }
 
+/// Genotype a repeat with pre-extracted reads (for batch processing)
+///
+/// This function is used when reads have already been fetched and filtered
+/// as part of batch processing. It skips the BAM fetch and read extraction
+/// steps and goes straight to alignment and genotyping.
+pub fn genotype_with_extracted_reads(
+    repeat: &mut crate::repeats::RepeatInterval,
+    reads: parse_bam::Reads,
+    args: &Cli,
+) -> Result<crate::vcf::VCFRecord, String> {
+    if args.debug {
+        repeat.set_time_stamp()
+    }
+
+    let flanking = 5000;
+    let mut flags: Vec<String> = vec![];
+
+    // Open FASTA reader to get reference sequence
+    let fasta_reader = rust_htslib::faidx::Reader::from_path(&args.fasta)
+        .unwrap_or_else(|_| panic!("Failed to open FASTA file: {}", args.fasta));
+
+    let repeat_ref_seq = match repeat.reference_repeat_sequence_with_reader(&fasta_reader) {
+        Some(seq) => seq,
+        None => {
+            return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args));
+        }
+    };
+
+    let repeat_compressed_reference =
+        repeat.make_repeat_compressed_sequence_with_reader(&fasta_reader, flanking);
+
+    // Create an index for minimap2 alignment to the artificial reference
+    let aligner = minimap2::Aligner::builder()
+        .map_ont()
+        .with_index_threads(1)
+        .with_cigar()
+        .with_seq(&repeat_compressed_reference)
+        .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
+
+    // Set up vectors to collect the results
+    let mut consenses: Vec<crate::consensus::Consensus> = vec![];
+    let mut all_insertions = if args.somatic { Some(vec![]) } else { None };
+    let mut outliers = if args.find_outliers {
+        Some(vec![])
+    } else {
+        None
+    };
+
+    // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
+    let unphased = (args.haploid.is_some()
+        && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
+        || args.unphased;
+
+    if args.haploid.is_some()
+        && args
+            .haploid
+            .as_ref()
+            .unwrap()
+            .split(',')
+            .collect::<Vec<&str>>()
+            .contains(&repeat.chrom.as_str())
+    {
+        // Haploid chromosome
+        let seq = &reads.phase0;
+        debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
+        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len());
+        if insertions.len() < args.support {
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                repeat,
+                &repeat_ref_seq,
+                insertions.len().to_string(),
+                args,
+            ));
+        }
+        let consensus =
+            crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
+        consenses.push(consensus.clone());
+        consenses.push(consensus);
+        if let Some(ref mut all_ins) = all_insertions {
+            all_ins.push(insertions.join(":"));
+        }
+    } else if unphased {
+        // Unphased
+        let seq = &reads.phase0;
+        debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
+        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        if insertions.len() < args.support {
+            debug!("{repeat}: Not enough insertions found: {}", insertions.len());
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                repeat,
+                &repeat_ref_seq,
+                insertions.len().to_string(),
+                args,
+            ));
+        }
+        if insertions.len() == 1 {
+            return Ok(crate::vcf::VCFRecord::single_read(
+                &insertions[0],
+                repeat,
+                &repeat_ref_seq,
+                all_insertions,
+                reads.ps,
+                flags,
+                args,
+            ));
+        }
+
+        debug!("{repeat}: Phasing {} insertions", insertions.len());
+        let phased = crate::phase_insertions::split(
+            &insertions,
+            repeat,
+            args.find_outliers,
+            args.min_haplotype_fraction,
+        );
+        match phased.hap2 {
+            Some(phase2) => {
+                consenses.push(crate::consensus::consensus(
+                    &phased.hap1,
+                    args.support,
+                    args.consensus_reads,
+                    repeat,
+                ));
+                consenses.push(crate::consensus::consensus(
+                    &phase2,
+                    args.support,
+                    args.consensus_reads,
+                    repeat,
+                ));
+                if let Some(ref mut all_ins) = all_insertions {
+                    all_ins.push(phased.hap1.join(":"));
+                    all_ins.push(phase2.join(":"));
+                }
+            }
+            None => {
+                if phased.hap1.len() < args.support {
+                    return Ok(crate::vcf::VCFRecord::missing_genotype(
+                        repeat,
+                        &repeat_ref_seq,
+                        insertions.len().to_string(),
+                        args,
+                    ));
+                }
+                let consensus = crate::consensus::consensus(
+                    &phased.hap1,
+                    args.support,
+                    args.consensus_reads,
+                    repeat,
+                );
+                consenses.push(consensus.clone());
+                consenses.push(consensus);
+                flags.push("CLUSTERFAILURE".to_string());
+                if let Some(ref mut all_ins) = all_insertions {
+                    all_ins.push(phased.hap1.join(":"));
+                }
+            }
+        }
+        outliers = phased.outliers;
+    } else {
+        // Phased
+        let seq1 = &reads.phase1;
+        let seq2 = &reads.phase2;
+        debug!(
+            "{repeat}: Phased: Aligning {} and {} reads for haplotypes 1 and 2",
+            seq1.len(),
+            seq2.len()
+        );
+        let insertions1 = find_insertions(seq1, &aligner, args.minlen, flanking, repeat);
+        let insertions2 = find_insertions(seq2, &aligner, args.minlen, flanking, repeat);
+        debug!(
+            "{repeat}: Phased: Got {} and {} insertions for haplotypes 1 and 2",
+            insertions1.len(),
+            insertions2.len()
+        );
+        if insertions1.len() < args.support || insertions2.len() < args.support {
+            return Ok(crate::vcf::VCFRecord::missing_genotype(
+                repeat,
+                &repeat_ref_seq,
+                format!("{},{}", insertions1.len(), insertions2.len()),
+                args,
+            ));
+        }
+        consenses.push(crate::consensus::consensus(
+            &insertions1,
+            args.support,
+            args.consensus_reads,
+            repeat,
+        ));
+        consenses.push(crate::consensus::consensus(
+            &insertions2,
+            args.support,
+            args.consensus_reads,
+            repeat,
+        ));
+        if let Some(ref mut all_ins) = all_insertions {
+            all_ins.push(insertions1.join(":"));
+            all_ins.push(insertions2.join(":"));
+        }
+    }
+
+    if args.debug {
+        debug!("{repeat}: Creating VCF record");
+    }
+    Ok(crate::vcf::VCFRecord::new(
+        consenses,
+        repeat_ref_seq,
+        all_insertions,
+        outliers,
+        repeat,
+        reads.ps,
+        flags,
+        args,
+    ))
+}
+
 /// This function genotypes a particular repeat defined by chrom, start and end in the specified bam file
 /// All indel cigar operations longer than minlen are considered
 /// The bam file is expected to be phased using the HP tag, unless --unphased is specified

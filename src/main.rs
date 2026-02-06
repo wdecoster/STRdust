@@ -3,6 +3,8 @@ use clap::Parser;
 use log::{info, warn};
 use std::path::PathBuf;
 
+pub mod bam_pool;
+pub mod batching;
 pub mod call;
 pub mod consensus;
 pub mod genotype;

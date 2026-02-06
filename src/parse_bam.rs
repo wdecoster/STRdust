@@ -121,7 +121,7 @@ pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
 }
 
 /// Downsample a vector of reads to a maximum number in-place
-fn downsample_reads_inplace(phase_reads: &mut Vec<Vec<u8>>, max_reads: usize) {
+pub fn downsample_reads_inplace(phase_reads: &mut Vec<Vec<u8>>, max_reads: usize) {
     let n_reads = phase_reads.len();
     if n_reads <= max_reads {
         return; // No downsampling needed
@@ -279,7 +279,7 @@ pub fn get_overlapping_reads(
     }
 }
 
-fn get_phase(record: &bam::Record) -> u8 {
+pub fn get_phase(record: &bam::Record) -> u8 {
     match record.aux(b"HP") {
         Ok(value) => match value {
             Aux::U8(v) => v,
@@ -291,7 +291,7 @@ fn get_phase(record: &bam::Record) -> u8 {
     }
 }
 
-fn get_phase_set(record: &bam::Record) -> Option<u32> {
+pub fn get_phase_set(record: &bam::Record) -> Option<u32> {
     match record.aux(b"PS") {
         Ok(value) => match value {
             Aux::U32(v) => Some(v),
