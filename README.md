@@ -55,6 +55,7 @@ OPTIONS:
         --consensus-reads              Maximum number of reads to use to build the consensus sequence [default: 20]
         --find-outliers                Identify poorly supported outlier expansions (only with --unphased)
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
+        --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
     -h, --help                         Print help information
     -V, --version                      Print version information
 ```
@@ -64,6 +65,7 @@ OPTIONS:
 - BED files can be provided in plain text or gzipped format (`.bed` or `.bed.gz`)
 - Lowering the number of consensus reads may lead to lesser accurate alternative allele sequences (selecting randomly from the reads), but may greatly improve speed. Note that in the case of somatic length variation, a small number of randomly selected reads may lead to a bias and not be representative of the true repeat length.
 - Genotyping known pathogenic repeats with the `--pathogenic` flag will return a VCF with the pathogenic STRs from STRchive, but currently only for the GRCh38 reference.
+- By default, STRdust uses a fast reference check (QUICKREF) to skip full alignment at loci that appear to be homozygous reference. It inspects the CIGAR strings of the first 25 reads spanning a locus, and if at least 5 are found and none show a length difference from the reference of more than 3 bp, the locus is called 0|0 immediately. Loci called this way are marked with a `QUICKREF` flag in the VCF INFO field. This substantially speeds up runs on samples with many reference-like loci. To disable this optimisation and always perform full alignment, use `--alignment-all`.
 
 ## Output format
 
