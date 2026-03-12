@@ -1,6 +1,6 @@
 # STRdust
 
-Tandem repeat genotyper for long reads, returning the repeat length and sequence in VCF format.
+STRdust is a tandem repeat genotyper for long reads, returning the repeat length and sequence in VCF format. STRdust performs realignment of reads overlapping with a repeat locus to an artificial reference sequence from which the repeat was removed. STRdust was developed while investigating the [pathogenic GOLGA8A repeat expansion](https://www.nature.com/articles/s41588-026-02537-7), and as such was not primarily intended as a general-purpose tandem repeat genotyper. This is reflected by [a benchmark of repeat genotypers](https://www.biorxiv.org/content/10.64898/2026.02.28.708646v1), where STRdust v0.16.0 performs the best of the tested tools on the detection of pathogenic alleles, but less so in the nucleotide-level precision of repeat lengths without expansion.
 
 ## Usage
 
