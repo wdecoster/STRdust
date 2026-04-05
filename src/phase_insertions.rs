@@ -1,5 +1,5 @@
+use crate::utils::levenshtein;
 use kodama::{Method, linkage};
-use levenshtein::levenshtein;
 use log::{Level, debug, error, log_enabled};
 use std::{cmp::max, collections::HashMap};
 

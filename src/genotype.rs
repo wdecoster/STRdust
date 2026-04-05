@@ -654,6 +654,10 @@ fn find_insertions(
 
     // align the reads to the new repeat-compressed reference
     for s in seq {
+        if s.is_empty() {
+            debug!("{repeat}: Skipping empty read sequence");
+            continue;
+        }
         let mapping = aligner.map(s.as_slice(), true, false, None, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
         for read in mapping {
             if let Some(s) = parse_cs(read, minlen, flanking, repeat) {

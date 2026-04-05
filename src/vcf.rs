@@ -1,7 +1,6 @@
 use crate::Cli;
 use crate::consensus::Consensus;
-use distance::levenshtein;
-use human_sort::compare as human_compare;
+use crate::utils::{human_compare, levenshtein};
 use log::debug;
 use rust_htslib::faidx;
 use std::cmp::Ordering;
@@ -133,10 +132,11 @@ impl VCFRecord {
             format!("{};", flag.join(";"))
         };
         let time_taken = if args.debug {
-            format!(
-                ";TIME={}",
-                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
-            )
+            let elapsed = repeat
+                .created
+                .expect("Failed accessing timestamp")
+                .elapsed();
+            format!(";TIME={:.3}s", elapsed.as_secs_f64())
         } else {
             "".to_string()
         };
@@ -167,10 +167,11 @@ impl VCFRecord {
         args: &crate::Cli,
     ) -> VCFRecord {
         let time_taken = if args.debug {
-            format!(
-                ";TIME={}",
-                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
-            )
+            let elapsed = repeat
+                .created
+                .expect("Failed accessing timestamp")
+                .elapsed();
+            format!(";TIME={:.3}s", elapsed.as_secs_f64())
         } else {
             "".to_string()
         };
@@ -206,10 +207,11 @@ impl VCFRecord {
         args: &crate::Cli,
     ) -> VCFRecord {
         let time_taken = if args.debug {
-            format!(
-                ";TIME={}",
-                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
-            )
+            let elapsed = repeat
+                .created
+                .expect("Failed accessing timestamp")
+                .elapsed();
+            format!(";TIME={:.3}s", elapsed.as_secs_f64())
         } else {
             "".to_string()
         };
@@ -249,10 +251,11 @@ impl VCFRecord {
             None => "".to_string(),
         };
         let time_taken = if args.debug {
-            format!(
-                ";TIME={}",
-                chrono::Utc::now() - repeat.created.expect("Failed accessing timestamp")
-            )
+            let elapsed = repeat
+                .created
+                .expect("Failed accessing timestamp")
+                .elapsed();
+            format!(";TIME={:.3}s", elapsed.as_secs_f64())
         } else {
             "".to_string()
         };

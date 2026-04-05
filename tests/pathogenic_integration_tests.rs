@@ -2,6 +2,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+fn cache_dir() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
 /// Integration tests for STRdust --pathogenic functionality
 /// These tests verify the end-to-end behavior of downloading and processing STRchive data
 /// Get the project root directory
@@ -105,9 +112,7 @@ fn test_pathogenic_cache_behavior() {
     }
 
     // Clear any existing cache
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("strdust");
+    let cache_dir = cache_dir().join("strdust");
     let cache_file = cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed");
     let _ = fs::remove_file(&cache_file);
 
@@ -212,9 +217,7 @@ fn test_pathogenic_full_workflow() {
     }
 
     // Clear cache to ensure fresh download
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("strdust");
+    let cache_dir = cache_dir().join("strdust");
     let cache_file = cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed");
     let _ = fs::remove_file(&cache_file);
 

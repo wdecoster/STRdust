@@ -55,7 +55,7 @@ pub fn consensus(
         let seqs_bytes = if num_reads > consensus_reads {
             debug!("{repeat}: Too many reads, downsampling to {consensus_reads}");
             seqs.into_iter()
-                .choose_multiple(&mut rand::rng(), consensus_reads)
+                .sample(&mut rand::rng(), consensus_reads)
                 .into_iter()
                 .map(|seq| seq.bytes().collect::<Vec<u8>>())
                 .collect::<Vec<Vec<u8>>>()

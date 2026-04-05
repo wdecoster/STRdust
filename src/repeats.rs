@@ -97,9 +97,7 @@ impl RepeatIntervalIterator {
     }
 
     pub fn pathogenic(fasta: &str) -> Self {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("strdust");
+        let cache_dir = crate::utils::cache_dir().join("strdust");
 
         // Create cache directory if it doesn't exist
         fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
@@ -210,9 +208,7 @@ impl RepeatIntervalIterator {
     /// This is exposed for testing purposes to allow test cleanup and verification
     #[cfg(test)]
     pub fn get_cache_file_path() -> std::path::PathBuf {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("strdust");
+        let cache_dir = crate::utils::cache_dir().join("strdust");
         cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed")
     }
 }
@@ -249,7 +245,7 @@ pub struct RepeatInterval {
     pub chrom: String,
     pub start: u32,
     pub end: u32,
-    pub created: Option<chrono::DateTime<chrono::Utc>>,
+    pub created: Option<std::time::Instant>,
 }
 
 impl fmt::Display for RepeatInterval {
@@ -357,7 +353,7 @@ impl RepeatInterval {
     }
 
     pub fn set_time_stamp(&mut self) {
-        self.created = Some(chrono::Utc::now());
+        self.created = Some(std::time::Instant::now());
     }
 }
 
@@ -605,9 +601,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         }
 
         // Clear any existing cache to test download functionality
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("strdust");
+        let cache_dir = crate::utils::cache_dir().join("strdust");
         let cache_file = cache_dir.join("STRchive-disease-loci.hg38.TRGT.bed");
         let _ = std::fs::remove_file(&cache_file);
 
