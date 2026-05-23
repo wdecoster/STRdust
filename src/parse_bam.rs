@@ -31,15 +31,15 @@ pub fn calculate_all_length_diff_from_cigar(
                 }
                 reference_position += *len;
             }
-            rust_htslib::bam::record::Cigar::SoftClip(len) => {
-                if start < reference_position && reference_position < end {
-                    length_diff += i64::from(*len);
-                }
+            rust_htslib::bam::record::Cigar::SoftClip(len)
+                if start < reference_position && reference_position < end =>
+            {
+                length_diff += i64::from(*len);
             }
-            rust_htslib::bam::record::Cigar::Ins(len) => {
-                if start < reference_position && reference_position < end {
-                    length_diff += i64::from(*len);
-                }
+            rust_htslib::bam::record::Cigar::Ins(len)
+                if start < reference_position && reference_position < end =>
+            {
+                length_diff += i64::from(*len);
             }
             rust_htslib::bam::record::Cigar::RefSkip(len) => reference_position += *len,
             _ => (),

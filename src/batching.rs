@@ -52,7 +52,7 @@ pub fn create_batches(repeats: Vec<RepeatInterval>, batch_distance_threshold: u3
 
     // Sort repeats within each chromosome
     for chrom_repeats in by_chromosome.values_mut() {
-        chrom_repeats.sort_by(|a, b| a.start.cmp(&b.start));
+        chrom_repeats.sort_by_key(|a| a.start);
     }
 
     // Create batches within each chromosome
