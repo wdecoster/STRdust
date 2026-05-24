@@ -44,5 +44,5 @@ jobs:
 
     - name: Install and run cargo deny
       run: |
-        cargo install cargo-deny --locked
+        cargo install cargo-deny --version "0.19.7"
         cargo deny check

@@ -13,6 +13,7 @@ allow = [
     "Unicode-3.0",  # Unicode License v3 - used by ICU/Unicode crates
     "Zlib",         # zlib License - used by foldhash crate
     "MPL-2.0",      # Mozilla Public License 2.0 - used by option-ext crate
+    "CDLA-Permissive-2.0",  # Community Data License Agreement - used by webpki-root-certs
 ]
 
 # Confidence threshold for detecting licenses
