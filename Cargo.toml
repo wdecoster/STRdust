@@ -25,7 +25,7 @@ indicatif = { version = "0.18.0", features = ["rayon"] }
 
 
 [dev-dependencies]
-ctor = "*"
+ctor = "1.0.7"
 
 [lints.clippy]
 # Allow functions with many arguments - common in systems programming
