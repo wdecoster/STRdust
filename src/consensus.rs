@@ -1,7 +1,16 @@
 use bio::alignment::{pairwise::Scoring, poa::Aligner};
 use log::debug;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
 use std::fmt;
+
+/// Fixed seed for the read downsampling RNG. Downsampling is purely a
+/// performance/memory measure, so the choice of subset should not make the
+/// genotype non-reproducible: seeding with a constant makes every run (and
+/// every comparison between runs) deterministic and independent of locus or
+/// thread ordering.
+const DOWNSAMPLE_SEED: u64 = 42;
 
 #[derive(Clone)]
 pub struct Consensus {
@@ -47,7 +56,7 @@ pub fn consensus(
         Consensus { seq: None, support: num_reads, std_dev, score: -1 }
     } else if consensus_reads == 1 {
         // if only on read should be used to generate the consensus, the consensus is a randomly selected read
-        let seq = seqs.into_iter().choose(&mut rand::rng()).unwrap();
+        let seq = seqs.into_iter().choose(&mut StdRng::seed_from_u64(DOWNSAMPLE_SEED)).unwrap();
         Consensus { seq: Some(seq.to_string()), support: num_reads, std_dev, score: 0 }
     } else {
         // if there are more than <consensus_reads> reads, downsample before taking the consensus
@@ -55,7 +64,7 @@ pub fn consensus(
         let seqs_bytes = if num_reads > consensus_reads {
             debug!("{repeat}: Too many reads, downsampling to {consensus_reads}");
             seqs.into_iter()
-                .sample(&mut rand::rng(), consensus_reads)
+                .sample(&mut StdRng::seed_from_u64(DOWNSAMPLE_SEED), consensus_reads)
                 .into_iter()
                 .map(|seq| seq.bytes().collect::<Vec<u8>>())
                 .collect::<Vec<Vec<u8>>>()
