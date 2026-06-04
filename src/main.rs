@@ -150,7 +150,7 @@ fn main() {
     if args.find_outliers && !args.unphased {
         warn!("--find-outliers is only effective with --unphased");
     }
-    info!("Collected arguments");
+    info!("Collected arguments: {args:?}");
     call::genotype_repeats(args);
 }
 
