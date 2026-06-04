@@ -51,9 +51,13 @@ OPTIONS:
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
         --sample <SAMPLE>              Sample name to use in VCF header, if not provided, the bam file name is used
         --somatic                      Print information on somatic variability
-        --unphased                     Reads are not phased, will use hierarchical clustering to phase expansions
+        --unphased                     Reads are not phased, will cluster the reads to phase expansions
         --consensus-reads              Maximum number of reads to use to build the consensus sequence [default: 20]
         --find-outliers                Identify poorly supported outlier expansions (only with --unphased)
+        --min-haplotype-fraction <F>   Minimum fraction of reads for a cluster to be a haplotype (only with --unphased) [default: 0.1]
+        --phasing-strategy <STRATEGY>  How to split unphased reads into haplotypes: 'ward' or 'dbscan' (only with --unphased) [default: ward]
+        --dbscan-eps <EPS>             DBSCAN neighbourhood radius in normalized [0,1] feature space (only with --phasing-strategy dbscan) [default: 0.4]
+        --dbscan-length-weight <W>     Weight of the length axis vs k-mer composition for DBSCAN (only with --phasing-strategy dbscan) [default: 0.3]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
     -h, --help                         Print help information
@@ -65,6 +69,9 @@ OPTIONS:
 - BED files can be provided in plain text or gzipped format (`.bed` or `.bed.gz`)
 - Lowering the number of consensus reads may lead to lesser accurate alternative allele sequences (selecting randomly from the reads), but may greatly improve speed. Note that in the case of somatic length variation, a small number of randomly selected reads may lead to a bias and not be representative of the true repeat length.
 - Genotyping known pathogenic repeats with the `--pathogenic` flag will return a VCF with the pathogenic STRs from STRchive, but currently only for the GRCh38 reference.
+- For unphased data (`--unphased`), STRdust splits the reads into (at most) two haplotypes before building consensus. Two strategies are available via `--phasing-strategy`:
+  - `ward` (default): hierarchical (Ward) clustering on a length-weighted Levenshtein distance. Robust for the common case where alleles differ mainly in length.
+  - `dbscan` (experimental): DBSCAN on length-invariant k-mer composition feature vectors. Better at keeping a length-variable expansion together as one allele (where the length-based distance tends to fragment it), at the cost of needing the reference and expanded alleles to differ in composition. The two largest clusters become the haplotypes; remaining clusters and noise reads are reported as `OUTLIERS`, and the total number of clusters is reported in `NCLUSTERS` (so loci with `NCLUSTERS > 2`, i.e. complex/multi-population loci, can be flagged downstream). Tune with `--dbscan-eps` (larger = fewer, looser clusters) and `--dbscan-length-weight` (lower = composition matters more than length).
 - By default, STRdust uses a fast reference check (QUICKREF) to skip full alignment at loci that appear to be homozygous reference. It inspects the CIGAR strings of the first 25 reads spanning a locus, and if at least 5 are found and none show a length difference from the reference of more than 3 bp, the locus is called 0|0 immediately. Loci called this way are marked with a `QUICKREF` flag in the VCF INFO field. This substantially speeds up runs on samples with many reference-like loci. To disable this optimisation and always perform full alignment, use `--alignment-all`.
 
 ## Output format
@@ -81,6 +88,7 @@ Example output:
 ##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">
 ##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">
 ##INFO=<ID=OUTLIERS,Number=1,Type=String,Description="Outlier sequences much longer than the alleles">
+##INFO=<ID=NCLUSTERS,Number=1,Type=Integer,Description="Number of read clusters found by the DBSCAN phasing strategy (>2 indicates a complex multi-population locus)">
 ##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
 ##FORMAT=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases relative to reference">
