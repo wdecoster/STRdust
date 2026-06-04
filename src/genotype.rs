@@ -276,6 +276,7 @@ pub fn genotype_with_extracted_reads(
             repeat,
             args.find_outliers,
             args.min_haplotype_fraction,
+            args.support,
         );
         match phased.hap2 {
             Some(phase2) => {
@@ -556,6 +557,7 @@ fn genotype_repeat(
             repeat,
             args.find_outliers,
             args.min_haplotype_fraction,
+            args.support,
         );
         match phased.hap2 {
             Some(phase2) => {

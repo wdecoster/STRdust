@@ -15,6 +15,7 @@ pub fn split(
     repeat: &crate::repeats::RepeatInterval,
     check_outliers: bool,
     min_haplotype_fraction: f32,
+    support: usize,
 ) -> SplitSequences {
     // the insertions are from an unphased experiment
     // and should be split in one (if homozygous) or two haplotypes
@@ -112,12 +113,19 @@ pub fn split(
     // create a vector with candidate haplotype-clusters
     let mut haplotype_clusters = vec![];
     // clusters have to represent at least min_haplotype_fraction of the reads, but never less than 1
-    let min_cluster_size = max((insertions.len() as f32 * min_haplotype_fraction) as usize, 1);
+    // the fraction-based threshold is capped by `support` so that copy-number gains (which inflate
+    // the total read count, and thus the fraction-based threshold) cannot swallow a genuine minority
+    // allele that is supported by at least `support` reads
+    let min_cluster_size = max(
+        ((insertions.len() as f32 * min_haplotype_fraction) as usize).min(support),
+        1,
+    );
     debug!(
-        "{repeat}: Minimum cluster size: {} reads ({}% of {} total)",
+        "{repeat}: Minimum cluster size: {} reads (min of {}% of {} total and support {})",
         min_cluster_size,
         min_haplotype_fraction * 100.0,
-        insertions.len()
+        insertions.len(),
+        support
     );
 
     for (index, step) in dend.steps().iter().enumerate() {
@@ -384,6 +392,76 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_split_expansion_minority_allele() {
+        // Regression test for chr15:34419425-34419451 from rr_NA99_170.log
+        // A real, length-variable expansion is present on only 5/44 reads (the rest
+        // are the short reference allele). The expansion reads must be recovered as a
+        // haplotype and must NOT all be discarded as length outliers.
+        let r43 = "TCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTTTCTTTCTTTCTTT".to_string();
+        let r2 = "TCTTTCTTTCTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTCTTT".to_string();
+        let r33 = "CTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCCCTGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAAAAAAAAAAAAAAAAAAAAAAAATCTCTCTCTCTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTCTTTCTTTCTTTC".to_string();
+        let r8 = "TCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTCTTTCTTT".to_string();
+        let r23 = "TCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTCTCTCTCTCTCTCTCTCTCTTTCTTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTCTTT".to_string();
+
+        let mut insertions = vec![r43, r2, r33, r8, r23];
+        // 39 short reference-allele reads (lengths matching the logged distribution)
+        for _ in 0..20 {
+            insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTTT".to_string()); // 27
+        }
+        for _ in 0..7 {
+            insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTTTT".to_string()); // 28
+        }
+        for _ in 0..2 {
+            insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTT".to_string()); // 26
+        }
+        for _ in 0..2 {
+            insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTTTTT".to_string()); // 29
+        }
+        insertions.push("CTTTTCTTTCTTTCTTTCTTTC".to_string()); // 22
+        insertions.push("TTTCTTTCTTTCTTTCTTTCTTT".to_string()); // 23
+        insertions.push("TTTTCTTTCTTTCTTTCTTTCTTT".to_string()); // 24
+        insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTTTCTTT".to_string()); // 31
+        insertions.push("AGTTTCTTTCTTTCTTTCTTTCTTTTTTTCTTT".to_string()); // 33
+        insertions.push("TTTCTTTCTTTCTTTCTTTTTTTCTTTTTTTCTTT".to_string()); // 35
+        for _ in 0..2 {
+            insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTTTTTTTTTT".to_string()); // 34
+        }
+        assert_eq!(insertions.len(), 44);
+
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        insertions.shuffle(&mut rng);
+
+        let splitseqs = split(
+            &insertions,
+            &crate::repeats::RepeatInterval {
+                chrom: "chr15".to_string(),
+                start: 34419425,
+                end: 34419451,
+                created: None,
+            },
+            true,
+            0.1,
+            2,
+        );
+
+        let hap2 = splitseqs
+            .hap2
+            .expect("expected a heterozygous call with two haplotypes");
+        // One of the two haplotypes should capture the expansion (median length >> reference)
+        let expansion_captured =
+            find_median(&splitseqs.hap1) > 100 || find_median(&hap2) > 100;
+        let n_outliers = splitseqs.outliers.as_ref().map_or(0, |o| o.len());
+        assert!(
+            expansion_captured,
+            "expansion not captured as a haplotype; hap1 median {}, hap2 median {}, {} outliers",
+            find_median(&splitseqs.hap1),
+            find_median(&hap2),
+            n_outliers
+        );
+    }
+
+    #[test]
     fn test_split_length() {
         // test that the split function identifies two haplotype, mainly based on insertion length
         // using a CAG expansion with some SNV noise
@@ -409,6 +487,7 @@ mod tests {
             },
             false,
             0.1,
+            3,
         );
         assert!(splitseqs.hap1.len() == splitseqs.hap2.unwrap().len());
         // check that all sequences in hap1 are the same length
@@ -453,6 +532,7 @@ mod tests {
             },
             false,
             0.1,
+            3,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
@@ -494,6 +574,7 @@ mod tests {
             },
             false,
             0.1,
+            3,
         );
         assert!(splitseqs.hap1.len() + splitseqs.hap2.unwrap().len() == insertions.len());
     }
@@ -538,6 +619,7 @@ mod tests {
             },
             false,
             0.1,
+            3,
         );
         assert!(splitseqs.hap2.is_none());
         println!("hap1: {:?}", splitseqs.hap1);
@@ -580,6 +662,7 @@ mod tests {
             },
             false,
             0.1,
+            3,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
@@ -653,6 +736,7 @@ mod tests {
             },
             false,
             0.1,
+            3,
         );
         let mut hap1 = splitseqs.hap1;
         let mut hap2 = splitseqs.hap2.unwrap();
