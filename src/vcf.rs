@@ -52,6 +52,7 @@ pub struct VCFRecord {
     pub score: (String, String),
     pub somatic_info_field: String,
     pub outliers: String,
+    pub n_clusters: String,
     pub time_taken: String,
     pub ps: Option<u32>, // phase set identifier
     pub flags: String,
@@ -64,6 +65,7 @@ impl VCFRecord {
         repeat_ref_sequence: String,
         all_insertions: Option<Vec<String>>,
         outlier_insertions: Option<Vec<String>>,
+        n_clusters: Option<usize>,
         repeat: &crate::repeats::RepeatInterval,
         ps: Option<u32>,
         flag: Vec<String>,
@@ -126,6 +128,11 @@ impl VCFRecord {
             None => "".to_string(),
         };
 
+        let n_clusters = match n_clusters {
+            Some(n) => format!(";NCLUSTERS={n}"),
+            None => "".to_string(),
+        };
+
         let flags = if flag.is_empty() {
             "".to_string()
         } else {
@@ -153,6 +160,7 @@ impl VCFRecord {
             score: (allele1.score, allele2.score),
             somatic_info_field,
             outliers,
+            n_clusters,
             time_taken,
             ps,
             flags,
@@ -193,6 +201,7 @@ impl VCFRecord {
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
+            n_clusters: "".to_string(),
             time_taken,
             ps: None,
             flags: flags_str,
@@ -228,6 +237,7 @@ impl VCFRecord {
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
+            n_clusters: "".to_string(),
             time_taken,
             ps: None,
             flags: "".to_string(),
@@ -272,6 +282,7 @@ impl VCFRecord {
             score: (".".to_string(), ".".to_string()),
             somatic_info_field,
             outliers: "".to_string(),
+            n_clusters: "".to_string(),
             time_taken,
             ps,
             flags: if flag.is_empty() {
@@ -426,7 +437,7 @@ impl fmt::Display for VCFRecord {
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}{time_taken}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{sup1},{sup2}:{score1},{score2}{ps}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}{n_clusters}{time_taken}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{sup1},{sup2}:{score1},{score2}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -441,6 +452,7 @@ impl fmt::Display for VCFRecord {
                     sd2 = self.std_dev.1,
                     somatic = self.somatic_info_field,
                     outliers = self.outliers,
+                    n_clusters = self.n_clusters,
                     time_taken = self.time_taken,
                     genotype1 = self.allele.0,
                     genotype2 = self.allele.1,
@@ -531,6 +543,9 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##INFO=<ID=OUTLIERS,Number=1,Type=String,Description="Outlier sequences much longer than the alleles">"#
     );
     println!(
+        r#"##INFO=<ID=NCLUSTERS,Number=1,Type=Integer,Description="Number of read clusters found by the DBSCAN phasing strategy (>2 indicates a complex multi-population locus)">"#
+    );
+    println!(
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
     );
     println!(
@@ -581,6 +596,9 @@ fn test_write_vcf_header_from_bam() {
         unphased: true,
         find_outliers: false,
         min_haplotype_fraction: 0.1,
+        phasing_strategy: crate::PhasingStrategy::Ward,
+        dbscan_eps: 0.2,
+        dbscan_length_weight: 1.0,
         threads: 1,
         sample: None,
         haploid: Some(String::from("chr7")),
@@ -608,6 +626,9 @@ fn test_write_vcf_header_from_name() {
         unphased: true,
         find_outliers: false,
         min_haplotype_fraction: 0.1,
+        phasing_strategy: crate::PhasingStrategy::Ward,
+        dbscan_eps: 0.2,
+        dbscan_length_weight: 1.0,
         threads: 1,
         sample: Some("test_sample".to_string()),
         haploid: Some(String::from("chr7")),

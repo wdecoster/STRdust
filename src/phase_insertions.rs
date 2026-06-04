@@ -8,6 +8,9 @@ pub struct SplitSequences {
     pub hap2: Option<Vec<String>>,
     pub flag: Option<String>,
     pub outliers: Option<Vec<String>>,
+    /// Number of clusters found, only set by the DBSCAN strategy (None for Ward).
+    /// Surfaced in the VCF as NCLUSTERS so complex multi-population loci can be flagged.
+    pub n_clusters: Option<usize>,
 }
 
 pub fn split(
@@ -116,10 +119,8 @@ pub fn split(
     // the fraction-based threshold is capped by `support` so that copy-number gains (which inflate
     // the total read count, and thus the fraction-based threshold) cannot swallow a genuine minority
     // allele that is supported by at least `support` reads
-    let min_cluster_size = max(
-        ((insertions.len() as f32 * min_haplotype_fraction) as usize).min(support),
-        1,
-    );
+    let min_cluster_size =
+        max(((insertions.len() as f32 * min_haplotype_fraction) as usize).min(support), 1);
     debug!(
         "{repeat}: Minimum cluster size: {} reads (min of {}% of {} total and support {})",
         min_cluster_size,
@@ -219,6 +220,7 @@ pub fn split(
                 } else {
                     None
                 },
+                n_clusters: None,
             }
         }
         1 => {
@@ -237,6 +239,7 @@ pub fn split(
                 } else {
                     None
                 },
+                n_clusters: None,
             }
         }
         2 => {
@@ -263,11 +266,117 @@ pub fn split(
                 } else {
                     None
                 },
+                n_clusters: None,
             }
         }
         _ => {
             error!("{repeat}: Found more than two haplotype clusters. This shouldn't happen.");
             panic!();
+        }
+    }
+}
+
+/// Alternative phasing strategy to [`split`] (Ward over length-weighted
+/// Levenshtein). Builds k-mer composition feature vectors (length-invariant)
+/// and clusters them with DBSCAN. Noise points and any clusters beyond the two
+/// largest become outliers. Returns `n_clusters` so complex multi-population
+/// loci can be flagged in the VCF.
+pub fn split_dbscan(
+    insertions: &[String],
+    repeat: &crate::repeats::RepeatInterval,
+    check_outliers: bool,
+    support: usize,
+    eps: f64,
+    length_weight: f64,
+) -> SplitSequences {
+    use crate::features::{self, KmerTable};
+
+    // Auto-detect the repeat period (k) from the median-length insertion.
+    let mut by_len: Vec<&String> = insertions.iter().collect();
+    by_len.sort_by_key(|s| s.len());
+    let median_seq = by_len[by_len.len() / 2];
+    let k = features::detect_period(median_seq.as_bytes(), features::AUTO_K_MAX)
+        .unwrap_or(features::AUTO_K_DEFAULT);
+    let table = KmerTable::new(k);
+    let max_len = insertions.iter().map(|s| s.len()).max().unwrap_or(0);
+
+    let points: Vec<Vec<f64>> = insertions
+        .iter()
+        .map(|s| features::build_feature_vector(s, &table, k, max_len, length_weight))
+        .collect();
+
+    // min_samples = support, so every DBSCAN cluster is backed by >= support reads.
+    let labels = crate::dbscan::cluster(&points, eps, support);
+
+    let mut clusters: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut noise: Vec<String> = Vec::new();
+    for (seq, label) in insertions.iter().zip(labels.iter()) {
+        match label {
+            Some(cid) => clusters.entry(*cid).or_default().push(seq.clone()),
+            None => noise.push(seq.clone()),
+        }
+    }
+    let n_clusters = Some(clusters.len());
+    debug!(
+        "{repeat}: DBSCAN (k={k}, eps={eps}, min_samples={support}) found {} clusters and {} noise reads",
+        clusters.len(),
+        noise.len()
+    );
+
+    // Sort clusters by size (desc); tie-break on total bp then id for determinism.
+    let mut sized: Vec<(usize, Vec<String>)> = clusters.into_iter().collect();
+    sized.sort_by(|a, b| {
+        b.1.len()
+            .cmp(&a.1.len())
+            .then_with(|| {
+                b.1.iter()
+                    .map(String::len)
+                    .sum::<usize>()
+                    .cmp(&a.1.iter().map(String::len).sum::<usize>())
+            })
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
+    let outliers_opt =
+        |extra: Vec<String>| -> Option<Vec<String>> { check_outliers.then_some(extra).filter(|e| !e.is_empty()) };
+
+    match sized.len() {
+        0 => {
+            debug!("{repeat}: DBSCAN found no clusters; treating as homozygous (CLUSTERFAILURE)");
+            SplitSequences {
+                hap1: insertions.to_vec(),
+                hap2: None,
+                flag: Some("CLUSTERFAILURE".to_string()),
+                outliers: None,
+                n_clusters,
+            }
+        }
+        1 => {
+            let hap1 = sized.into_iter().next().unwrap().1;
+            SplitSequences {
+                hap1,
+                hap2: None,
+                flag: None,
+                outliers: outliers_opt(noise),
+                n_clusters,
+            }
+        }
+        _ => {
+            let mut it = sized.into_iter();
+            let hap1 = it.next().unwrap().1;
+            let hap2 = it.next().unwrap().1;
+            // any clusters beyond the two largest join the noise as outliers
+            let mut extra = noise;
+            for (_, c) in it {
+                extra.extend(c);
+            }
+            SplitSequences {
+                hap1,
+                hap2: Some(hap2),
+                flag: None,
+                outliers: outliers_opt(extra),
+                n_clusters,
+            }
         }
     }
 }
@@ -391,12 +500,10 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
 
-    #[test]
-    fn test_split_expansion_minority_allele() {
-        // Regression test for chr15:34419425-34419451 from rr_NA99_170.log
-        // A real, length-variable expansion is present on only 5/44 reads (the rest
-        // are the short reference allele). The expansion reads must be recovered as a
-        // haplotype and must NOT all be discarded as length outliers.
+    /// The 44 insertions of chr15:34419425-34419451 (GOLGA8A) from rr_NA99_170.log:
+    /// 5 length-variable, CT/CCTT-rich expansion reads + 39 short TTTC reference reads.
+    #[allow(dead_code)]
+    fn golga8a_insertions() -> Vec<String> {
         let r43 = "TCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTTTCTTTCTTTCTTT".to_string();
         let r2 = "TCTTTCTTTCTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTCTTT".to_string();
         let r33 = "CTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTCCCCCTGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAAAAAAAAAAAAAAAAAAAAAAAATCTCTCTCTCTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTCTTTCTTTCTTTC".to_string();
@@ -427,6 +534,43 @@ mod tests {
             insertions.push("TTTCTTTCTTTCTTTCTTTCTTTCTTTTTTTTTT".to_string()); // 34
         }
         assert_eq!(insertions.len(), 44);
+        insertions
+    }
+
+    #[test]
+    fn test_split_dbscan_captures_expansion() {
+        // The DBSCAN strategy on the GOLGA8A data: with length-invariant k-mer
+        // composition features, the length-variable expansion is recovered as a
+        // distinct haplotype (rather than being fragmented by length and lost to
+        // the outlier bin, as happens with the length-dominated Ward distance).
+        let insertions = golga8a_insertions();
+        let repeat = crate::repeats::RepeatInterval {
+            chrom: "chr15".to_string(),
+            start: 34419425,
+            end: 34419451,
+            created: None,
+        };
+        // default CLI params (eps=0.2, length_weight=1.0), min_samples = support = 2
+        let s = split_dbscan(&insertions, &repeat, true, 2, 0.2, 1.0);
+        let hap2 = s.hap2.expect("expected a heterozygous call");
+        // exactly the reference + expansion alleles -> two clusters
+        assert_eq!(s.n_clusters, Some(2));
+        // one haplotype is the short reference, the other captures the expansion
+        let med1 = find_median(&s.hap1);
+        let med2 = find_median(&hap2);
+        assert!(
+            med1.min(med2) < 50 && med1.max(med2) > 100,
+            "expected one reference (~27bp) and one expansion (>100bp) haplotype, got {med1} and {med2}"
+        );
+    }
+
+    #[test]
+    fn test_split_expansion_minority_allele() {
+        // Regression test for chr15:34419425-34419451 from rr_NA99_170.log
+        // A real, length-variable expansion is present on only 5/44 reads (the rest
+        // are the short reference allele). The expansion reads must be recovered as a
+        // haplotype and must NOT all be discarded as length outliers.
+        let mut insertions = golga8a_insertions();
 
         use rand::seq::SliceRandom;
         let mut rng = rand::rng();
@@ -449,8 +593,7 @@ mod tests {
             .hap2
             .expect("expected a heterozygous call with two haplotypes");
         // One of the two haplotypes should capture the expansion (median length >> reference)
-        let expansion_captured =
-            find_median(&splitseqs.hap1) > 100 || find_median(&hap2) > 100;
+        let expansion_captured = find_median(&splitseqs.hap1) > 100 || find_median(&hap2) > 100;
         let n_outliers = splitseqs.outliers.as_ref().map_or(0, |o| o.len());
         assert!(
             expansion_captured,

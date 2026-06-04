@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use log::{info, warn};
 use std::path::PathBuf;
 
@@ -7,6 +7,8 @@ pub mod bam_pool;
 pub mod batching;
 pub mod call;
 pub mod consensus;
+pub mod dbscan;
+pub mod features;
 pub mod genotype;
 pub mod motif;
 pub mod parse_bam;
@@ -14,6 +16,15 @@ pub mod phase_insertions;
 pub mod repeats;
 pub mod utils;
 pub mod vcf;
+
+/// Strategy for splitting unphased reads into haplotypes.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhasingStrategy {
+    /// Length-weighted Levenshtein distance + Ward hierarchical clustering.
+    Ward,
+    /// k-mer composition feature vectors + DBSCAN.
+    Dbscan,
+}
 
 // The arguments end up in the Cli struct
 #[derive(Parser, Debug)]
@@ -70,6 +81,23 @@ pub struct Cli {
     /// Minimum fraction of reads required for a cluster to be considered a haplotype (only with --unphased)
     #[arg(long, default_value_t = 0.1)]
     min_haplotype_fraction: f32,
+
+    /// Strategy for splitting unphased reads into haplotypes (only with --unphased).
+    /// 'ward': length-weighted Levenshtein + hierarchical clustering (default).
+    /// 'dbscan': k-mer composition features + DBSCAN (experimental, robust to length-variable expansions).
+    #[arg(long, value_enum, default_value_t = PhasingStrategy::Ward)]
+    phasing_strategy: PhasingStrategy,
+
+    /// DBSCAN neighbourhood radius in normalized [0,1] feature space (only with --phasing-strategy dbscan).
+    /// Smaller values split more readily. Tune together with --dbscan-length-weight.
+    #[arg(long, default_value_t = 0.2)]
+    dbscan_eps: f64,
+
+    /// Weight of the (normalized) length axis relative to k-mer composition for DBSCAN
+    /// (only with --phasing-strategy dbscan). Lower values let length-variable expansions of the
+    /// same motif cluster together; higher values better separate same-motif alleles that differ only in length.
+    #[arg(long, default_value_t = 1.0)]
+    dbscan_length_weight: f64,
 
     /// comma-separated list of haploid (sex) chromosomes
     #[arg(long)]

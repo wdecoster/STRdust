@@ -209,6 +209,8 @@ pub fn genotype_with_extracted_reads(
     } else {
         None
     };
+    // number of clusters found by the DBSCAN phasing strategy (None for Ward / phased input)
+    let mut n_clusters: Option<usize> = None;
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     let unphased = (args.haploid.is_some()
@@ -271,13 +273,23 @@ pub fn genotype_with_extracted_reads(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len());
-        let phased = crate::phase_insertions::split(
-            &insertions,
-            repeat,
-            args.find_outliers,
-            args.min_haplotype_fraction,
-            args.support,
-        );
+        let phased = match args.phasing_strategy {
+            crate::PhasingStrategy::Ward => crate::phase_insertions::split(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.min_haplotype_fraction,
+                args.support,
+            ),
+            crate::PhasingStrategy::Dbscan => crate::phase_insertions::split_dbscan(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.support,
+                args.dbscan_eps,
+                args.dbscan_length_weight,
+            ),
+        };
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(
@@ -320,6 +332,7 @@ pub fn genotype_with_extracted_reads(
                 }
             }
         }
+        n_clusters = phased.n_clusters;
         outliers = phased.outliers;
     } else {
         // Phased
@@ -371,6 +384,7 @@ pub fn genotype_with_extracted_reads(
         repeat_ref_seq,
         all_insertions,
         outliers,
+        n_clusters,
         repeat,
         reads.ps,
         flags,
@@ -482,6 +496,8 @@ fn genotype_repeat(
     } else {
         None
     };
+    // number of clusters found by the DBSCAN phasing strategy (None for Ward / phased input)
+    let mut n_clusters: Option<usize> = None;
 
     // The rest of the function has three mutually exclusive options from here.
     // Either the reads are from a haploid chromosome, unphased or phased by a tool like WhatsHap/hiphase/...
@@ -552,13 +568,23 @@ fn genotype_repeat(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(
-            &insertions,
-            repeat,
-            args.find_outliers,
-            args.min_haplotype_fraction,
-            args.support,
-        );
+        let phased = match args.phasing_strategy {
+            crate::PhasingStrategy::Ward => crate::phase_insertions::split(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.min_haplotype_fraction,
+                args.support,
+            ),
+            crate::PhasingStrategy::Dbscan => crate::phase_insertions::split_dbscan(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.support,
+                args.dbscan_eps,
+                args.dbscan_length_weight,
+            ),
+        };
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(
@@ -602,6 +628,7 @@ fn genotype_repeat(
                 }
             }
         }
+        n_clusters = phased.n_clusters;
         if let Some(ref mut outliers_vec) = outliers
             && let Some(outliers_found) = phased.outliers
         {
@@ -637,6 +664,7 @@ fn genotype_repeat(
         repeat_ref_seq,
         all_insertions,
         outliers,
+        n_clusters,
         repeat,
         reads.ps,
         flags,
@@ -806,6 +834,9 @@ mod tests {
             unphased: false,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
+            dbscan_eps: 0.2,
+            dbscan_length_weight: 1.0,
             threads: 1,
             sample: None,
             haploid: None,
@@ -841,6 +872,9 @@ mod tests {
             unphased: true,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
+            dbscan_eps: 0.2,
+            dbscan_length_weight: 1.0,
             threads: 1,
             sample: None,
             haploid: Some(String::from("chr7")),
@@ -870,6 +904,9 @@ mod tests {
             unphased: true,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
+            dbscan_eps: 0.2,
+            dbscan_length_weight: 1.0,
             threads: 1,
             sample: None,
             haploid: None,
@@ -905,6 +942,9 @@ mod tests {
             unphased: false,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
+            dbscan_eps: 0.2,
+            dbscan_length_weight: 1.0,
             threads: 1,
             sample: None,
             haploid: None,
@@ -942,6 +982,9 @@ mod tests {
             unphased: false,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
+            dbscan_eps: 0.2,
+            dbscan_length_weight: 1.0,
             threads: 1,
             sample: None,
             haploid: None,
