@@ -90,13 +90,13 @@ pub struct Cli {
 
     /// DBSCAN neighbourhood radius in normalized [0,1] feature space (only with --phasing-strategy dbscan).
     /// Smaller values split more readily. Tune together with --dbscan-length-weight.
-    #[arg(long, default_value_t = 0.2)]
+    #[arg(long, default_value_t = 0.4)]
     dbscan_eps: f64,
 
     /// Weight of the (normalized) length axis relative to k-mer composition for DBSCAN
     /// (only with --phasing-strategy dbscan). Lower values let length-variable expansions of the
     /// same motif cluster together; higher values better separate same-motif alleles that differ only in length.
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = 0.3)]
     dbscan_length_weight: f64,
 
     /// comma-separated list of haploid (sex) chromosomes

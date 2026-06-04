@@ -337,8 +337,9 @@ pub fn split_dbscan(
             .then_with(|| a.0.cmp(&b.0))
     });
 
-    let outliers_opt =
-        |extra: Vec<String>| -> Option<Vec<String>> { check_outliers.then_some(extra).filter(|e| !e.is_empty()) };
+    let outliers_opt = |extra: Vec<String>| -> Option<Vec<String>> {
+        check_outliers.then_some(extra).filter(|e| !e.is_empty())
+    };
 
     match sized.len() {
         0 => {
@@ -550,8 +551,8 @@ mod tests {
             end: 34419451,
             created: None,
         };
-        // default CLI params (eps=0.2, length_weight=1.0), min_samples = support = 2
-        let s = split_dbscan(&insertions, &repeat, true, 2, 0.2, 1.0);
+        // default CLI params (eps=0.4, length_weight=0.3), min_samples = support = 2
+        let s = split_dbscan(&insertions, &repeat, true, 2, 0.4, 0.3);
         let hap2 = s.hap2.expect("expected a heterozygous call");
         // exactly the reference + expansion alleles -> two clusters
         assert_eq!(s.n_clusters, Some(2));
