@@ -83,7 +83,7 @@ def parse_log_and_draw_trees(logfile):
 def main():
     parser = argparse.ArgumentParser(description="Generate tree visualizations from STRdust log files")
     parser.add_argument("logfile", help="Path to the STRdust log file")
-    parser.add_argument("--format", choices=["dot", "png"], default="dot", 
+    parser.add_argument("-f", "--format", choices=["dot", "png"], default="dot", 
                         help="Output format (default: dot format to stdout)")
     parser.add_argument("--output-dir", help="Directory to save PNG files (for --format=png)")
     
