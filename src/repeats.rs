@@ -245,7 +245,26 @@ pub struct RepeatInterval {
     pub chrom: String,
     pub start: u32,
     pub end: u32,
-    pub created: Option<std::time::Instant>,
+    /// Thread CPU time consumed at the moment genotyping of this locus started
+    /// (see [`thread_cpu_time`]). Subtracting it from a later reading on the same
+    /// thread yields the locus's CPU cost, reported via the `TIME=` INFO field.
+    pub created: Option<std::time::Duration>,
+}
+
+/// Read the calling thread's consumed CPU time.
+///
+/// Unlike `Instant::now()` (wall-clock), this clock only advances while the
+/// thread is actually scheduled on a CPU, so per-locus measurements are not
+/// inflated by other processes competing for the machine. Each locus is
+/// genotyped start-to-finish on a single rayon worker thread, so the delta
+/// between two readings on that thread is the locus's CPU cost.
+pub fn thread_cpu_time() -> std::time::Duration {
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: `ts` is a valid, fully-initialized timespec; clock_gettime only
+    // writes the seconds/nanoseconds fields and returns 0 on success.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+    debug_assert_eq!(rc, 0, "clock_gettime(CLOCK_THREAD_CPUTIME_ID) failed");
+    std::time::Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
 
 impl fmt::Display for RepeatInterval {
@@ -353,7 +372,23 @@ impl RepeatInterval {
     }
 
     pub fn set_time_stamp(&mut self) {
-        self.created = Some(std::time::Instant::now());
+        self.created = Some(thread_cpu_time());
+    }
+
+    /// CPU time consumed since [`set_time_stamp`](Self::set_time_stamp) was
+    /// called, or `None` if it never was.
+    pub fn cpu_elapsed(&self) -> Option<std::time::Duration> {
+        self.created
+            .map(|start| thread_cpu_time().saturating_sub(start))
+    }
+
+    /// Render the `;TIME=<cpu seconds>s` INFO field. Empty unless `debug` is set
+    /// and a start timestamp was recorded.
+    pub fn time_field(&self, debug: bool) -> String {
+        match (debug, self.cpu_elapsed()) {
+            (true, Some(elapsed)) => format!(";TIME={:.3}s", elapsed.as_secs_f64()),
+            _ => String::new(),
+        }
     }
 }
 

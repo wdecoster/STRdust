@@ -14,6 +14,7 @@ dependencies = [
  "hts-sys",
  "indicatif",
  "kodama",
+ "libc",
  "log",
  "minimap2",
  "rand 0.10.1",
