@@ -131,15 +131,7 @@ impl VCFRecord {
         } else {
             format!("{};", flag.join(";"))
         };
-        let time_taken = if args.debug {
-            let elapsed = repeat
-                .created
-                .expect("Failed accessing timestamp")
-                .elapsed();
-            format!(";TIME={:.3}s", elapsed.as_secs_f64())
-        } else {
-            "".to_string()
-        };
+        let time_taken = repeat.time_field(args.debug);
         VCFRecord {
             chrom: repeat.chrom.clone(),
             start: repeat.start,
@@ -166,15 +158,7 @@ impl VCFRecord {
         flags: Vec<String>,
         args: &crate::Cli,
     ) -> VCFRecord {
-        let time_taken = if args.debug {
-            let elapsed = repeat
-                .created
-                .expect("Failed accessing timestamp")
-                .elapsed();
-            format!(";TIME={:.3}s", elapsed.as_secs_f64())
-        } else {
-            "".to_string()
-        };
+        let time_taken = repeat.time_field(args.debug);
         let flags_str = if flags.is_empty() {
             "".to_string()
         } else {
@@ -206,15 +190,7 @@ impl VCFRecord {
         support: String,
         args: &crate::Cli,
     ) -> VCFRecord {
-        let time_taken = if args.debug {
-            let elapsed = repeat
-                .created
-                .expect("Failed accessing timestamp")
-                .elapsed();
-            format!(";TIME={:.3}s", elapsed.as_secs_f64())
-        } else {
-            "".to_string()
-        };
+        let time_taken = repeat.time_field(args.debug);
         VCFRecord {
             chrom: repeat.chrom.clone(),
             start: repeat.start,
@@ -250,15 +226,7 @@ impl VCFRecord {
             }
             None => "".to_string(),
         };
-        let time_taken = if args.debug {
-            let elapsed = repeat
-                .created
-                .expect("Failed accessing timestamp")
-                .elapsed();
-            format!(";TIME={:.3}s", elapsed.as_secs_f64())
-        } else {
-            "".to_string()
-        };
+        let time_taken = repeat.time_field(args.debug);
         VCFRecord {
             chrom: repeat.chrom.clone(),
             start: repeat.start,
@@ -538,7 +506,7 @@ pub fn write_vcf_header(args: &Cli) {
     );
     if args.debug {
         println!(
-            r#"##INFO=<ID=TIME,Number=1,Type=String,Description="Time taken to genotype the repeat">"#
+            r#"##INFO=<ID=TIME,Number=1,Type=String,Description="Thread CPU time taken to genotype the repeat (debug mode only)">"#
         );
     }
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
