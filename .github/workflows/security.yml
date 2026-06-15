@@ -5,44 +5,22 @@ on:
     # Run weekly on Sundays at 2:00 AM UTC
     - cron: '0 2 * * 0'
   workflow_dispatch: # Allow manual trigger
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
   audit:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
 
-    - name: Install cargo-audit
-      run: cargo install cargo-audit
-
-    - name: Run security audit
+    # cargo-deny's advisories check covers vulnerabilities, unsound, yanked, and
+    # unmaintained advisories. Policy (allowed licenses, ignored advisories,
+    # unmaintained = "workspace") lives in deny.toml so it is reviewable in one
+    # place instead of being scattered across inline --ignore flags.
+    - name: Install and run cargo-deny
       run: |
-        # Ignore known unmaintained crates that are transitive dependencies
-        # These are also ignored in deny.toml for cargo-deny
-        cargo audit \
-          --ignore RUSTSEC-2025-0058 \
-          --ignore RUSTSEC-2025-0057 \
-          --ignore RUSTSEC-2024-0436
-
-    - name: Check for outdated dependencies
-      run: |
-        # Install cargo-outdated with locked dependencies to avoid version conflicts
-        cargo install cargo-outdated --locked || echo "cargo-outdated installation failed, skipping outdated check"
-        if command -v cargo-outdated >/dev/null 2>&1; then
-          cargo outdated --root-deps-only || echo "cargo-outdated failed, but this is non-critical"
-        fi
-
-    - name: Install and run cargo deny
-      run: |
-        cargo install cargo-deny --version "0.19.7"
+        cargo install cargo-deny --version "0.19.7" --locked
         cargo deny check

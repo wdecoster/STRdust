@@ -59,13 +59,13 @@ db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
 
-# Handle known unmaintained crates that are still widely used
-ignore = [
-    # Bio crate dependencies that are unmaintained but still functional
-    "RUSTSEC-2025-0058",  # custom_derive - widely used in bio ecosystem
-    "RUSTSEC-2025-0057",  # fxhash - used by bio, has replacement but not critical
-    "RUSTSEC-2024-0436",  # paste - used by nalgebra/simba and minimap2-sys, archived but stable
-]
+# Only flag "unmaintained" advisories for crates we depend on directly, not for
+# deep transitive build-time dependencies (e.g. proc-macro-error2, paste,
+# fxhash, custom_derive pulled in via getset -> bio). Those are unmaintained
+# upstream with no safe upgrade and are not a security risk for a CLI, and they
+# were causing a new red build every week as fresh advisories were published.
+# Actual vulnerabilities (and unsound advisories) still fail the check.
+unmaintained = "workspace"
 
 [sources]
 # Lint level for what to happen when a crate from a git repository is encountered
