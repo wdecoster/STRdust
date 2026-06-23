@@ -111,7 +111,9 @@ fn test_pathogenic_exclusive_with_region() {
 fn test_pathogenic_cache_behavior() {
     // Only run if explicitly enabled
     if std::env::var("TEST_PATHOGENIC_NETWORK").is_err() {
-        eprintln!("skipping test_pathogenic_cache_behavior: set TEST_PATHOGENIC_NETWORK=1 to enable");
+        eprintln!(
+            "skipping test_pathogenic_cache_behavior: set TEST_PATHOGENIC_NETWORK=1 to enable"
+        );
         return;
     }
 
