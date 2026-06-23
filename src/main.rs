@@ -24,6 +24,9 @@ pub enum PhasingStrategy {
     Ward,
     /// k-mer composition feature vectors + DBSCAN.
     Dbscan,
+    /// QC mode: report the Ward call but additionally run DBSCAN and flag substantial
+    /// length discordance (DISCORDANT_LENGTH / DBSCAN_RB) for review.
+    Both,
 }
 
 // The arguments end up in the Cli struct
@@ -85,19 +88,10 @@ pub struct Cli {
     /// Strategy for splitting unphased reads into haplotypes (only with --unphased).
     /// 'ward': length-weighted Levenshtein + hierarchical clustering (default).
     /// 'dbscan': k-mer composition features + DBSCAN (experimental, robust to length-variable expansions).
-    #[arg(long, value_enum, default_value_t = PhasingStrategy::Ward)]
+    /// 'both': QC mode that reports the Ward call but also runs DBSCAN and flags substantial
+    /// length discordance (DISCORDANT_LENGTH / DBSCAN_RB) for review.
+    #[arg(long = "phasing", value_name = "STRATEGY", value_enum, default_value_t = PhasingStrategy::Ward)]
     phasing_strategy: PhasingStrategy,
-
-    /// DBSCAN neighbourhood radius in normalized [0,1] feature space (only with --phasing-strategy dbscan).
-    /// Smaller values split more readily. Tune together with --dbscan-length-weight.
-    #[arg(long, default_value_t = 0.4)]
-    dbscan_eps: f64,
-
-    /// Weight of the (normalized) length axis relative to k-mer composition for DBSCAN
-    /// (only with --phasing-strategy dbscan). Lower values let length-variable expansions of the
-    /// same motif cluster together; higher values better separate same-motif alleles that differ only in length.
-    #[arg(long, default_value_t = 0.3)]
-    dbscan_length_weight: f64,
 
     /// comma-separated list of haploid (sex) chromosomes
     #[arg(long)]

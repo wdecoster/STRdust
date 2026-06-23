@@ -1,4 +1,4 @@
-//! DBSCAN clustering for the optional `--phasing-strategy dbscan` path.
+//! DBSCAN clustering for the optional `--phasing dbscan` path.
 //!
 //! Adapted from the `trout` cohort-outlier tool, which used a custom DBSCAN
 //! over a precomputed CSR adjacency for speed (one pairwise distance per pair,

@@ -12,17 +12,38 @@ use std::fmt;
 /// thread ordering.
 const DOWNSAMPLE_SEED: u64 = 42;
 
+/// A called allele is flagged IMPRECISE_LENGTH when the coefficient of variation
+/// (std_dev / mean) of its cluster's read lengths exceeds this threshold. 0.2 (20%
+/// spread) separates clean, near-fixed-length alleles from continuous/long-tailed
+/// length distributions (e.g. the GOLGA8A repeat) where a single consensus length
+/// is not a faithful representation of the underlying reads. Hardcoded for now;
+/// can be promoted to a CLI argument later if cohort experience warrants it.
+const IMPRECISE_LENGTH_CV: f64 = 0.2;
+
 #[derive(Clone)]
 pub struct Consensus {
     pub seq: Option<String>,
     pub support: usize,
     pub std_dev: usize,
     pub score: i32,
+    /// Median full length of the cluster reads (before length-outlier removal),
+    /// reported as MRL. More robust to a long tail than the POA consensus length.
+    pub median_length: usize,
+    /// True when the cluster's read-length coefficient of variation exceeds
+    /// [`IMPRECISE_LENGTH_CV`]; surfaced as the IMPRECISE_LENGTH locus flag.
+    pub imprecise: bool,
 }
 
 impl Default for Consensus {
     fn default() -> Consensus {
-        Consensus { seq: None, support: 0, std_dev: 0, score: -1 }
+        Consensus {
+            seq: None,
+            support: 0,
+            std_dev: 0,
+            score: -1,
+            median_length: 0,
+            imprecise: false,
+        }
     }
 }
 
@@ -46,21 +67,32 @@ pub fn consensus(
     repeat: &crate::repeats::RepeatInterval,
 ) -> Consensus {
     if seqs.is_empty() {
-        return Consensus { seq: None, support: 0, std_dev: 0, score: -1 };
+        return Consensus::default();
     }
     let num_reads_ = seqs.len();
-    let (seqs, std_dev) = remove_outliers(seqs, repeat);
+    // Length statistics over all cluster reads (before length-outlier removal), so the
+    // reported median and the imprecision verdict reflect the true read distribution.
+    let (mean, std_dev, median_length) = length_stats(seqs);
+    let imprecise = mean > 0 && (std_dev as f64 / mean as f64) > IMPRECISE_LENGTH_CV;
+    let seqs = remove_outliers(seqs, mean, std_dev, repeat);
     let num_reads = seqs.len();
     debug!("{repeat}: Kept {}/{} reads after dropping outliers", num_reads, num_reads_);
     if num_reads < support {
-        Consensus { seq: None, support: num_reads, std_dev, score: -1 }
+        Consensus { seq: None, support: num_reads, std_dev, score: -1, median_length, imprecise }
     } else if consensus_reads == 1 {
         // if only on read should be used to generate the consensus, the consensus is a randomly selected read
         let seq = seqs
             .into_iter()
             .choose(&mut StdRng::seed_from_u64(DOWNSAMPLE_SEED))
             .unwrap();
-        Consensus { seq: Some(seq.to_string()), support: num_reads, std_dev, score: 0 }
+        Consensus {
+            seq: Some(seq.to_string()),
+            support: num_reads,
+            std_dev,
+            score: 0,
+            median_length,
+            imprecise,
+        }
     } else {
         // if there are more than <consensus_reads> reads, downsample before taking the consensus
         // for performance and memory reasons
@@ -96,45 +128,53 @@ pub fn consensus(
             support: num_reads,
             std_dev,
             score,
+            median_length,
+            imprecise,
         }
     }
 }
 
-fn remove_outliers<'a>(
-    seqs: &'a [String],
-    repeat: &crate::repeats::RepeatInterval,
-) -> (Vec<&'a String>, usize) {
-    // remove sequences that are shorter or longer than two standard deviations from the mean
-    // except if the stdev is small
-    let lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
-    debug!("{repeat}: lengths: {:?}", lengths);
-
+/// Mean, (floored) standard deviation, and median of the sequence lengths.
+fn length_stats(seqs: &[String]) -> (usize, usize, usize) {
+    let mut lengths = seqs.iter().map(|x| x.len()).collect::<Vec<usize>>();
     let mean = lengths.iter().sum::<usize>() / lengths.len();
     let variance = lengths
         .iter()
         .map(|x| (*x as isize - mean as isize).pow(2) as usize)
         .sum::<usize>()
         / lengths.len();
-    // note that the casting to usize will floor the std_dev to the integer below, rather than properly rounding it to the nearest integer
-    // so this keeps the std_dev smaller than it really is, but not by a lot
-    // the places where this matter are probably negligible
+    // casting to usize floors the std_dev to the integer below, rather than rounding to nearest,
+    // so this keeps the std_dev slightly smaller than it really is, but not by a lot
     let std_dev = (variance as f64).sqrt() as usize;
-    debug!("mean: {}, std_dev: {}", mean, std_dev);
+    lengths.sort_unstable();
+    let median = if lengths.len() % 2 == 0 {
+        (lengths[lengths.len() / 2] + lengths[lengths.len() / 2 - 1]) / 2
+    } else {
+        lengths[lengths.len() / 2]
+    };
+    (mean, std_dev, median)
+}
+
+fn remove_outliers<'a>(
+    seqs: &'a [String],
+    mean: usize,
+    std_dev: usize,
+    repeat: &crate::repeats::RepeatInterval,
+) -> Vec<&'a String> {
+    // remove sequences that are shorter or longer than two standard deviations from the mean
+    // except if the stdev is small
+    debug!("{repeat}: mean: {}, std_dev: {}", mean, std_dev);
     if std_dev < 5 {
         debug!("std_dev < 5, not removing any outliers");
-        (seqs.iter().collect::<Vec<&String>>(), std_dev)
+        seqs.iter().collect::<Vec<&String>>()
     } else {
         // avoid underflowing usize
         let min_val = mean.saturating_sub(2 * std_dev);
         let max_val = mean + 2 * std_dev;
         debug!("Removing outliers outside of [{},{}]", min_val, max_val);
-        let filtered_seqs = seqs
-            .iter()
-            .zip(lengths.iter())
-            .filter(|(_, len)| **len > min_val && **len < max_val)
-            .map(|(seq, _)| seq)
-            .collect::<Vec<&String>>();
-        (filtered_seqs, std_dev)
+        seqs.iter()
+            .filter(|seq| seq.len() > min_val && seq.len() < max_val)
+            .collect::<Vec<&String>>()
     }
 }
 
@@ -142,6 +182,36 @@ fn remove_outliers<'a>(
 mod tests {
     use super::*;
     use bio::alignment::pairwise::Scoring;
+
+    fn dummy_repeat() -> crate::repeats::RepeatInterval {
+        crate::repeats::RepeatInterval {
+            chrom: "chr1".to_string(),
+            start: 1,
+            end: 100,
+            created: None,
+        }
+    }
+
+    #[test]
+    fn test_consensus_reports_median_and_not_imprecise_when_tight() {
+        // near-uniform lengths (~30 bp): low CV -> not imprecise, median ~30
+        let seqs: Vec<String> = (0..10).map(|i| "A".repeat(30 + i % 2)).collect();
+        let cons = consensus(&seqs, 2, 1, &dummy_repeat());
+        assert!(!cons.imprecise, "tight length distribution should not be imprecise");
+        assert!((29..=31).contains(&cons.median_length), "median {}", cons.median_length);
+    }
+
+    #[test]
+    fn test_consensus_flags_imprecise_when_length_spread_is_wide() {
+        // continuous/long-tailed lengths: CV well above 0.2 -> imprecise
+        let seqs: Vec<String> = vec![30, 50, 120, 300, 900, 2700]
+            .into_iter()
+            .map(|l| "A".repeat(l))
+            .collect();
+        let cons = consensus(&seqs, 2, 1, &dummy_repeat());
+        assert!(cons.imprecise, "wide length distribution should be flagged imprecise");
+    }
+
     #[test]
     fn test_consensus() {
         // I created this test because these sequences segfaulted on bianca

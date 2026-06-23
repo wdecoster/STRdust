@@ -3,6 +3,29 @@ use kodama::{Method, linkage};
 use log::{Level, debug, error, log_enabled};
 use std::{cmp::max, collections::HashMap};
 
+/// DBSCAN neighbourhood radius in the normalized feature space (squared-euclidean over
+/// `[length_weight * normalized_length, canonical_kmer_freqs...]`).
+///
+/// Tuning intuition (hardcoded for now; the `split_dbscan` signature still accepts a value
+/// so it can be swept in tests or promoted to a CLI argument on request):
+///
+/// - smaller eps -> tighter, more clusters: more splitting and more reads dropped to noise, which tends to *undercall* length-variable expansions (the long tail fragments off);
+/// - larger eps -> fewer, looser clusters: distinct alleles can be *merged* into one.
+///
+/// Adjust in small steps (±0.1) and watch `NCLUSTERS`.
+pub const DBSCAN_EPS: f64 = 0.4;
+
+/// Weight of the (normalized) length axis relative to the length-invariant k-mer composition.
+///
+/// Tuning intuition:
+///
+/// - lower (→0): composition dominates, so same-motif reads cluster together regardless of length — best for recovering length-variable / mosaic expansions as a single allele;
+/// - higher (→1): length matters more, better separating two same-motif alleles that differ only in length (behaving more like the length-dominated Ward strategy).
+///
+/// The 0.3 default favours keeping length-variable expansions together, which is the reason
+/// to reach for DBSCAN in the first place.
+pub const DBSCAN_LENGTH_WEIGHT: f64 = 0.3;
+
 pub struct SplitSequences {
     pub hap1: Vec<String>,
     pub hap2: Option<Vec<String>>,
