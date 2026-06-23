@@ -116,7 +116,7 @@ pub fn consensus(
         // `Scoring::gap_extend`) and applies a *linear* penalty of `gap_open` per gap base.
         // The -6 below is therefore inert; the effective gap model is -12 per base. Do not
         // bother tuning the second argument until/unless upstream POA gains affine gaps.
-        // (reported upstream: https://github.com/rust-bio/rust-bio/issues)
+        // (reported upstream: https://github.com/rust-bio/rust-bio/issues/677)
         log::info!("Creating consensus for {repeat}");
         let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
         let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
