@@ -10,29 +10,36 @@ use std::io::Read;
 pub struct Allele {
     pub length: String, // length of the consensus sequence minus the length of the repeat sequence
     pub full_length: String, // length of the consensus sequence
+    pub median_length: String, // median read length of the cluster, relative to the reference
     pub support: String, // number of reads supporting the allele
     pub std_dev: String, // standard deviation of the repeat length
     pub score: String,  // consensus score in the poa graph
+    pub imprecise: bool, // cluster read-length spread exceeds the imprecision threshold
     pub seq: String,    // consensus sequence
 }
 
 impl Allele {
     pub fn from_consensus(consensus: Consensus, start: u32, end: u32) -> Allele {
+        let ref_len = (end - start) as i32;
         match consensus.seq {
             Some(seq) => Allele {
-                length: (seq.len() as i32 - ((end - start) as i32)).to_string(),
+                length: (seq.len() as i32 - ref_len).to_string(),
                 full_length: seq.len().to_string(),
+                median_length: (consensus.median_length as i32 - ref_len).to_string(),
                 support: consensus.support.to_string(),
                 std_dev: consensus.std_dev.to_string(),
                 score: consensus.score.to_string(),
+                imprecise: consensus.imprecise,
                 seq,
             },
             None => Allele {
                 length: ".".to_string(),
                 full_length: ".".to_string(),
+                median_length: ".".to_string(),
                 support: consensus.support.to_string(),
                 std_dev: ".".to_string(),
                 score: ".".to_string(),
+                imprecise: false,
                 seq: ".".to_string(),
             },
         }
@@ -47,11 +54,14 @@ pub struct VCFRecord {
     pub alt_seq: Option<String>,
     pub length: (String, String),
     pub full_length: (String, String),
+    pub median_length: (String, String),
     pub support: (String, String),
     pub std_dev: (String, String),
     pub score: (String, String),
     pub somatic_info_field: String,
     pub outliers: String,
+    pub n_clusters: String,
+    pub dbscan_rb: String,
     pub time_taken: String,
     pub ps: Option<u32>, // phase set identifier
     pub flags: String,
@@ -64,9 +74,11 @@ impl VCFRecord {
         repeat_ref_sequence: String,
         all_insertions: Option<Vec<String>>,
         outlier_insertions: Option<Vec<String>>,
+        n_clusters: Option<usize>,
+        dbscan_rb: Option<String>,
         repeat: &crate::repeats::RepeatInterval,
         ps: Option<u32>,
-        flag: Vec<String>,
+        mut flag: Vec<String>,
         args: &Cli,
     ) -> VCFRecord {
         // since I use .pop() to format the two consensus sequences, the order is reversed
@@ -126,6 +138,22 @@ impl VCFRecord {
             None => "".to_string(),
         };
 
+        let n_clusters = match n_clusters {
+            Some(n) => format!(";NCLUSTERS={n}"),
+            None => "".to_string(),
+        };
+
+        let dbscan_rb = match dbscan_rb {
+            Some(rb) => format!(";DBSCAN_RB={rb}"),
+            None => "".to_string(),
+        };
+
+        // Flag the locus when either called allele's cluster has a wide read-length spread:
+        // a single consensus length is then not representative (e.g. continuous/long-tailed loci).
+        if (allele1.imprecise || allele2.imprecise) && !flag.iter().any(|f| f == "IMPRECISE_LENGTH")
+        {
+            flag.push("IMPRECISE_LENGTH".to_string());
+        }
         let flags = if flag.is_empty() {
             "".to_string()
         } else {
@@ -140,11 +168,14 @@ impl VCFRecord {
             alt_seq: Some(alts),
             length: (allele1.length, allele2.length),
             full_length: (allele1.full_length, allele2.full_length),
+            median_length: (allele1.median_length, allele2.median_length),
             support: (allele1.support, allele2.support),
             std_dev: (allele1.std_dev, allele2.std_dev),
             score: (allele1.score, allele2.score),
             somatic_info_field,
             outliers,
+            n_clusters,
+            dbscan_rb,
             time_taken,
             ps,
             flags,
@@ -172,11 +203,14 @@ impl VCFRecord {
             alt_seq: None,
             length: ("0".to_string(), "0".to_string()),
             full_length: (repeat_ref_seq.len().to_string(), repeat_ref_seq.len().to_string()),
+            median_length: ("0".to_string(), "0".to_string()),
             support: (".".to_string(), ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
+            n_clusters: "".to_string(),
+            dbscan_rb: "".to_string(),
             time_taken,
             ps: None,
             flags: flags_str,
@@ -199,11 +233,14 @@ impl VCFRecord {
             alt_seq: Some(".".to_string()),
             length: (".".to_string(), ".".to_string()),
             full_length: (".".to_string(), ".".to_string()),
+            median_length: (".".to_string(), ".".to_string()),
             support: (support, ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
+            n_clusters: "".to_string(),
+            dbscan_rb: "".to_string(),
             time_taken,
             ps: None,
             flags: "".to_string(),
@@ -235,11 +272,17 @@ impl VCFRecord {
             alt_seq: Some(seq.to_string()),
             length: ((seq.len() as u32 - (repeat.end - repeat.start)).to_string(), ".".to_string()),
             full_length: ((seq.len() as u32).to_string(), ".".to_string()),
+            median_length: (
+                (seq.len() as u32 - (repeat.end - repeat.start)).to_string(),
+                ".".to_string(),
+            ),
             support: ("1".to_string(), ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
             somatic_info_field,
             outliers: "".to_string(),
+            n_clusters: "".to_string(),
+            dbscan_rb: "".to_string(),
             time_taken,
             ps,
             flags: if flag.is_empty() {
@@ -389,12 +432,12 @@ impl fmt::Display for VCFRecord {
         match &self.alt_seq {
             Some(alts) => {
                 let (FORMAT, ps) = match self.ps {
-                    Some(ps) => ("GT:RB:FRB:SUP:SC:PS", format!(":{}", ps)),
-                    None => ("GT:RB:FRB:SUP:SC", "".to_string()),
+                    Some(ps) => ("GT:RB:FRB:MRL:SUP:SC:PS", format!(":{}", ps)),
+                    None => ("GT:RB:FRB:MRL:SUP:SC", "".to_string()),
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}{time_taken}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{sup1},{sup2}:{score1},{score2}{ps}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{ml1},{ml2}:{sup1},{sup2}:{score1},{score2}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -405,10 +448,14 @@ impl fmt::Display for VCFRecord {
                     l2 = self.length.1,
                     fl1 = self.full_length.0,
                     fl2 = self.full_length.1,
+                    ml1 = self.median_length.0,
+                    ml2 = self.median_length.1,
                     sd1 = self.std_dev.0,
                     sd2 = self.std_dev.1,
                     somatic = self.somatic_info_field,
                     outliers = self.outliers,
+                    n_clusters = self.n_clusters,
+                    dbscan_rb = self.dbscan_rb,
                     time_taken = self.time_taken,
                     genotype1 = self.allele.0,
                     genotype2 = self.allele.1,
@@ -499,7 +546,22 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##INFO=<ID=OUTLIERS,Number=1,Type=String,Description="Outlier sequences much longer than the alleles">"#
     );
     println!(
+        r#"##INFO=<ID=NCLUSTERS,Number=1,Type=Integer,Description="Number of read clusters found by the DBSCAN phasing strategy (>2 indicates a complex multi-population locus)">"#
+    );
+    println!(
         r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
+    );
+    println!(
+        r#"##INFO=<ID=EXPANSION_OUTLIER,Number=0,Type=Flag,Description="At least 2 reads are more than 2x longer than the longer called allele, suggesting a larger expansion missed by both alleles (only with --unphased)">"#
+    );
+    println!(
+        r#"##INFO=<ID=IMPRECISE_LENGTH,Number=0,Type=Flag,Description="A called allele has a wide read-length spread (coefficient of variation > 0.2); the reported consensus length may not be representative">"#
+    );
+    println!(
+        r#"##INFO=<ID=DISCORDANT_LENGTH,Number=0,Type=Flag,Description="With --phasing both: the reported Ward call and the DBSCAN call differ by more than 2x on the longer allele; see DBSCAN_RB (QC only, fires liberally)">"#
+    );
+    println!(
+        r#"##INFO=<ID=DBSCAN_RB,Number=2,Type=Integer,Description="With --phasing both: DBSCAN allele lengths relative to reference, reported when DISCORDANT_LENGTH is set">"#
     );
     println!(
         r#"##INFO=<ID=QUICKREF,Number=0,Type=Flag,Description="Locus identified as homozygous reference via fast CIGAR check, alignment skipped">"#
@@ -515,6 +577,9 @@ pub fn write_vcf_header(args: &Cli) {
     );
     println!(
         r#"##FORMAT=<ID=FRB,Number=2,Type=Integer,Description="Full repeat length of the two alleles in bases">"#
+    );
+    println!(
+        r#"##FORMAT=<ID=MRL,Number=2,Type=Integer,Description="Median read length of the two alleles' clusters in bases relative to reference, robust to a long length tail">"#
     );
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
     println!(r#"##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">"#);
@@ -549,6 +614,7 @@ fn test_write_vcf_header_from_bam() {
         unphased: true,
         find_outliers: false,
         min_haplotype_fraction: 0.1,
+        phasing_strategy: crate::PhasingStrategy::Ward,
         threads: 1,
         sample: None,
         haploid: Some(String::from("chr7")),
@@ -576,6 +642,7 @@ fn test_write_vcf_header_from_name() {
         unphased: true,
         find_outliers: false,
         min_haplotype_fraction: 0.1,
+        phasing_strategy: crate::PhasingStrategy::Ward,
         threads: 1,
         sample: Some("test_sample".to_string()),
         haploid: Some(String::from("chr7")),

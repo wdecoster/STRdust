@@ -10,6 +10,121 @@ use std::sync::OnceLock;
 // Compile regex once and reuse across all CS tag parsing
 static CS_REGEX: OnceLock<Regex> = OnceLock::new();
 
+/// A read counts towards EXPANSION_OUTLIER when it is at least this many times
+/// longer than the longer called allele. These capture large expansions that fell
+/// to noise/outliers or were removed as length outliers, and so were missed by both
+/// alleles. Hardcoded for now (default 2 reads, 2x longer); can be promoted to CLI
+/// arguments later if cohort experience warrants tuning.
+const EXPANSION_OUTLIER_MIN_READS: usize = 2;
+const EXPANSION_OUTLIER_RATIO: f64 = 2.0;
+
+/// In `--phasing both` QC mode, the reported (Ward) longer-allele length and the
+/// DBSCAN longer-allele length are flagged DISCORDANT_LENGTH when their ratio
+/// exceeds this. Hardcoded at 2x and deliberately fires liberally: we prioritise
+/// sensitivity, so over-flagging for review is acceptable.
+const DISCORDANT_LENGTH_RATIO: f64 = 2.0;
+
+/// Decide whether the EXPANSION_OUTLIER flag applies: at least
+/// [`EXPANSION_OUTLIER_MIN_READS`] insertions exceed [`EXPANSION_OUTLIER_RATIO`]
+/// times the longer called allele (the longest consensus length).
+///
+/// Only meaningful for `--unphased` data, where all spanning reads are pooled
+/// before clustering; it is therefore only ever called from the unphased path.
+fn expansion_outlier_flagged(
+    insertions: &[String],
+    consenses: &[crate::consensus::Consensus],
+) -> bool {
+    let longer_allele = longer_allele_len(consenses);
+    if longer_allele == 0 {
+        return false;
+    }
+    let threshold = EXPANSION_OUTLIER_RATIO * longer_allele as f64;
+    let n_big = insertions
+        .iter()
+        .filter(|s| s.len() as f64 > threshold)
+        .count();
+    n_big >= EXPANSION_OUTLIER_MIN_READS
+}
+
+/// Length of the longest called allele's consensus, in bases (0 if none called).
+fn longer_allele_len(consenses: &[crate::consensus::Consensus]) -> usize {
+    consenses
+        .iter()
+        .filter_map(|c| c.seq.as_ref().map(|s| s.len()))
+        .max()
+        .unwrap_or(0)
+}
+
+/// QC comparison for `--phasing both`: run DBSCAN alongside the reported Ward call,
+/// build its consensus alleles, and compare the longer allele of each method.
+/// Returns `(discordant, dbscan_rb)` where `discordant` is true when the longer
+/// allele lengths differ by more than [`DISCORDANT_LENGTH_RATIO`], and `dbscan_rb`
+/// is the DBSCAN allele lengths relative to the reference (for the DBSCAN_RB INFO field).
+fn dbscan_qc_comparison(
+    insertions: &[String],
+    repeat: &crate::repeats::RepeatInterval,
+    args: &Cli,
+    ward_consenses: &[crate::consensus::Consensus],
+) -> (bool, String) {
+    let dbscan = crate::phase_insertions::split_dbscan(
+        insertions,
+        repeat,
+        false,
+        args.support,
+        crate::phase_insertions::DBSCAN_EPS,
+        crate::phase_insertions::DBSCAN_LENGTH_WEIGHT,
+    );
+    let mut dbscan_consenses: Vec<crate::consensus::Consensus> = vec![];
+    match dbscan.hap2 {
+        Some(hap2) => {
+            dbscan_consenses.push(crate::consensus::consensus(
+                &dbscan.hap1,
+                args.support,
+                args.consensus_reads,
+                repeat,
+            ));
+            dbscan_consenses.push(crate::consensus::consensus(
+                &hap2,
+                args.support,
+                args.consensus_reads,
+                repeat,
+            ));
+        }
+        None => {
+            let c = crate::consensus::consensus(
+                &dbscan.hap1,
+                args.support,
+                args.consensus_reads,
+                repeat,
+            );
+            dbscan_consenses.push(c.clone());
+            dbscan_consenses.push(c);
+        }
+    }
+
+    let ref_len = (repeat.end - repeat.start) as i32;
+    let dbscan_rb = dbscan_consenses
+        .iter()
+        .map(|c| match &c.seq {
+            Some(s) => (s.len() as i32 - ref_len).to_string(),
+            None => ".".to_string(),
+        })
+        .collect::<Vec<String>>()
+        .join(",");
+
+    // Compare on full consensus lengths (always non-negative), so the 2x ratio is well-defined.
+    let discordant =
+        length_discordant(longer_allele_len(ward_consenses), longer_allele_len(&dbscan_consenses));
+    (discordant, dbscan_rb)
+}
+
+/// True when two allele lengths differ by more than [`DISCORDANT_LENGTH_RATIO`].
+/// A zero length on one side is discordant whenever the other side is non-zero.
+fn length_discordant(a: usize, b: usize) -> bool {
+    let (lo, hi) = (a.min(b), a.max(b));
+    hi as f64 > DISCORDANT_LENGTH_RATIO * lo as f64
+}
+
 /// Result of checking reads for quick reference detection
 enum ReadCheckResult {
     /// No reads found - return missing genotype immediately
@@ -209,6 +324,11 @@ pub fn genotype_with_extracted_reads(
     } else {
         None
     };
+    // number of clusters found by the DBSCAN phasing strategy (None for Ward / phased input)
+    let mut n_clusters: Option<usize> = None;
+    // DBSCAN allele lengths for the DBSCAN_RB INFO field, only set in `--phasing both` QC mode
+    // when the DBSCAN call is substantially length-discordant with the reported Ward call.
+    let mut dbscan_rb: Option<String> = None;
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     let unphased = (args.haploid.is_some()
@@ -271,12 +391,31 @@ pub fn genotype_with_extracted_reads(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len());
-        let phased = crate::phase_insertions::split(
-            &insertions,
-            repeat,
-            args.find_outliers,
-            args.min_haplotype_fraction,
-        );
+        let phased = match args.phasing_strategy {
+            crate::PhasingStrategy::Ward => crate::phase_insertions::split(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.min_haplotype_fraction,
+                args.support,
+            ),
+            crate::PhasingStrategy::Dbscan => crate::phase_insertions::split_dbscan(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.support,
+                crate::phase_insertions::DBSCAN_EPS,
+                crate::phase_insertions::DBSCAN_LENGTH_WEIGHT,
+            ),
+            // 'both' reports the Ward call; DBSCAN is run separately below for QC discordance.
+            crate::PhasingStrategy::Both => crate::phase_insertions::split(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.min_haplotype_fraction,
+                args.support,
+            ),
+        };
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(
@@ -319,7 +458,19 @@ pub fn genotype_with_extracted_reads(
                 }
             }
         }
+        n_clusters = phased.n_clusters;
         outliers = phased.outliers;
+        if expansion_outlier_flagged(&insertions, &consenses) {
+            flags.push("EXPANSION_OUTLIER".to_string());
+        }
+        if matches!(args.phasing_strategy, crate::PhasingStrategy::Both) {
+            let (discordant, dbscan_rb_str) =
+                dbscan_qc_comparison(&insertions, repeat, args, &consenses);
+            if discordant {
+                flags.push("DISCORDANT_LENGTH".to_string());
+                dbscan_rb = Some(dbscan_rb_str);
+            }
+        }
     } else {
         // Phased
         let seq1 = &reads.phase1;
@@ -370,6 +521,8 @@ pub fn genotype_with_extracted_reads(
         repeat_ref_seq,
         all_insertions,
         outliers,
+        n_clusters,
+        dbscan_rb,
         repeat,
         reads.ps,
         flags,
@@ -481,6 +634,11 @@ fn genotype_repeat(
     } else {
         None
     };
+    // number of clusters found by the DBSCAN phasing strategy (None for Ward / phased input)
+    let mut n_clusters: Option<usize> = None;
+    // DBSCAN allele lengths for the DBSCAN_RB INFO field, only set in `--phasing both` QC mode
+    // when the DBSCAN call is substantially length-discordant with the reported Ward call.
+    let mut dbscan_rb: Option<String> = None;
 
     // The rest of the function has three mutually exclusive options from here.
     // Either the reads are from a haploid chromosome, unphased or phased by a tool like WhatsHap/hiphase/...
@@ -551,12 +709,31 @@ fn genotype_repeat(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = crate::phase_insertions::split(
-            &insertions,
-            repeat,
-            args.find_outliers,
-            args.min_haplotype_fraction,
-        );
+        let phased = match args.phasing_strategy {
+            crate::PhasingStrategy::Ward => crate::phase_insertions::split(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.min_haplotype_fraction,
+                args.support,
+            ),
+            crate::PhasingStrategy::Dbscan => crate::phase_insertions::split_dbscan(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.support,
+                crate::phase_insertions::DBSCAN_EPS,
+                crate::phase_insertions::DBSCAN_LENGTH_WEIGHT,
+            ),
+            // 'both' reports the Ward call; DBSCAN is run separately below for QC discordance.
+            crate::PhasingStrategy::Both => crate::phase_insertions::split(
+                &insertions,
+                repeat,
+                args.find_outliers,
+                args.min_haplotype_fraction,
+                args.support,
+            ),
+        };
         match phased.hap2 {
             Some(phase2) => {
                 consenses.push(crate::consensus::consensus(
@@ -600,10 +777,22 @@ fn genotype_repeat(
                 }
             }
         }
+        n_clusters = phased.n_clusters;
         if let Some(ref mut outliers_vec) = outliers
             && let Some(outliers_found) = phased.outliers
         {
             outliers_vec.push(outliers_found.join(","));
+        }
+        if expansion_outlier_flagged(&insertions, &consenses) {
+            flags.push("EXPANSION_OUTLIER".to_string());
+        }
+        if matches!(args.phasing_strategy, crate::PhasingStrategy::Both) {
+            let (discordant, dbscan_rb_str) =
+                dbscan_qc_comparison(&insertions, repeat, args, &consenses);
+            if discordant {
+                flags.push("DISCORDANT_LENGTH".to_string());
+                dbscan_rb = Some(dbscan_rb_str);
+            }
         }
     } else {
         // input alignments are already phased
@@ -635,6 +824,8 @@ fn genotype_repeat(
         repeat_ref_seq,
         all_insertions,
         outliers,
+        n_clusters,
+        dbscan_rb,
         repeat,
         reads.ps,
         flags,
@@ -746,6 +937,49 @@ fn parse_cs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::consensus::Consensus;
+
+    fn consensus_of_len(len: usize) -> Consensus {
+        Consensus { seq: Some("A".repeat(len)), ..Default::default() }
+    }
+
+    #[test]
+    fn test_expansion_outlier_flagged() {
+        // two called alleles ~30 bp; two reads >60 bp (2x the longer allele) -> flagged
+        let consenses = vec![consensus_of_len(30), consensus_of_len(30)];
+        let insertions = vec![
+            "A".repeat(28),
+            "A".repeat(30),
+            "A".repeat(5483),
+            "A".repeat(3000),
+        ];
+        assert!(expansion_outlier_flagged(&insertions, &consenses));
+    }
+
+    #[test]
+    fn test_expansion_outlier_single_read_not_flagged() {
+        // only one read exceeds 2x the longer allele -> below the 2-read threshold (artifact case)
+        let consenses = vec![consensus_of_len(30), consensus_of_len(30)];
+        let insertions = vec!["A".repeat(28), "A".repeat(30), "A".repeat(474)];
+        assert!(!expansion_outlier_flagged(&insertions, &consenses));
+    }
+
+    #[test]
+    fn test_length_discordant() {
+        assert!(length_discordant(100, 250)); // 2.5x -> discordant
+        assert!(length_discordant(0, 50)); // one allele uncalled, other long -> discordant
+        assert!(!length_discordant(100, 150)); // 1.5x -> concordant
+        assert!(!length_discordant(0, 0)); // both uncalled -> not discordant
+        assert!(!length_discordant(100, 200)); // exactly 2x -> not over the threshold
+    }
+
+    #[test]
+    fn test_expansion_outlier_not_flagged_when_alleles_long() {
+        // the expansion is already captured as an allele; no read is 2x longer -> not flagged
+        let consenses = vec![consensus_of_len(30), consensus_of_len(3000)];
+        let insertions = vec!["A".repeat(30), "A".repeat(2900), "A".repeat(3100)];
+        assert!(!expansion_outlier_flagged(&insertions, &consenses));
+    }
 
     #[test]
     fn test_parse_cs() {
@@ -804,6 +1038,7 @@ mod tests {
             unphased: false,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -839,6 +1074,7 @@ mod tests {
             unphased: true,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: Some(String::from("chr7")),
@@ -868,6 +1104,7 @@ mod tests {
             unphased: true,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -903,6 +1140,7 @@ mod tests {
             unphased: false,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -940,6 +1178,7 @@ mod tests {
             unphased: false,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
+            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,

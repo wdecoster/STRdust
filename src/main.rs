@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use log::{info, warn};
 use std::path::PathBuf;
 
@@ -7,6 +7,8 @@ pub mod bam_pool;
 pub mod batching;
 pub mod call;
 pub mod consensus;
+pub mod dbscan;
+pub mod features;
 pub mod genotype;
 pub mod motif;
 pub mod parse_bam;
@@ -14,6 +16,18 @@ pub mod phase_insertions;
 pub mod repeats;
 pub mod utils;
 pub mod vcf;
+
+/// Strategy for splitting unphased reads into haplotypes.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhasingStrategy {
+    /// Length-weighted Levenshtein distance + Ward hierarchical clustering.
+    Ward,
+    /// k-mer composition feature vectors + DBSCAN.
+    Dbscan,
+    /// QC mode: report the Ward call but additionally run DBSCAN and flag substantial
+    /// length discordance (DISCORDANT_LENGTH / DBSCAN_RB) for review.
+    Both,
+}
 
 // The arguments end up in the Cli struct
 #[derive(Parser, Debug)]
@@ -71,6 +85,14 @@ pub struct Cli {
     #[arg(long, default_value_t = 0.1)]
     min_haplotype_fraction: f32,
 
+    /// Strategy for splitting unphased reads into haplotypes (only with --unphased).
+    /// 'ward': length-weighted Levenshtein + hierarchical clustering (default).
+    /// 'dbscan': k-mer composition features + DBSCAN (experimental, robust to length-variable expansions).
+    /// 'both': QC mode that reports the Ward call but also runs DBSCAN and flags substantial
+    /// length discordance (DISCORDANT_LENGTH / DBSCAN_RB) for review.
+    #[arg(long = "phasing", value_name = "STRATEGY", value_enum, default_value_t = PhasingStrategy::Ward)]
+    phasing_strategy: PhasingStrategy,
+
     /// comma-separated list of haploid (sex) chromosomes
     #[arg(long)]
     haploid: Option<String>,
@@ -122,7 +144,7 @@ fn main() {
     if args.find_outliers && !args.unphased {
         warn!("--find-outliers is only effective with --unphased");
     }
-    info!("Collected arguments");
+    info!("Collected arguments: {args:?}");
     call::genotype_repeats(args);
 }
 
