@@ -103,11 +103,15 @@ fn test_pathogenic_exclusive_with_region() {
     );
 }
 
+// Network-dependent: gated on the TEST_PATHOGENIC_NETWORK env var rather than
+// `#[ignore]`, so that `TEST_PATHOGENIC_NETWORK=1 cargo test` actually runs it.
+// (A static `#[ignore]` would hide the test before the env-var check could run,
+// so the env var would have no effect — which is the bug this avoids.)
 #[test]
-#[ignore = "requires network access - set TEST_PATHOGENIC_NETWORK=1 to enable"]
 fn test_pathogenic_cache_behavior() {
     // Only run if explicitly enabled
     if std::env::var("TEST_PATHOGENIC_NETWORK").is_err() {
+        eprintln!("skipping test_pathogenic_cache_behavior: set TEST_PATHOGENIC_NETWORK=1 to enable");
         return;
     }
 
@@ -197,11 +201,13 @@ ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
     let _ = fs::remove_file(&temp_bam);
 }
 
+// Network-dependent and slow: gated on the TEST_PATHOGENIC_FULL env var rather
+// than `#[ignore]`, so that `TEST_PATHOGENIC_FULL=1 cargo test` actually runs it.
 #[test]
-#[ignore = "requires network and can be slow - set TEST_PATHOGENIC_FULL=1 to enable"]
 fn test_pathogenic_full_workflow() {
     // Only run if explicitly enabled
     if std::env::var("TEST_PATHOGENIC_FULL").is_err() {
+        eprintln!("skipping test_pathogenic_full_workflow: set TEST_PATHOGENIC_FULL=1 to enable");
         return;
     }
 
