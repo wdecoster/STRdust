@@ -66,6 +66,15 @@ pub struct VCFRecord {
     pub ps: Option<u32>, // phase set identifier
     pub flags: String,
     pub allele: (String, String),
+    pub haploid: bool, // locus on a --haploid chromosome: report a single allele value (e.g. "1", not "1|1")
+}
+
+/// A chromosome listed (comma-separated) under `--haploid` is treated as haploid, so
+/// genotypes at its loci are reported as a single allele value per the VCF specification.
+pub fn chrom_is_haploid(args: &Cli, chrom: &str) -> bool {
+    args.haploid
+        .as_ref()
+        .is_some_and(|h| h.split(',').any(|c| c == chrom))
 }
 
 impl VCFRecord {
@@ -81,43 +90,68 @@ impl VCFRecord {
         mut flag: Vec<String>,
         args: &Cli,
     ) -> VCFRecord {
-        // since I use .pop() to format the two consensus sequences, the order is reversed
-        let allele2 = Allele::from_consensus(
-            consenses
-                .pop()
-                .expect("Failed getting allele2 from consenses"),
-            repeat.start,
-            repeat.end,
-        );
-        let allele1 = Allele::from_consensus(
-            consenses
-                .pop()
-                .expect("Failed getting allele1 from consenses"),
-            repeat.start,
-            repeat.end,
-        );
+        let haploid = chrom_is_haploid(args, &repeat.chrom);
 
-        debug!(
-            "Genotyping {repeat}:{repeat_ref_sequence} with {} and {}",
-            allele1.seq, allele2.seq,
-        );
-        let (genotype1, genotype2) =
-            determine_genotypes(&repeat_ref_sequence, &allele1.seq, &allele2.seq);
+        // On a haploid chromosome a single consensus is built, so the record carries one
+        // allele; otherwise two consensus sequences are popped (in reverse, due to .pop()).
+        let (allele1, allele2) = if haploid {
+            let allele1 = Allele::from_consensus(
+                consenses
+                    .pop()
+                    .expect("Failed getting allele1 from consenses"),
+                repeat.start,
+                repeat.end,
+            );
+            (allele1, None)
+        } else {
+            let allele2 = Allele::from_consensus(
+                consenses
+                    .pop()
+                    .expect("Failed getting allele2 from consenses"),
+                repeat.start,
+                repeat.end,
+            );
+            let allele1 = Allele::from_consensus(
+                consenses
+                    .pop()
+                    .expect("Failed getting allele1 from consenses"),
+                repeat.start,
+                repeat.end,
+            );
+            (allele1, Some(allele2))
+        };
 
-        debug!(
-            "Genotype result for {repeat}: {}|{} (ref len: {}, allele1 len: {}, allele2 len: {})",
-            genotype1,
-            genotype2,
-            repeat_ref_sequence.len(),
-            allele1.seq.len(),
-            allele2.seq.len()
-        );
+        let (genotype1, genotype2) = match &allele2 {
+            Some(allele2) => {
+                debug!(
+                    "Genotyping {repeat}:{repeat_ref_sequence} with {} and {}",
+                    allele1.seq, allele2.seq,
+                );
+                let gts = determine_genotypes(&repeat_ref_sequence, &allele1.seq, &allele2.seq);
+                debug!(
+                    "Genotype result for {repeat}: {}|{} (ref len: {}, allele1 len: {}, allele2 len: {})",
+                    gts.0,
+                    gts.1,
+                    repeat_ref_sequence.len(),
+                    allele1.seq.len(),
+                    allele2.seq.len()
+                );
+                gts
+            }
+            None => {
+                debug!("Genotyping haploid {repeat}:{repeat_ref_sequence} with {}", allele1.seq);
+                let gt = determine_haploid_genotype(&repeat_ref_sequence, &allele1.seq);
+                debug!("Haploid genotype result for {repeat}: {gt}");
+                // The second slot is unused for haploid records (not emitted by Display).
+                (gt, ".".to_string())
+            }
+        };
 
         let alts = match (genotype1.as_str(), genotype2.as_str()) {
-            ("1", "0") | ("1", ".") | ("1", "1") => allele1.seq, // if both alleles are the same, only report one
-            ("0", "1") | (".", "1") => allele2.seq,
-            ("1", "2") => allele1.seq + "," + &allele2.seq,
-            _ => ".".to_string(), // includes ./. and 0/0
+            ("1", "0") | ("1", ".") | ("1", "1") => allele1.seq.clone(), // if both alleles are the same, only report one
+            ("0", "1") | (".", "1") => allele2.as_ref().unwrap().seq.clone(),
+            ("1", "2") => allele1.seq.clone() + "," + &allele2.as_ref().unwrap().seq,
+            _ => ".".to_string(), // includes ./. and 0/0, and haploid 0 / .
         };
 
         let somatic_info_field = match all_insertions {
@@ -150,7 +184,8 @@ impl VCFRecord {
 
         // Flag the locus when either called allele's cluster has a wide read-length spread:
         // a single consensus length is then not representative (e.g. continuous/long-tailed loci).
-        if (allele1.imprecise || allele2.imprecise) && !flag.iter().any(|f| f == "IMPRECISE_LENGTH")
+        let allele2_imprecise = allele2.as_ref().map(|a| a.imprecise).unwrap_or(false);
+        if (allele1.imprecise || allele2_imprecise) && !flag.iter().any(|f| f == "IMPRECISE_LENGTH")
         {
             flag.push("IMPRECISE_LENGTH".to_string());
         }
@@ -160,18 +195,57 @@ impl VCFRecord {
             format!("{};", flag.join(";"))
         };
         let time_taken = repeat.time_field(args.debug);
+        // The second slot of each FORMAT field holds the value of the second allele for diploid
+        // records; for haploid records it stays "." and is not emitted by Display.
+        let dot = || ".".to_string();
         VCFRecord {
             chrom: repeat.chrom.clone(),
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_sequence,
             alt_seq: Some(alts),
-            length: (allele1.length, allele2.length),
-            full_length: (allele1.full_length, allele2.full_length),
-            median_length: (allele1.median_length, allele2.median_length),
-            support: (allele1.support, allele2.support),
-            std_dev: (allele1.std_dev, allele2.std_dev),
-            score: (allele1.score, allele2.score),
+            length: (
+                allele1.length,
+                allele2
+                    .as_ref()
+                    .map(|a| a.length.clone())
+                    .unwrap_or_else(&dot),
+            ),
+            full_length: (
+                allele1.full_length,
+                allele2
+                    .as_ref()
+                    .map(|a| a.full_length.clone())
+                    .unwrap_or_else(&dot),
+            ),
+            median_length: (
+                allele1.median_length,
+                allele2
+                    .as_ref()
+                    .map(|a| a.median_length.clone())
+                    .unwrap_or_else(&dot),
+            ),
+            support: (
+                allele1.support,
+                allele2
+                    .as_ref()
+                    .map(|a| a.support.clone())
+                    .unwrap_or_else(&dot),
+            ),
+            std_dev: (
+                allele1.std_dev,
+                allele2
+                    .as_ref()
+                    .map(|a| a.std_dev.clone())
+                    .unwrap_or_else(&dot),
+            ),
+            score: (
+                allele1.score,
+                allele2
+                    .as_ref()
+                    .map(|a| a.score.clone())
+                    .unwrap_or_else(&dot),
+            ),
             somatic_info_field,
             outliers,
             n_clusters,
@@ -180,6 +254,7 @@ impl VCFRecord {
             ps,
             flags,
             allele: (genotype1.to_string(), genotype2.to_string()),
+            haploid,
         }
     }
 
@@ -215,6 +290,7 @@ impl VCFRecord {
             ps: None,
             flags: flags_str,
             allele: ("0".to_string(), "0".to_string()),
+            haploid: chrom_is_haploid(args, &repeat.chrom),
         }
     }
 
@@ -245,6 +321,7 @@ impl VCFRecord {
             ps: None,
             flags: "".to_string(),
             allele: (".".to_string(), ".".to_string()),
+            haploid: chrom_is_haploid(args, &repeat.chrom),
         }
     }
 
@@ -291,6 +368,7 @@ impl VCFRecord {
                 format!("{};", flag.join(";"))
             },
             allele: (".".to_string(), ".".to_string()),
+            haploid: chrom_is_haploid(args, &repeat.chrom),
         }
     }
 }
@@ -362,6 +440,18 @@ fn determine_genotypes(
     (String::from(genotypes.0), String::from(genotypes.1))
 }
 
+// Genotype a single allele on a haploid chromosome: "0" (reference), "1" (expansion/non-ref),
+// or "." (missing). The VCF spec asks for a single allele value at haploid loci.
+fn determine_haploid_genotype(repeat_ref_sequence: &str, allele: &str) -> String {
+    if allele == "." {
+        String::from(".")
+    } else if is_similar_to_ref(allele, repeat_ref_sequence) {
+        String::from("0")
+    } else {
+        String::from("1")
+    }
+}
+
 // Check if an allele is similar enough to reference to be called as ref (0)
 fn is_similar_to_ref(allele: &str, reference: &str) -> bool {
     // Exact match
@@ -427,6 +517,26 @@ fn are_alleles_similar(allele1: &str, allele2: &str) -> bool {
     edit_distance < threshold
 }
 
+impl VCFRecord {
+    // GT field: a single allele value on haploid chromosomes ("1"), an allele pair otherwise ("1|0").
+    fn genotype_field(&self) -> String {
+        if self.haploid {
+            self.allele.0.clone()
+        } else {
+            format!("{}|{}", self.allele.0, self.allele.1)
+        }
+    }
+
+    // A per-allele FORMAT value: a single value on haploid chromosomes, a comma-separated pair otherwise.
+    fn per_allele(&self, values: &(String, String)) -> String {
+        if self.haploid {
+            values.0.clone()
+        } else {
+            format!("{},{}", values.0, values.1)
+        }
+    }
+}
+
 impl fmt::Display for VCFRecord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.alt_seq {
@@ -437,48 +547,39 @@ impl fmt::Display for VCFRecord {
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={sd1},{sd2}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{genotype1}|{genotype2}:{l1},{l2}:{fl1},{fl2}:{ml1},{ml2}:{sup1},{sup2}:{score1},{score2}{ps}",
+                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
                     end = self.end,
                     ref = self.ref_seq,
                     alt = alts,
-                    l1 = self.length.0,
-                    l2 = self.length.1,
-                    fl1 = self.full_length.0,
-                    fl2 = self.full_length.1,
-                    ml1 = self.median_length.0,
-                    ml2 = self.median_length.1,
-                    sd1 = self.std_dev.0,
-                    sd2 = self.std_dev.1,
+                    stdev = self.per_allele(&self.std_dev),
                     somatic = self.somatic_info_field,
                     outliers = self.outliers,
                     n_clusters = self.n_clusters,
                     dbscan_rb = self.dbscan_rb,
                     time_taken = self.time_taken,
-                    genotype1 = self.allele.0,
-                    genotype2 = self.allele.1,
-                    sup1 = self.support.0,
-                    sup2 = self.support.1,
-                    score1 = self.score.0,
-                    score2 = self.score.1,
+                    gt = self.genotype_field(),
+                    rb = self.per_allele(&self.length),
+                    frb = self.per_allele(&self.full_length),
+                    mrl = self.per_allele(&self.median_length),
+                    sup = self.per_allele(&self.support),
+                    sc = self.per_allele(&self.score),
                 )
             }
             None => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\t{flags}END={end};{somatic}\tGT:SUP\t{genotype1}|{genotype2}:{sup1},{sup2}",
+                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\t{flags}END={end};{somatic}\tGT:SUP\t{gt}:{sup}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
                     end = self.end,
                     ref = self.ref_seq,
                     somatic = self.somatic_info_field,
-                    genotype1 = self.allele.0,
-                    genotype2 = self.allele.1,
-                    sup1 = self.support.0,
-                    sup2 = self.support.1,
+                    gt = self.genotype_field(),
+                    sup = self.per_allele(&self.support),
                 )
             }
         }
@@ -506,7 +607,7 @@ impl PartialEq for VCFRecord {
 impl Eq for VCFRecord {}
 
 pub fn write_vcf_header(args: &Cli) {
-    println!(r#"##fileformat=VCFv4.2"#);
+    println!(r#"##fileformat=VCFv4.5"#);
     // get absolute path to fasta file
     let path = std::fs::canonicalize(&args.fasta)
         .unwrap_or_else(|err| panic!("Failed getting absolute path to fasta: {err}"));
@@ -537,7 +638,7 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the repeat interval">"#
     );
     println!(
-        r#"##INFO=<ID=STDEV,Number=2,Type=Integer,Description="Standard deviation of the repeat length">"#
+        r#"##INFO=<ID=STDEV,Number=.,Type=Integer,Description="Standard deviation of the repeat length per allele (one value on haploid chromosomes, two otherwise)">"#
     );
     println!(
         r#"##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">"#
@@ -573,17 +674,21 @@ pub fn write_vcf_header(args: &Cli) {
     }
     println!(r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#);
     println!(
-        r#"##FORMAT=<ID=RB,Number=2,Type=Integer,Description="Repeat length of the two alleles in bases relative to reference">"#
+        r#"##FORMAT=<ID=RB,Number=.,Type=Integer,Description="Repeat length per allele in bases relative to reference (one value on haploid chromosomes, two otherwise)">"#
     );
     println!(
-        r#"##FORMAT=<ID=FRB,Number=2,Type=Integer,Description="Full repeat length of the two alleles in bases">"#
+        r#"##FORMAT=<ID=FRB,Number=.,Type=Integer,Description="Full repeat length per allele in bases (one value on haploid chromosomes, two otherwise)">"#
     );
     println!(
-        r#"##FORMAT=<ID=MRL,Number=2,Type=Integer,Description="Median read length of the two alleles' clusters in bases relative to reference, robust to a long length tail">"#
+        r#"##FORMAT=<ID=MRL,Number=.,Type=Integer,Description="Median read length per allele's cluster in bases relative to reference, robust to a long length tail (one value on haploid chromosomes, two otherwise)">"#
     );
     println!(r#"##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">"#);
-    println!(r#"##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">"#);
-    println!(r#"##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Consensus score per allele">"#);
+    println!(
+        r#"##FORMAT=<ID=SUP,Number=.,Type=Integer,Description="Read support per allele (one value on haploid chromosomes, two otherwise)">"#
+    );
+    println!(
+        r#"##FORMAT=<ID=SC,Number=.,Type=Integer,Description="Consensus score per allele (one value on haploid chromosomes, two otherwise)">"#
+    );
     let name = match &args.sample {
         Some(name) => name,
         None => {
@@ -724,4 +829,74 @@ fn test_determine_genotypes7() {
     let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
     assert_eq!(genotype1, "1");
     assert_eq!(genotype2, ".");
+}
+
+#[test]
+fn test_determine_haploid_genotype() {
+    let repeat_ref_sequence = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
+    // Reference-matching allele -> 0
+    assert_eq!(determine_haploid_genotype(repeat_ref_sequence, repeat_ref_sequence), "0");
+    // Expanded allele -> 1
+    let expanded = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
+    assert_eq!(determine_haploid_genotype(repeat_ref_sequence, expanded), "1");
+    // Missing allele -> .
+    assert_eq!(determine_haploid_genotype(repeat_ref_sequence, "."), ".");
+}
+
+// A minimal record builder for testing the ploidy-aware Display output.
+#[cfg(test)]
+fn test_record(haploid: bool, allele: (&str, &str), alt: Option<&str>) -> VCFRecord {
+    let pair = || ("10".to_string(), "20".to_string());
+    VCFRecord {
+        chrom: "chrX".to_string(),
+        start: 100,
+        end: 130,
+        ref_seq: "ATCATCATCATCATCATCATCATCATCATC".to_string(),
+        alt_seq: alt.map(|a| a.to_string()),
+        length: pair(),
+        full_length: pair(),
+        median_length: pair(),
+        support: pair(),
+        std_dev: pair(),
+        score: pair(),
+        somatic_info_field: "".to_string(),
+        outliers: "".to_string(),
+        n_clusters: "".to_string(),
+        dbscan_rb: "".to_string(),
+        time_taken: "".to_string(),
+        ps: None,
+        flags: "".to_string(),
+        allele: (allele.0.to_string(), allele.1.to_string()),
+        haploid,
+    }
+}
+
+#[test]
+fn test_display_haploid_single_values() {
+    // Haploid record: single GT value and single per-allele FORMAT values.
+    let record = test_record(true, ("1", "."), Some("ATCATCATC"));
+    let line = format!("{record}");
+    let sample = line.split('\t').next_back().unwrap();
+    assert_eq!(sample, "1:10:10:10:10:10");
+    assert!(line.contains("STDEV=10\t") || line.contains("STDEV=10;"));
+}
+
+#[test]
+fn test_display_diploid_pair_values() {
+    // Diploid record: phased GT pair and comma-separated per-allele FORMAT values.
+    let record = test_record(false, ("1", "0"), Some("ATCATCATC"));
+    let line = format!("{record}");
+    let sample = line.split('\t').next_back().unwrap();
+    assert_eq!(sample, "1|0:10,20:10,20:10,20:10,20:10,20");
+    assert!(line.contains("STDEV=10,20"));
+}
+
+#[test]
+fn test_display_haploid_missing() {
+    // Missing haploid call must be a single ".", not "./.".
+    let record = test_record(true, (".", "."), Some("."));
+    let line = format!("{record}");
+    let sample = line.split('\t').next_back().unwrap();
+    assert!(sample.starts_with("."), "expected single-dot GT, got {sample}");
+    assert!(!sample.starts_with(".|."), "haploid missing must not be diploid ./.");
 }

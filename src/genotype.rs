@@ -357,9 +357,10 @@ pub fn genotype_with_extracted_reads(
                 args,
             ));
         }
+        // A haploid chromosome yields a single consensus / haplotype, pushed once;
+        // vcf.rs reports it as a single allele value per the VCF specification.
         let consensus =
             crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
-        consenses.push(consensus.clone());
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
             all_ins.push(insertions.join(":"));
@@ -667,11 +668,10 @@ fn genotype_repeat(
                 args,
             ));
         }
-        // there is only one haplotype, haploid, so this gets duplicated for reporting in the VCF module
-        // Ideally vcf.rs would explicitly handle haploid chromosomes
+        // There is only one haplotype on a haploid chromosome: a single consensus is pushed and
+        // vcf.rs reports it as a single allele value (e.g. "1") per the VCF specification.
         let consensus =
             crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
-        consenses.push(consensus.clone());
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
             // store all inserted sequences for identifying somatic variation
