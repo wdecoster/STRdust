@@ -46,18 +46,22 @@ SPECIFY ONE OF:
         --pathogenic                   Genotype the pathogenic STRs from STRchive
 
 OPTIONS:
-    -m, --minlen <MINLEN>              minimal length of insertion/deletion operation [default: 5]
+    -m, --minlen <MINLEN>              minimal length of insertion/deletion operation [default: 1]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
         --sample <SAMPLE>              Sample name to use in VCF header, if not provided, the bam file name is used
         --somatic                      Print information on somatic variability
         --unphased                     Reads are not phased, will cluster the reads to phase expansions
         --consensus-reads              Maximum number of reads to use to build the consensus sequence [default: 20]
+        --max-number-reads             Max number of reads to extract per locus for genotyping (-1 for all reads) [default: 60]
+        --max-locus <MAX_LOCUS>        Maximum locus size to consider; larger intervals are filtered out
         --find-outliers                Identify poorly supported outlier expansions (only with --unphased)
         --min-haplotype-fraction <F>   Minimum fraction of reads for a cluster to be a haplotype (only with --unphased) [default: 0.1]
         --phasing <STRATEGY>           How to split unphased reads into haplotypes: 'ward', 'dbscan' or 'both' (only with --unphased) [default: ward]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
+        --sorted                       Sort output by chrom, start and end
+        --debug                        Debug mode
     -h, --help                         Print help information
     -V, --version                      Print version information
 ```
