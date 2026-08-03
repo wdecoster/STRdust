@@ -1,10 +1,11 @@
-# Dependabot configuration for STRdust
-# This file configures Dependabot to automatically check for dependency updates
-# and create pull requests to keep dependencies up to date.
+# Dependabot configuration for STRdust.
+# Tuned per GitHub's "tame Dependabot" guidance: batch version updates into a
+# few grouped PRs on a slow (monthly) cadence, with a release cooldown. Security
+# updates ignore groups/schedule and still open immediately.
 
 version: 2
 updates:
-  # Enable updates for Cargo dependencies
+  # Cargo (Rust)
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
@@ -24,31 +25,28 @@ updates:
     labels:
       - "dependencies"
       - "rust"
-    # Group related dependency updates together
+    # One grouped PR for all cargo version updates (only patch bumps are allowed
+    # below, so majors/minors never open individually).
     groups:
-      rust-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-      rust-dev-dependencies:
-        patterns:
-          - "*"
-        dependency-type: "development"
-    # Allow automatic merging for patch updates of trusted dependencies
-    # (This requires branch protection rules to be configured)
+      cargo:
+        patterns: ["*"]
+    # Wait a few days after a release before opening a version-update PR, so a
+    # compromised fresh release has time to be flagged.
+    cooldown:
+      default-days: 7
+    # Conservative posture: only patch version updates (security updates are
+    # separate and unaffected by this allow list).
     allow:
       - dependency-type: "direct"
         update-type: "version-update:semver-patch"
       - dependency-type: "indirect"
         update-type: "version-update:semver-patch"
 
-  # Enable updates for GitHub Actions
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
       day: "monday"
       time: "04:00"
       timezone: "UTC"
@@ -65,5 +63,6 @@ updates:
       - "github-actions"
     groups:
       github-actions:
-        patterns:
-          - "*"
+        patterns: ["*"]
+    cooldown:
+      default-days: 7
