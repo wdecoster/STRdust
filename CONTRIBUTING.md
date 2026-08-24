@@ -65,12 +65,24 @@ cargo test
 make test
 ```
 
-Some tests depend on network access (testing the STRchive download functionality) and are skipped by default. They are gated on environment variables — set the variable and run `cargo test` as usual (no `--ignored` needed):
+Some tests depend on network access or on data files that are not in the
+repository, and are skipped by default. They are marked `#[ignore]` *and* gated
+on an environment variable, so running them takes both `--ignored` and the
+variable:
 
 ```bash
-TEST_PATHOGENIC_NETWORK=1 cargo test   # cache/download behavior
-TEST_PATHOGENIC_FULL=1 cargo test      # full --pathogenic workflow (slower)
+# genotyping a remote CRAM over HTTPS (streams from ftp.1000genomes.ebi.ac.uk)
+TEST_REMOTE_BAM=1 cargo test -- --ignored
+
+# STRchive download and cache behavior for --pathogenic
+TEST_PATHOGENIC_DOWNLOAD=1 cargo test -- --ignored
+
+# full --pathogenic workflow, needs a local reference genome (FASTA_PATH)
+TEST_WITH_FASTA=1 FASTA_PATH=/path/to/genome.fa cargo test -- --ignored
 ```
+
+CI runs only the default set, so it never depends on a third-party server being
+up. Run the network tests locally before touching remote-file handling.
 
 ## Code Quality Standards
 

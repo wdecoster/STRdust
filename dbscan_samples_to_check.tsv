@@ -1,0 +1,11 @@
+category	sample	ward_len	dbscan_len	delta	n_outliers	max_outlier_len	flagged	conclusion
+A_big_clean_gain	rr_NA14_105	930	3268	2338	0	0	False	Dbscan seems about right given the evidence, but few reads support the expansion to give an idea of the actual germline length
+A_big_clean_gain	rr_NP26269	448	2241	1793	1	12	False	that is a bit of a stretch, but the data supports that such lengths exist, but classifying them as an outlier could have been more appropriate
+A_big_clean_gain	rr_NA14_199	996	2368	1372	0	0	False	Dbscan seems about right given the evidence, but few reads support the expansion to give an idea of the actual germline length
+A_big_clean_gain	rr_NA12_350	300	611	311	1	16	False	that is a bit of a stretch, but the data supports that such lengths exist, but classifying them as an outlier could have been more appropriate
+B_flagged_missed_expansion	rr_FTD338_1	36	7	-29	2	474	True	there is no expansion here, the flagged read is an artifact
+B_flagged_missed_expansion	rr_PIDN12322	9	30	21	3	5483	True	there is an actual, much longer expansion, missed by both methods
+B_flagged_missed_expansion	rr_QSBB51_18	40	42	2	1	3529	True	there is an actual, much longer expansion, missed by both methods
+C_big_drop	rr_EMC1998_119	1788	927	-861	0	0	False	longer would have been more accurate
+C_big_drop	rr_KULA_22549	1341	580	-761	5	532	False	there is an actual outlier of 1404bp, but 550 seems about right for the expansion length
+C_big_drop	rr_NA13_045	1262	838	-424	2	10	False	many reads support a 300bp expansion, with some towards 2700bp, so neither 1262 and 838 are entirely correct

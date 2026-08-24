@@ -1163,7 +1163,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires network access to ftp.1000genomes.ebi.ac.uk - set TEST_REMOTE_BAM=1 to enable"]
     fn test_genotype_repeat_url() {
+        if std::env::var("TEST_REMOTE_BAM").is_err() {
+            return;
+        }
         let args = Cli {
             bam: String::from(
                 "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram",
@@ -1175,7 +1179,8 @@ mod tests {
             minlen: 1,
             support: 1,
             somatic: true,
-            unphased: false,
+            // this sample is aligned without HP tags, so only the unphased path returns reads
+            unphased: true,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
             phasing_strategy: crate::PhasingStrategy::Ward,
@@ -1197,7 +1202,18 @@ mod tests {
             created: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
-        let genotype = genotype_repeat(&repeat, &args, &mut bam);
-        println!("{}", genotype.expect("Unable to genotype repeat"));
+        let record = genotype_repeat(&repeat, &args, &mut bam).expect("Unable to genotype repeat");
+        println!("{record}");
+        assert!(
+            record.alt_seq.is_some(),
+            "Expected an alt allele to be called from the remote CRAM"
+        );
+        // the locus had 20 spanning MAPQ60 reads when this test was written; assert loosely
+        // so a re-release of the file upstream does not break the test
+        let support: usize =
+            record.support.0.parse().unwrap_or_else(|_| {
+                panic!("Expected a numeric SUP value, got {:?}", record.support.0)
+            });
+        assert!(support >= 5, "Expected at least 5 supporting reads, got {support}");
     }
 }

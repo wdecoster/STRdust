@@ -328,20 +328,33 @@ fn test_get_overlapping_reads() {
 }
 
 #[test]
+#[ignore = "requires network access to ftp.1000genomes.ebi.ac.uk - set TEST_REMOTE_BAM=1 to enable"]
 fn test_get_overlapping_reads_url() {
+    if std::env::var("TEST_REMOTE_BAM").is_err() {
+        return;
+    }
     let bam = String::from(
         "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/hg38/HG00096.hg38.cram",
     );
     let fasta = String::from("test_data/chr7.fa.gz");
     let repeat = crate::repeats::RepeatInterval {
-        chrom: String::from("chr20"),
+        chrom: String::from("chr7"),
         start: 154654404,
         end: 154654432,
         created: None,
     };
-    let unphased = false;
+    // this sample is aligned without HP tags, so only the unphased path returns reads
+    let unphased = true;
     let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60);
+    let reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60)
+        .expect("Expected spanning reads from the remote CRAM");
+    // the locus had 20 spanning MAPQ60 reads when this test was written; assert loosely
+    // so a re-release of the file upstream does not break the test
+    assert!(
+        reads.phase0.len() >= 10,
+        "Expected at least 10 spanning reads from the remote CRAM, got {}",
+        reads.phase0.len()
+    );
 }
 
 #[test]
