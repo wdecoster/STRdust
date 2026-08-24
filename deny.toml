@@ -1,6 +1,18 @@
 # Configuration for cargo-deny
 # https://embark-studios.github.io/cargo-deny/
 
+# Only consider the platforms STRdust is actually built for (see
+# .github/workflows/publish.yml). Without this the graph also carries the
+# Windows target shims, which duplicate across windows-sys generations and
+# produce warnings nobody can act on.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
 [licenses]
 # Allow specific licenses
 allow = [
@@ -12,12 +24,16 @@ allow = [
     "ISC",
     "Unicode-3.0",  # Unicode License v3 - used by ICU/Unicode crates
     "Zlib",         # zlib License - used by foldhash crate
-    "MPL-2.0",      # Mozilla Public License 2.0 - used by option-ext crate
     "CDLA-Permissive-2.0",  # Community Data License Agreement - used by webpki-root-certs
 ]
 
 # Confidence threshold for detecting licenses
 confidence-threshold = 0.8
+
+# The allow list is a policy statement, not a mirror of the current dependency
+# graph: a permissive license staying in it after the crate that needed it is
+# gone is fine, and beats a red build the next time one shows up again.
+unused-allowed-license = "allow"
 
 [bans]
 # Lint level for when multiple versions of the same crate are detected
@@ -25,32 +41,19 @@ multiple-versions = "warn"
 # Lint level for when a crate version requirement is `*`
 wildcards = "warn"
 
-# Skip certain crates for multiple version checks
+# Skip certain crates for multiple version checks. Only crates that actually
+# have several versions in the resolved graph belong here -- stale entries are
+# reported as unmatched/unnecessary skips and drown out the real output.
 skip = [
     # Common crates that often have multiple versions due to ecosystem splits
     { name = "rand", reason = "Machine learning crates require different rand versions" },
     { name = "rand_core", reason = "Part of rand ecosystem version splits" },
-    { name = "rand_chacha", reason = "Part of rand ecosystem version splits" },
     { name = "getrandom", reason = "Random number generation, version compatibility" },
     { name = "hashbrown", reason = "HashMap implementation versions" },
     { name = "itertools", reason = "Iterator utilities, ecosystem compatibility" },
     { name = "derive-new", reason = "Different versions in bio ecosystem (0.6 vs 0.7)" },
     { name = "thiserror", reason = "Error handling, v1 vs v2 ecosystem split" },
     { name = "thiserror-impl", reason = "Part of thiserror ecosystem" },
-    { name = "windows-link", reason = "Windows platform different versions (0.1 vs 0.2)" },
-    { name = "windows-result", reason = "Windows platform different versions (0.3 vs 0.4)" },
-    { name = "windows-strings", reason = "Windows platform different versions (0.4 vs 0.5)" },
-    # Windows platform support
-    { name = "windows-sys", reason = "Windows API versions for different features" },
-    { name = "windows-targets", reason = "Windows target specifications" },
-    { name = "windows_aarch64_gnullvm", reason = "Windows ARM64 target support" },
-    { name = "windows_aarch64_msvc", reason = "Windows ARM64 MSVC target" },
-    { name = "windows_i686_gnu", reason = "Windows 32-bit GNU target" },
-    { name = "windows_i686_gnullvm", reason = "Windows 32-bit GNU LLVM target" },
-    { name = "windows_i686_msvc", reason = "Windows 32-bit MSVC target" },
-    { name = "windows_x86_64_gnu", reason = "Windows 64-bit GNU target" },
-    { name = "windows_x86_64_gnullvm", reason = "Windows 64-bit GNU LLVM target" },
-    { name = "windows_x86_64_msvc", reason = "Windows 64-bit MSVC target" },
 ]
 
 [advisories]
@@ -74,4 +77,6 @@ unknown-git = "warn"
 unknown-registry = "warn"
 
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# rust-htslib is consumed from a fork; allowing it explicitly documents the
+# exception instead of leaving a source-not-allowed warning on every run.
+allow-git = ["https://github.com/wdecoster/rust-htslib"]
