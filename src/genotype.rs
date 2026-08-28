@@ -1076,7 +1076,7 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
-            fast: false,
+            mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
@@ -1114,7 +1114,7 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
-            fast: false,
+            mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
@@ -1146,7 +1146,7 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
-            fast: false,
+            mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
         let repeat = crate::repeats::RepeatInterval {
@@ -1184,7 +1184,7 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
-            fast: false,
+            mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
         let repeat = crate::repeats::RepeatInterval {
@@ -1229,7 +1229,7 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
-            fast: false,
+            mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
 

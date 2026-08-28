@@ -17,6 +17,19 @@ pub mod repeats;
 pub mod utils;
 pub mod vcf;
 
+/// How the repeat sequence of a read is recovered.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenotypingMode {
+    /// Re-align every read to a reference with the repeat excised and take the sequence
+    /// that fails to align. Slow, but recovers alleles from reads that the original
+    /// alignment clipped or placed badly, which is what large expansions look like.
+    Sensitive,
+    /// Cut the repeat straight out of the CIGAR of the alignment in the BAM/CRAM. Orders
+    /// of magnitude faster, but only reads that span the locus can contribute; loci left
+    /// without enough spanning reads fall back to `sensitive`.
+    Fast,
+}
+
 /// Strategy for splitting unphased reads into haplotypes.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PhasingStrategy {
@@ -121,17 +134,24 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     alignment_all: bool,
 
-    /// Fast mode: cut the repeat sequence straight out of the existing alignment (CIGAR)
-    /// instead of re-aligning reads to a repeat-compressed reference. Much faster, and
-    /// concordant for reads that span the locus; loci where too few reads span are still
-    /// genotyped with the full alignment.
-    #[arg(long, default_value_t = false)]
-    fast: bool,
+    /// How to recover the repeat sequence from a read.
+    /// 'sensitive': re-align every read to a repeat-compressed reference (default).
+    /// 'fast': cut the repeat straight out of the alignment already in the BAM/CRAM.
+    #[arg(long, value_name = "MODE", value_enum, default_value_t = GenotypingMode::Sensitive)]
+    mode: GenotypingMode,
 
-    /// Number of flanking bases taken on either side of the repeat in --fast mode, so that
-    /// indels the aligner placed just outside the annotated interval are still captured
+    /// Number of flanking bases taken on either side of the repeat with --mode fast, so
+    /// that indels the aligner placed just outside the annotated interval are still captured
     #[arg(long, default_value_t = 10)]
     fast_flank: u32,
+}
+
+impl Cli {
+    /// Whether the repeat sequence is cut out of the existing alignment rather than
+    /// recovered by re-aligning the read.
+    pub fn is_fast_mode(&self) -> bool {
+        self.mode == GenotypingMode::Fast
+    }
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {

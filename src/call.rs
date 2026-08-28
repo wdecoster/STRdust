@@ -157,8 +157,9 @@ fn process_batch(
                 // In --fast mode the repeat allele is cut straight out of the alignment;
                 // if too few reads span the locus that way we fall back to re-aligning
                 // whole reads, which can still genotype clipped/non-spanning reads.
-                let mut reads = collect_reads(&filtered_records, info, repeat, args, args.fast);
-                if args.fast && !enough_support(&reads, repeat, args) {
+                let mut reads =
+                    collect_reads(&filtered_records, info, repeat, args, args.is_fast_mode());
+                if args.is_fast_mode() && !enough_support(&reads, repeat, args) {
                     debug!("{repeat}: too few spanning reads for --fast, using alignment");
                     reads = collect_reads(&filtered_records, info, repeat, args, false);
                 }
