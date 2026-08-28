@@ -23,6 +23,7 @@ cargo build --release
 STRdust -r chr7:154654404-154654432 reference.fa sample.cram > sample.vcf
 STRdust --pathogenic reference.fa sample.cram | bgzip > sample.vcf.gz
 STRdust -R targets.bed --haploid chrX,chrY reference.fa male_sample.cram | bgzip > repeats.vcf.gz
+STRdust --mode fast -R genome_wide_catalog.bed reference.fa sample.cram | bgzip > repeats.vcf.gz
 ```
 
 The 'test_data' directory contains a small example dataset to test the tool:
@@ -134,6 +135,8 @@ STRdust was developed while investigating the [pathogenic GOLGA8A repeat expansi
 | `DISCORDANT_LENGTH` ratio (`--phasing both`) | > 2x longer allele | `src/genotype.rs` | lower to surface smaller Ward/DBSCAN disagreements for QC review |
 | DBSCAN neighbourhood radius (`eps`) | 0.4 | `src/phase_insertions.rs` | smaller = tighter/more clusters (more splitting, more reads dropped to noise → can undercall length-variable expansions); larger = looser clusters that can merge distinct alleles. Adjust in ±0.1 steps and watch `NCLUSTERS` |
 | DBSCAN length weight | 0.3 | `src/phase_insertions.rs` | lower = composition dominates (keeps length-variable expansions together); higher = length matters more (separates same-motif alleles that differ only in length, behaving more like `ward`) |
+| `FLANK_SEARCH` (`--mode fast`) | 30 bases | `src/parse_bam.rs` | how far outside the annotated interval an indel is still taken to belong to the repeat, mirroring the ±30 base junction window of the `sensitive` path. Raise to catch expansions the aligner scattered further out, at the risk of stealing indels that belong to a neighbouring locus |
+| `FLANK_MIN_INDEL` (`--mode fast`) | 10 bases | `src/parse_bam.rs` | minimum indel size that may widen the flank. Lower it and single-base alignment noise around the locus starts counting towards the allele |
 
 If you have a specifically challenging repeat expansion where the defaults do not work well, we would be happy to work with you — please [open an issue](https://github.com/wdecoster/STRdust/issues) with details.
 
