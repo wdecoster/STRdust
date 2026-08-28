@@ -120,6 +120,18 @@ pub struct Cli {
     /// Always use full alignment (disable fast reference check via CIGAR)
     #[arg(long, default_value_t = false)]
     alignment_all: bool,
+
+    /// Fast mode: cut the repeat sequence straight out of the existing alignment (CIGAR)
+    /// instead of re-aligning reads to a repeat-compressed reference. Much faster, and
+    /// concordant for reads that span the locus; loci where too few reads span are still
+    /// genotyped with the full alignment.
+    #[arg(long, default_value_t = false)]
+    fast: bool,
+
+    /// Number of flanking bases taken on either side of the repeat in --fast mode, so that
+    /// indels the aligner placed just outside the annotated interval are still captured
+    #[arg(long, default_value_t = 10)]
+    fast_flank: u32,
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {

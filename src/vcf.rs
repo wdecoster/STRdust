@@ -729,6 +729,8 @@ fn test_write_vcf_header_from_bam() {
         max_number_reads: 60,
         max_locus: None,
         alignment_all: false,
+        fast: false,
+        fast_flank: 10,
     };
     write_vcf_header(&args);
 }
@@ -757,6 +759,8 @@ fn test_write_vcf_header_from_name() {
         max_number_reads: 60,
         max_locus: None,
         alignment_all: false,
+        fast: false,
+        fast_flank: 10,
     };
     write_vcf_header(&args);
 }
