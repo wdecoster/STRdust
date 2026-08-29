@@ -521,11 +521,21 @@ fn are_alleles_similar(allele1: &str, allele2: &str) -> bool {
 
 impl VCFRecord {
     // GT field: a single allele value on haploid chromosomes ("1"), an allele pair otherwise ("1|0").
+    /// The two alleles are only *phased* when they came from reads a phasing tool had
+    /// already assigned to haplotypes, which is exactly the case where that tool also gave
+    /// us a phase set. Alleles produced by clustering unphased reads are two alleles of one
+    /// genotype and nothing more, so they get the unphased separator: writing `|` there
+    /// would assert a phase relationship with every other variant on the chromosome, which
+    /// is a claim STRdust cannot make.
+    fn genotype_separator(&self) -> &'static str {
+        if self.ps.is_some() { "|" } else { "/" }
+    }
+
     fn genotype_field(&self) -> String {
         if self.haploid {
             self.allele.0.clone()
         } else {
-            format!("{}|{}", self.allele.0, self.allele.1)
+            format!("{}{}{}", self.allele.0, self.genotype_separator(), self.allele.1)
         }
     }
 
@@ -573,7 +583,7 @@ impl fmt::Display for VCFRecord {
             None => {
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\t{flags}END={end};{somatic}\tGT:SUP\t{gt}:{sup}",
+                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\t{flags}END={end}{somatic}\tGT:SUP\t{gt}:{sup}",
                     chrom = self.chrom,
                     start = self.start,
                     flags = self.flags,
@@ -609,7 +619,9 @@ impl PartialEq for VCFRecord {
 impl Eq for VCFRecord {}
 
 pub fn write_vcf_header(args: &Cli) {
-    println!(r#"##fileformat=VCFv4.5"#);
+    // STRdust uses nothing beyond VCF 4.2, and declaring the oldest sufficient version
+    // keeps the output readable by tooling that rejects versions it does not know.
+    println!(r#"##fileformat=VCFv4.2"#);
     // get absolute path to fasta file
     let path = std::fs::canonicalize(&args.fasta)
         .unwrap_or_else(|err| panic!("Failed getting absolute path to fasta: {err}"));
@@ -926,12 +938,35 @@ fn test_display_haploid_single_values() {
 
 #[test]
 fn test_display_diploid_pair_values() {
-    // Diploid record: phased GT pair and comma-separated per-allele FORMAT values.
+    // Without a phase set the alleles came from clustering, so the GT is unphased.
     let record = test_record(false, ("1", "0"), Some("ATCATCATC"));
     let line = format!("{record}");
     let sample = line.split('\t').next_back().unwrap();
-    assert_eq!(sample, "1|0:10,20:10,20:10,20:10,20:10,20");
+    assert_eq!(sample, "1/0:10,20:10,20:10,20:10,20:10,20");
     assert!(line.contains("STDEV=10,20"));
+}
+
+#[test]
+fn test_display_phased_record_uses_phased_separator() {
+    // A phase set means a phasing tool assigned the reads to haplotypes, so `|` is earned
+    // and PS is reported alongside it.
+    let mut record = test_record(false, ("1", "2"), Some("ATCATCATC,ATCATC"));
+    record.ps = Some(12345);
+    let line = format!("{record}");
+    let sample = line.split('\t').next_back().unwrap();
+    assert!(sample.starts_with("1|2:"), "expected phased GT, got {sample}");
+    assert!(sample.ends_with(":12345"), "phased records carry PS, got {sample}");
+    assert!(line.contains("GT:RB:FRB:MRL:SUP:SC:PS"));
+}
+
+#[test]
+fn test_info_field_has_no_empty_key() {
+    // A record without an ALT still must not end its INFO field on a bare ';'
+    let record = test_record(false, ("0", "0"), None);
+    let line = format!("{record}");
+    let info = line.split('\t').nth(7).unwrap();
+    assert!(!info.ends_with(';'), "INFO must not end in an empty key: {info}");
+    assert!(info.contains("END=130"));
 }
 
 #[test]

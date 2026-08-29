@@ -126,6 +126,32 @@ chr1    1435798 .       TGGCGCGGAGCGGCGCGGAGCG  GCTGGCGCGGAGCGGCGCGGA,GCGGGCGCGC
 chr1    57367044        .       AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAAT     AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAA,AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAA        .       .       END=57367125;STDEV=3,0 GT:RB:FRB:SUP:SC 1|2:-9,-34:72,47:17,12:216,141
 ```
 
+### How a record represents the repeat
+
+A STRdust record describes one catalog interval, not a minimal variant:
+
+- `POS`, `END` and `REF` always come from the target interval, never from the reads. The
+  same BED entry therefore yields the same coordinates and the same `REF` in every sample,
+  which is what makes records joinable across a cohort.
+- `REF` and `ALT` carry the **whole repeat sequence**, not a parsimonious left-aligned
+  allele. This is the usual convention among tandem repeat callers, but it means
+  `bcftools norm` will realign most records and move their positions, breaking any join
+  back to the catalog. Compare STRdust output against a truth set on the *unnormalised*
+  records, or normalise both sides.
+- `ALT` may describe bases lying just **outside** `[POS, END]`. Both modes deliberately
+  count indels the aligner placed near, but not inside, the annotated interval, because
+  repeat boundaries in a catalog rarely agree with where an aligner puts an indel (see
+  `--mode` above). The allele *length* is right, but the record is not a strict
+  "replace `REF` at these coordinates with `ALT`" statement, so reconstructing a haplotype
+  from it (`bcftools consensus`) can place those bases up to a few tens of bases off.
+  Read the lengths from `RB`, `FRB` and `MRL` rather than reconstructing from `ALT`.
+- `GT` uses `|` only when the input reads were phased by an external tool, which is also
+  when `PS` is reported. Alleles obtained by clustering unphased reads are written `1/2`:
+  they are two alleles of one genotype, with no phase relationship to anything else. One
+  consequence is that a phased run mixes separators - loci called through the QUICKREF
+  path never fetch reads, so they carry no phase set and are written `0/0`. Those loci are
+  homozygous reference, where phase carries no information either way.
+
 ## Tuning and hardcoded parameters
 
 STRdust was developed while investigating the [pathogenic GOLGA8A repeat expansion](https://www.nature.com/articles/s41588-026-02537-7), and a [benchmark of repeat genotypers](https://www.biorxiv.org/content/10.64898/2026.02.28.708646v1) found it to be the most sensitive of the tested tools for detecting actual pathogenic expansions. Maximising that sensitivity is a priority, and several of the heuristics that support it are intentionally kept as **hardcoded constants** rather than command-line arguments. A parameter is only worth exposing if a user can tell how to tune it, and exposing all of these would inflate the option list without helping most users. Each is defined as a documented constant in the source so it can be changed (and promoted to a CLI argument) if real cohort experience shows a need:
