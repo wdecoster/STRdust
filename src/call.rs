@@ -10,6 +10,13 @@ use std::{io, sync::Mutex};
 
 use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
 
+/// Per-target bookkeeping while scanning a batch: which of the batch's stored records
+/// overlap this target, and whether any of them showed a length difference (QUICKREF).
+struct TargetInfo {
+    has_variation: bool,
+    record_indices: Vec<usize>,
+}
+
 /// Process a batch of nearby STR targets with optimized single-fetch approach
 ///
 /// This function:
@@ -37,12 +44,6 @@ fn process_batch(
             batch.chromosome, batch.start, batch.end
         )
     })?;
-
-    // Track target information and only store overlapping records
-    struct TargetInfo {
-        has_variation: bool,
-        record_indices: Vec<usize>,
-    }
 
     let mut filtered_records = Vec::new();
     let mut target_info: std::collections::HashMap<usize, TargetInfo> =
@@ -152,36 +153,15 @@ fn process_batch(
                 results.push(vcf_record);
             }
             Some(info) => {
-                // Needs full genotyping: extract sequences from filtered records
-                let mut reads = parse_bam::Reads {
-                    phase0: Vec::new(),
-                    phase1: Vec::new(),
-                    phase2: Vec::new(),
-                    ps: None,
-                };
-
-                for &idx in &info.record_indices {
-                    let record = &filtered_records[idx];
-                    let phase = parse_bam::get_phase(record);
-                    let seq = record.seq().as_bytes();
-
-                    if args.unphased {
-                        reads.phase0.push(seq);
-                    } else {
-                        match phase {
-                            1 => {
-                                reads.phase1.push(seq);
-                                reads.ps = parse_bam::get_phase_set(record);
-                            }
-                            2 => {
-                                reads.phase2.push(seq);
-                                reads.ps = parse_bam::get_phase_set(record);
-                            }
-                            _ => {
-                                reads.phase0.push(seq);
-                            }
-                        }
-                    }
+                // Needs full genotyping: extract sequences from filtered records.
+                // In --fast mode the repeat allele is cut straight out of the alignment;
+                // if too few reads span the locus that way we fall back to re-aligning
+                // whole reads, which can still genotype clipped/non-spanning reads.
+                let mut reads =
+                    collect_reads(&filtered_records, info, repeat, args, args.is_fast_mode());
+                if args.is_fast_mode() && !enough_support(&reads, repeat, args) {
+                    debug!("{repeat}: too few spanning reads for --fast, using alignment");
+                    reads = collect_reads(&filtered_records, info, repeat, args, false);
                 }
 
                 // Check if we have enough reads
@@ -231,6 +211,86 @@ fn process_batch(
     }
 
     Ok(results)
+}
+
+/// Gather the per-haplotype sequences of one target from the batch's records.
+///
+/// With `sliced` the repeat allele is cut straight out of each read's alignment
+/// (`--fast`) and reads that do not span the locus are dropped; otherwise the whole read
+/// sequence is stored for re-alignment to the repeat-compressed reference.
+fn collect_reads(
+    filtered_records: &[bam::Record],
+    info: &TargetInfo,
+    repeat: &crate::repeats::RepeatInterval,
+    args: &Cli,
+    sliced: bool,
+) -> parse_bam::Reads {
+    let mut reads = parse_bam::Reads {
+        phase0: Vec::new(),
+        phase1: Vec::new(),
+        phase2: Vec::new(),
+        ps: None,
+        sliced,
+    };
+
+    for &idx in &info.record_indices {
+        let record = &filtered_records[idx];
+        let seq = if sliced {
+            match parse_bam::repeat_sequence_from_alignment(
+                record,
+                repeat.start,
+                repeat.end,
+                args.fast_flank,
+            ) {
+                Some(seq) => seq,
+                // read does not span the locus (or is clipped into it): it cannot report
+                // an allele length, so it is dropped
+                None => continue,
+            }
+        } else {
+            record.seq().as_bytes()
+        };
+
+        if args.unphased {
+            reads.phase0.push(seq);
+        } else {
+            match parse_bam::get_phase(record) {
+                1 => {
+                    reads.phase1.push(seq);
+                    reads.ps = parse_bam::get_phase_set(record);
+                }
+                2 => {
+                    reads.phase2.push(seq);
+                    reads.ps = parse_bam::get_phase_set(record);
+                }
+                _ => {
+                    reads.phase0.push(seq);
+                }
+            }
+        }
+    }
+    reads
+}
+
+/// Whether the sliced reads still support a call, i.e. whether `--mode fast` can be used
+/// here. Reads that do not span the locus were dropped, which may leave a haplotype short;
+/// the locus then goes to the alignment path, which can still use those reads.
+///
+/// The bar is what genotyping will actually need: `--support` reads for the one haplotype
+/// of a haploid chromosome, `--support` per haplotype when the input is already phased, and
+/// twice that when unphased reads still have to be split into two haplotypes.
+fn enough_support(
+    reads: &parse_bam::Reads,
+    repeat: &crate::repeats::RepeatInterval,
+    args: &Cli,
+) -> bool {
+    if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
+        reads.phase0.len() >= args.support
+    } else if args.unphased {
+        reads.phase0.len() >= 2 * args.support
+    } else {
+        reads.phase1.len() >= args.support && reads.phase2.len() >= args.support
+    }
 }
 
 pub fn genotype_repeats(args: Cli) {

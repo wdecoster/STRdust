@@ -23,6 +23,7 @@ cargo build --release
 STRdust -r chr7:154654404-154654432 reference.fa sample.cram > sample.vcf
 STRdust --pathogenic reference.fa sample.cram | bgzip > sample.vcf.gz
 STRdust -R targets.bed --haploid chrX,chrY reference.fa male_sample.cram | bgzip > repeats.vcf.gz
+STRdust --mode fast -R genome_wide_catalog.bed reference.fa sample.cram | bgzip > repeats.vcf.gz
 ```
 
 The 'test_data' directory contains a small example dataset to test the tool:
@@ -60,6 +61,8 @@ OPTIONS:
         --phasing <STRATEGY>           How to split unphased reads into haplotypes: 'ward', 'dbscan' or 'both' (only with --unphased) [default: ward]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
+        --mode <MODE>                  How to recover the repeat sequence from a read: 'sensitive' or 'fast' [default: sensitive]
+        --fast-flank <FAST_FLANK>      How far outside the interval an insertion still counts, with --mode fast [default: 20]
         --sorted                       Sort output by chrom, start and end
         --debug                        Debug mode
     -h, --help                         Print help information
@@ -76,6 +79,13 @@ OPTIONS:
   - `dbscan` (experimental): DBSCAN on **length-invariant k-mer composition feature vectors**, i.e. it groups reads by their *sequence composition* (which motif they are made of) rather than primarily by length. This is the key difference from `ward`: two reads of the same motif cluster together even when their lengths differ a lot, so a length-variable expansion is kept together as one allele. The trade-off is that the reference and expanded alleles must differ in composition for DBSCAN to separate them. The two largest clusters become the haplotypes; remaining clusters and noise reads are reported as `OUTLIERS`, and the total number of clusters is reported in `NCLUSTERS` (so loci with `NCLUSTERS > 2`, i.e. complex/multi-population loci, can be flagged downstream). Its internal parameters (neighbourhood radius and length weight) are hardcoded — see [Tuning and hardcoded parameters](#tuning-and-hardcoded-parameters).
   - `both` (QC mode): report the `ward` call as usual, but additionally run `dbscan` and, when the two disagree by more than 2x on the longer allele, raise a `DISCORDANT_LENGTH` flag and report the DBSCAN allele lengths in `DBSCAN_RB`. This deliberately over-flags (it prioritises sensitivity) and is intended as a triage signal: a worklist of loci worth reviewing where the two orthogonal clustering approaches disagree. The reported genotype is unchanged from `ward`.
 - By default, STRdust uses a fast reference check (QUICKREF) to skip full alignment at loci that appear to be homozygous reference. It inspects the CIGAR strings of the first 25 reads spanning a locus, and if at least 5 are found and none show a length difference from the reference of more than 3 bp, the locus is called 0|0 immediately. Loci called this way are marked with a `QUICKREF` flag in the VCF INFO field. This substantially speeds up runs on samples with many reference-like loci. To disable this optimisation and always perform full alignment, use `--alignment-all`.
+
+- `--mode` chooses how the repeat sequence of a read is recovered, trading sensitivity against speed.
+  - `sensitive` (default) builds an artificial reference with the repeat excised, re-aligns every read to it with minimap2, and takes the sequence that fails to align as the allele. It can recover an allele from a read whose original alignment clipped or misplaced the repeat, which is what large expansions look like. It is also expensive: re-aligning whole (tens of kb) reads is essentially the entire runtime.
+  - `fast` cuts the allele straight out of the alignment already in the BAM/CRAM, by walking the CIGAR from the repeat start to the repeat end. The slice contains the reference-matching repeat copies as well as any inserted bases, and is shortened by deletions, so it is the full repeat sequence as the read carries it - not only the inserted part. Everything downstream (haplotype splitting, consensus, VCF) is unchanged.
+  - Aligners place a large insertion inconsistently, often tens of bases off the annotated repeat: at one locus tested the same ~900 bp insertion sits anywhere across a 30 bp stretch depending on the read. Insertions of at least 3 bases lying within `--fast-flank` bases of the interval therefore count towards the allele too. Deletions need no such tolerance - a deletion has a reference span, so one that belongs to the repeat overlaps the interval and is already reflected in the slice, while one lying entirely outside belongs to a neighbouring event and must not shorten the allele.
+  - In `fast` mode a read is dropped when it does not span the locus, when its alignment clips within 100 bases of the repeat (the clipped bases may be the expansion the aligner gave up on), or when the repeat is deleted from it entirely. If that leaves a haplotype below what a call needs, the locus falls back to `sensitive`, which can still recover an allele from those reads. Over-dropping only costs time; under-dropping would cost a false reference call at exactly the loci that matter most.
+  - On a 30x ONT genome, `fast` genotyped 2000 catalog loci in 7 s of CPU against 1016 s for `sensitive` (140x, and 284 MB against 643 MB peak memory). Per-haplotype median read lengths (`MRL`) are identical to `sensitive` at 56% of alleles and within 2 bp at 93%. Treat that as agreement, not accuracy: neither mode has been benchmarked against a truth set yet, so where they differ it is not established which is right.
 
 ## Output format
 
@@ -126,6 +136,8 @@ STRdust was developed while investigating the [pathogenic GOLGA8A repeat expansi
 | `DISCORDANT_LENGTH` ratio (`--phasing both`) | > 2x longer allele | `src/genotype.rs` | lower to surface smaller Ward/DBSCAN disagreements for QC review |
 | DBSCAN neighbourhood radius (`eps`) | 0.4 | `src/phase_insertions.rs` | smaller = tighter/more clusters (more splitting, more reads dropped to noise → can undercall length-variable expansions); larger = looser clusters that can merge distinct alleles. Adjust in ±0.1 steps and watch `NCLUSTERS` |
 | DBSCAN length weight | 0.3 | `src/phase_insertions.rs` | lower = composition dominates (keeps length-variable expansions together); higher = length matters more (separates same-motif alleles that differ only in length, behaving more like `ward`) |
+| `FLANK_MIN_INDEL` (`--mode fast`) | 3 bases | `src/parse_bam.rs` | smallest insertion in the flank that counts towards the allele. Lower it and single-base alignment noise beside the locus starts moving allele lengths; raise it and small repeat-boundary indels are missed. Weakly determined — anything from 3 to 10 performed within noise on the sample tested |
+| `CLIP_SEARCH` (`--mode fast`) | 100 bases | `src/parse_bam.rs` | how close a clipped alignment end has to be before the read is considered untrustworthy and dropped. Raising it drops more reads and sends more loci to `sensitive`, which is the safe direction; lowering it risks reporting a reference-length allele for a read that clipped through an expansion |
 
 If you have a specifically challenging repeat expansion where the defaults do not work well, we would be happy to work with you — please [open an issue](https://github.com/wdecoster/STRdust/issues) with details.
 

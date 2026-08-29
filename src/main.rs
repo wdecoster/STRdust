@@ -17,6 +17,19 @@ pub mod repeats;
 pub mod utils;
 pub mod vcf;
 
+/// How the repeat sequence of a read is recovered.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenotypingMode {
+    /// Re-align every read to a reference with the repeat excised and take the sequence
+    /// that fails to align. Slow, but recovers alleles from reads that the original
+    /// alignment clipped or placed badly, which is what large expansions look like.
+    Sensitive,
+    /// Cut the repeat straight out of the CIGAR of the alignment in the BAM/CRAM. Orders
+    /// of magnitude faster, but only reads that span the locus can contribute; loci left
+    /// without enough spanning reads fall back to `sensitive`.
+    Fast,
+}
+
 /// Strategy for splitting unphased reads into haplotypes.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PhasingStrategy {
@@ -120,6 +133,26 @@ pub struct Cli {
     /// Always use full alignment (disable fast reference check via CIGAR)
     #[arg(long, default_value_t = false)]
     alignment_all: bool,
+
+    /// How to recover the repeat sequence from a read.
+    /// 'sensitive': re-align every read to a repeat-compressed reference (default).
+    /// 'fast': cut the repeat straight out of the alignment already in the BAM/CRAM.
+    #[arg(long, value_name = "MODE", value_enum, default_value_t = GenotypingMode::Sensitive)]
+    mode: GenotypingMode,
+
+    /// How far outside the annotated interval an insertion may sit and still count towards
+    /// the allele with --mode fast. Aligners place a large insertion inconsistently, often
+    /// tens of bases off the repeat; the default mirrors the tolerance of the sensitive path
+    #[arg(long, default_value_t = 20)]
+    fast_flank: u32,
+}
+
+impl Cli {
+    /// Whether the repeat sequence is cut out of the existing alignment rather than
+    /// recovered by re-aligning the read.
+    pub fn is_fast_mode(&self) -> bool {
+        self.mode == GenotypingMode::Fast
+    }
 }
 
 fn is_file(pathname: &str) -> Result<String, String> {
@@ -151,6 +184,13 @@ fn main() {
              previous diploid representation ('1/1', './.'). Per-allele FORMAT/INFO fields (RB, \
              FRB, MRL, SUP, SC, STDEV) likewise carry a single value at these loci. Downstream \
              tools that assumed diploid genotypes may need updating."
+        );
+    }
+    if args.is_fast_mode() && args.minlen != 1 {
+        warn!(
+            "--minlen has no effect with --mode fast: the allele is read off the alignment \
+             rather than collected from insertion operations, so there is no indel length to \
+             filter on."
         );
     }
     info!("Collected arguments: {args:?}");

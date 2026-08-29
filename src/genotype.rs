@@ -305,16 +305,22 @@ pub fn genotype_with_extracted_reads(
         }
     };
 
-    let repeat_compressed_reference =
-        repeat.make_repeat_compressed_sequence_with_reader(&fasta_reader, flanking);
-
-    // Create an index for minimap2 alignment to the artificial reference
-    let aligner = minimap2::Aligner::builder()
-        .map_ont()
-        .with_index_threads(1)
-        .with_cigar()
-        .with_seq(&repeat_compressed_reference)
-        .unwrap_or_else(|err| panic!("Unable to build index:\n{err}"));
+    // In --fast mode the reads were already cut down to the repeat allele straight from
+    // the BAM alignment, so no artificial reference and no re-alignment are needed.
+    let aligner = if reads.sliced {
+        None
+    } else {
+        let repeat_compressed_reference =
+            repeat.make_repeat_compressed_sequence_with_reader(&fasta_reader, flanking);
+        Some(
+            minimap2::Aligner::builder()
+                .map_ont()
+                .with_index_threads(1)
+                .with_cigar()
+                .with_seq(&repeat_compressed_reference)
+                .unwrap_or_else(|err| panic!("Unable to build index:\n{err}")),
+        )
+    };
 
     // Set up vectors to collect the results
     let mut consenses: Vec<crate::consensus::Consensus> = vec![];
@@ -347,7 +353,7 @@ pub fn genotype_with_extracted_reads(
         // Haploid chromosome
         let seq = &reads.phase0;
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        let insertions = get_insertions(seq, aligner.as_ref(), args, flanking, repeat);
         debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len());
         if insertions.len() < args.support {
             return Ok(crate::vcf::VCFRecord::missing_genotype(
@@ -369,7 +375,7 @@ pub fn genotype_with_extracted_reads(
         // Unphased
         let seq = &reads.phase0;
         debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        let insertions = get_insertions(seq, aligner.as_ref(), args, flanking, repeat);
         if insertions.len() < args.support {
             debug!("{repeat}: Not enough insertions found: {}", insertions.len());
             return Ok(crate::vcf::VCFRecord::missing_genotype(
@@ -481,8 +487,8 @@ pub fn genotype_with_extracted_reads(
             seq1.len(),
             seq2.len()
         );
-        let insertions1 = find_insertions(seq1, &aligner, args.minlen, flanking, repeat);
-        let insertions2 = find_insertions(seq2, &aligner, args.minlen, flanking, repeat);
+        let insertions1 = get_insertions(seq1, aligner.as_ref(), args, flanking, repeat);
+        let insertions2 = get_insertions(seq2, aligner.as_ref(), args, flanking, repeat);
         debug!(
             "{repeat}: Phased: Got {} and {} insertions for haplotypes 1 and 2",
             insertions1.len(),
@@ -833,6 +839,28 @@ fn genotype_repeat(
     ))
 }
 
+/// Turn the per-read sequences of one haplotype into repeat alleles.
+///
+/// With an `aligner` (default mode) the reads are whole reads that still have to be
+/// aligned to the repeat-compressed reference; without one (`--fast`) they are already
+/// the repeat alleles cut out of the BAM alignment and only need converting to `String`.
+fn get_insertions(
+    seq: &Vec<Vec<u8>>,
+    aligner: Option<&Aligner<Built>>,
+    args: &Cli,
+    flanking: u32,
+    repeat: &crate::repeats::RepeatInterval,
+) -> Vec<String> {
+    match aligner {
+        Some(aligner) => find_insertions(seq, aligner, args.minlen, flanking, repeat),
+        None => seq
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect(),
+    }
+}
+
 // may adapt the function below to allow for multiple alignment methods later
 fn find_insertions(
     seq: &Vec<Vec<u8>>,
@@ -1048,6 +1076,8 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            mode: crate::GenotypingMode::Sensitive,
+            fast_flank: 10,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -1084,6 +1114,8 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            mode: crate::GenotypingMode::Sensitive,
+            fast_flank: 10,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -1114,6 +1146,8 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            mode: crate::GenotypingMode::Sensitive,
+            fast_flank: 10,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -1150,6 +1184,8 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            mode: crate::GenotypingMode::Sensitive,
+            fast_flank: 10,
         };
         let repeat = crate::repeats::RepeatInterval {
             chrom: String::from("chr7"),
@@ -1193,6 +1229,8 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            mode: crate::GenotypingMode::Sensitive,
+            fast_flank: 10,
         };
 
         let repeat = crate::repeats::RepeatInterval {
