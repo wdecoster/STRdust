@@ -394,6 +394,7 @@ pub fn get_overlapping_reads(
     repeat: &crate::repeats::RepeatInterval,
     unphased: bool,
     max_number_reads: isize,
+    min_mapq: u8,
 ) -> Option<Reads> {
     let tid = bam
         .header()
@@ -415,8 +416,8 @@ pub fn get_overlapping_reads(
     // extract sequences spanning the repeat locus
     for r in bam.rc_records() {
         let r = r.unwrap_or_else(|err| panic!("Error reading BAM file in region {repeat}:\n{err}"));
-        // skip reads with mapq 0 or reads that do not span the repeat locus
-        if r.mapq() == 0
+        // skip poorly mapped reads and reads that do not span the repeat locus
+        if r.mapq() < min_mapq
             || r.reference_start() > repeat.start.into()
             || r.reference_end() < repeat.end.into()
         {
@@ -513,7 +514,7 @@ fn test_get_overlapping_reads() {
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
-    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60);
+    let _reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60, 10);
 }
 
 #[test]
@@ -535,7 +536,7 @@ fn test_get_overlapping_reads_url() {
     // this sample is aligned without HP tags, so only the unphased path returns reads
     let unphased = true;
     let mut bam = create_bam_reader(&bam, &fasta);
-    let reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60)
+    let reads = get_overlapping_reads(&mut bam, &repeat, unphased, 60, 10)
         .expect("Expected spanning reads from the remote CRAM");
     // the locus had 20 spanning MAPQ60 reads when this test was written; assert loosely
     // so a re-release of the file upstream does not break the test
