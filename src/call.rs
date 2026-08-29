@@ -10,6 +10,12 @@ use std::{io, sync::Mutex};
 
 use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
 
+/// Reads are inspected this far outside the interval when deciding whether a locus is
+/// homozygous reference. An aligner routinely places a repeat's indel a little outside the
+/// annotated boundary, and calling such a locus reference without looking would be a false
+/// negative on exactly the loci STRdust exists to find.
+const QUICKREF_PADDING: u32 = 15;
+
 /// Per-target bookkeeping while scanning a batch: which of the batch's stored records
 /// overlap this target, and whether any of them showed a length difference (QUICKREF).
 struct TargetInfo {
@@ -93,8 +99,8 @@ fn process_batch(
                 if !args.alignment_all && !info.has_variation {
                     let diff = parse_bam::calculate_all_length_diff_from_cigar(
                         &record_rc,
-                        target.start,
-                        target.end,
+                        target.start.saturating_sub(QUICKREF_PADDING),
+                        target.end + QUICKREF_PADDING,
                     );
                     if diff != 0 {
                         info.has_variation = true;
