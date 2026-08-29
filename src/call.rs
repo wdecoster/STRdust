@@ -272,16 +272,22 @@ fn collect_reads(
     reads
 }
 
-/// Whether the sliced reads still support a call, i.e. whether --fast can be used here.
-/// Reads that do not span the locus were dropped, which may leave a haplotype short.
+/// Whether the sliced reads still support a call, i.e. whether `--mode fast` can be used
+/// here. Reads that do not span the locus were dropped, which may leave a haplotype short;
+/// the locus then goes to the alignment path, which can still use those reads.
+///
+/// The bar is what genotyping will actually need: `--support` reads for the one haplotype
+/// of a haploid chromosome, `--support` per haplotype when the input is already phased, and
+/// twice that when unphased reads still have to be split into two haplotypes.
 fn enough_support(
     reads: &parse_bam::Reads,
     repeat: &crate::repeats::RepeatInterval,
     args: &Cli,
 ) -> bool {
-    let unphased = args.unphased || crate::vcf::chrom_is_haploid(args, &repeat.chrom);
-    if unphased {
+    if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         reads.phase0.len() >= args.support
+    } else if args.unphased {
+        reads.phase0.len() >= 2 * args.support
     } else {
         reads.phase1.len() >= args.support && reads.phase2.len() >= args.support
     }

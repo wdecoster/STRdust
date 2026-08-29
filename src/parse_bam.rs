@@ -49,58 +49,20 @@ pub fn calculate_all_length_diff_from_cigar(
     length_diff
 }
 
-/// How far beyond the annotated interval an indel is still considered part of the repeat,
-/// mirroring the +/-30 base window the alignment path allows around its junction.
-const FLANK_SEARCH: i64 = 30;
-/// Only indels of at least this size widen the flank. Single-base indels are everywhere in
-/// long-read alignments and would drag unrelated sequencing noise into the allele.
-const FLANK_MIN_INDEL: i64 = 10;
+/// Only insertions of at least this size may be taken in from the flank. One- and two-base
+/// indels are everywhere in long-read alignments; counting them would let ordinary
+/// sequencing noise beside the locus change the reported allele length. Weakly determined:
+/// on the sample tested, anything from 3 to 10 performs within noise of the other.
+const FLANK_MIN_INDEL: i64 = 3;
+/// Minimum size of a clip that makes a read unusable near the locus.
+const CLIP_MIN_LEN: i64 = 10;
 
-/// Pick the flank to use on either side of the repeat for one read.
-///
-/// Starts from the requested `flank` and widens it just far enough to take in whole indels
-/// of at least [`FLANK_MIN_INDEL`] bases lying within [`FLANK_SEARCH`] of the interval, so
-/// that a large indel the aligner placed a little off the annotated boundary still counts
-/// towards the allele.
-fn flanks_for_read(record: &bam::Record, repeat_lo: i64, repeat_hi: i64, flank: i64) -> (i64, i64) {
-    use rust_htslib::bam::record::Cigar;
-
-    let (mut flank_lo, mut flank_hi) = (flank, flank);
-    let search_lo = repeat_lo - FLANK_SEARCH;
-    let search_hi = repeat_hi + FLANK_SEARCH;
-    let mut ref_pos = record.reference_start();
-
-    for entry in record.cigar().iter() {
-        let (len, consumes_ref) = match entry {
-            Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) => (i64::from(*l), true),
-            Cigar::Del(l) | Cigar::RefSkip(l) => (i64::from(*l), true),
-            Cigar::Ins(l) => (i64::from(*l), false),
-            Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => (0, false),
-        };
-        let is_indel = matches!(entry, Cigar::Ins(_) | Cigar::Del(_));
-        if is_indel && len >= FLANK_MIN_INDEL {
-            // reference span of the event: insertions occupy no reference, deletions do
-            let (event_lo, event_hi) = if consumes_ref {
-                (ref_pos, ref_pos + len)
-            } else {
-                (ref_pos, ref_pos)
-            };
-            if event_lo >= search_lo && event_lo < repeat_lo {
-                flank_lo = flank_lo.max(repeat_lo - event_lo);
-            }
-            if event_hi > repeat_hi && event_hi <= search_hi {
-                flank_hi = flank_hi.max(event_hi - repeat_hi);
-            }
-        }
-        if consumes_ref {
-            ref_pos += len;
-            if ref_pos > search_hi {
-                break;
-            }
-        }
-    }
-    (flank_lo, flank_hi)
-}
+/// A read whose alignment terminates (soft- or hard-clips) within this many bases of the
+/// repeat cannot be trusted to have aligned through it: the clipped bases may be repeat
+/// sequence the aligner gave up on, which is exactly what a large expansion looks like.
+/// Such reads are dropped, which hands the locus to the alignment path once too few are
+/// left - over-rejecting only costs time, under-rejecting costs a false reference call.
+const CLIP_SEARCH: i64 = 100;
 
 /// Slice the repeat allele straight out of the existing alignment.
 ///
@@ -109,24 +71,21 @@ fn flanks_for_read(record: &bam::Record, repeat_lo: i64, repeat_hi: i64, flank: 
 /// deletions. This is the same quantity the alignment-based path recovers as an insertion
 /// against the repeat-compressed reference, but without re-aligning anything.
 ///
-/// `flank` bases of reference on either side are taken into the window and then trimmed
-/// back off again, so the allele grows or shrinks by exactly the indels the aligner placed
-/// just outside the annotated interval - repeat boundaries in a catalog rarely agree with
-/// where an aligner puts an indel. The trim removes `flank` *reference* bases, so a
-/// flanking insertion still lengthens the allele; the bases kept are then the ones nearest
-/// the repeat rather than the inserted ones themselves, but the allele length is exact
-/// either way. With `flank = 0` the slice is exactly the annotated interval.
+/// Aligners do not agree with each other, or between reads, about where a large insertion
+/// belongs: at one locus the same ~900 bp insertion is placed anywhere across a 30 bp
+/// stretch. Insertions of at least [`FLANK_MIN_INDEL`] bases lying within `flank` bases of
+/// the interval are therefore counted towards the allele as well. The allele grows by
+/// exactly their length; the bases kept are the ones nearest the repeat rather than the
+/// inserted ones themselves, which leaves the length exact and the sequence approximate in
+/// that (uncommon) case.
 ///
-/// Aligners do not agree with each other, or between reads, about where a large indel
-/// belongs: at one locus below the same ~900 bp insertion is placed anywhere across a 30 bp
-/// stretch. The flank is therefore widened per read, up to [`FLANK_SEARCH`], to take in
-/// whole indels of at least [`FLANK_MIN_INDEL`] bases that sit just outside the interval -
-/// the same tolerance the alignment path applies around its junction.
+/// Deletions need no such tolerance: a deletion has a reference span, so one that belongs
+/// to the repeat overlaps the interval and is already reflected in the slice. A deletion
+/// lying entirely outside is a neighbouring event and must not shorten the allele.
 ///
-/// Returns `None` when the read does not fully span the padded window (it starts or ends
-/// inside it, or is soft/hard-clipped into it): such a read cannot report an allele length.
-/// Also `None` when nothing is left after trimming, i.e. the read has deleted the whole
-/// repeat; the alignment-based path likewise reports no insertion for such a read.
+/// Returns `None` when the read does not fully span the padded window, when it clips within
+/// [`CLIP_SEARCH`] bases of the repeat, or when the repeat is deleted from the read
+/// entirely; the alignment path likewise reports no insertion for such a read.
 pub fn repeat_sequence_from_alignment(
     record: &bam::Record,
     start: u32,
@@ -140,10 +99,13 @@ pub fn repeat_sequence_from_alignment(
     // excises between its two flanks.
     let repeat_lo = i64::from(start) - 1;
     let repeat_hi = i64::from(end);
-    let (flank_lo, flank_hi) = flanks_for_read(record, repeat_lo, repeat_hi, i64::from(flank));
-    // query offsets wanted for the two ends of the padded window
-    let targets = [repeat_lo - flank_lo, repeat_hi + flank_hi];
-    let mut anchors = [None::<i64>; 2];
+    let flank = i64::from(flank);
+    // query offsets wanted for, in ascending order: the outer edge of the left flank, the
+    // repeat start, the repeat end, and the outer edge of the right flank
+    let targets = [repeat_lo - flank, repeat_lo, repeat_hi, repeat_hi + flank];
+    let mut anchors = [None::<i64>; 4];
+    // lengths of the qualifying insertions sitting in either flank
+    let (mut left_insertions, mut right_insertions) = (0i64, 0i64);
 
     let mut ref_pos = record.reference_start();
     if ref_pos > targets[0] {
@@ -155,60 +117,59 @@ pub fn repeat_sequence_from_alignment(
         match entry {
             Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) => {
                 let l = i64::from(*l);
-                // the lower anchor is placed as soon as the window is reached, so an
-                // insertion sitting on that boundary falls inside the slice; the upper
-                // anchor waits until the window is left behind, for the same reason
-                if anchors[0].is_none() && ref_pos + l >= targets[0] {
-                    anchors[0] = Some(q_pos + (targets[0] - ref_pos).max(0));
-                }
-                if anchors[1].is_none() && ref_pos + l > targets[1] {
-                    anchors[1] = Some(q_pos + (targets[1] - ref_pos).max(0));
-                }
+                set_anchors(&mut anchors, &targets, ref_pos, l, q_pos, true);
                 ref_pos += l;
                 q_pos += l;
             }
             Cigar::Ins(l) => {
-                q_pos += i64::from(*l);
+                let l = i64::from(*l);
+                // an insertion on either boundary of the repeat already falls inside the
+                // slice, so only the ones strictly out in a flank are counted here
+                if l >= FLANK_MIN_INDEL {
+                    if ref_pos >= targets[0] && ref_pos < targets[1] {
+                        left_insertions += l;
+                    } else if ref_pos > targets[2] && ref_pos <= targets[3] {
+                        right_insertions += l;
+                    }
+                }
+                q_pos += l;
             }
             Cigar::Del(l) | Cigar::RefSkip(l) => {
                 let l = i64::from(*l);
-                if anchors[0].is_none() && ref_pos + l >= targets[0] {
-                    anchors[0] = Some(q_pos);
-                }
-                if anchors[1].is_none() && ref_pos + l > targets[1] {
-                    anchors[1] = Some(q_pos);
-                }
+                set_anchors(&mut anchors, &targets, ref_pos, l, q_pos, false);
                 ref_pos += l;
             }
             Cigar::SoftClip(l) => {
-                // a clip reaching into the window means the read stops inside the locus
-                if ref_pos >= targets[0] && ref_pos <= targets[1] {
+                if i64::from(*l) >= CLIP_MIN_LEN && clips_into_locus(ref_pos, repeat_lo, repeat_hi)
+                {
                     return None;
                 }
                 q_pos += i64::from(*l);
             }
-            Cigar::HardClip(_) => {
-                if ref_pos >= targets[0] && ref_pos <= targets[1] {
+            Cigar::HardClip(l) => {
+                if i64::from(*l) >= CLIP_MIN_LEN && clips_into_locus(ref_pos, repeat_lo, repeat_hi)
+                {
                     return None;
                 }
             }
             Cigar::Pad(_) => (),
         }
-        if anchors[1].is_some() {
+        // stop once the window is behind us and no clip can still reach back to the locus
+        if anchors[3].is_some() && ref_pos > repeat_hi + CLIP_SEARCH {
             break;
         }
     }
-    // a read whose alignment ends exactly at the window edge still spans it
-    if anchors[1].is_none() && ref_pos >= targets[1] {
-        anchors[1] = Some(q_pos);
+    // a read whose alignment ends flush with the window edge still spans it
+    if anchors[3].is_none() && ref_pos >= targets[3] {
+        anchors[3] = Some(q_pos);
     }
 
-    let (win_lo, win_hi) = (anchors[0]?, anchors[1]?);
-    // trim as many query bases as the flank has reference bases: an insertion the aligner
-    // parked in a flank lengthens the allele, a deletion there shortens it, and a flank
-    // that matches the reference exactly leaves the annotated interval untouched
-    let lo = win_lo + flank_lo;
-    let hi = win_hi - flank_hi;
+    let (win_lo, rep_lo, rep_hi, win_hi) = (anchors[0]?, anchors[1]?, anchors[2]?, anchors[3]?);
+    // the allele is the repeat itself plus the insertions rescued from the flanks; take
+    // those extra bases from the query sequence adjoining the repeat, without ever
+    // reaching past the flank the aligner actually gave us
+    let lo = (rep_lo - left_insertions).max(win_lo);
+    let hi = (rep_hi + right_insertions).min(win_hi);
     if hi <= lo {
         return None;
     }
@@ -223,6 +184,43 @@ pub fn repeat_sequence_from_alignment(
             .map(|i| seq[i].to_ascii_uppercase())
             .collect(),
     )
+}
+
+/// Record the query offset of every window edge this CIGAR operation reaches.
+///
+/// `q_pos` is the operation's query offset; an operation that consumes only reference (a
+/// deletion) maps every reference position inside it to that same offset. The repeat start
+/// and the left window edge are claimed as soon as the operation reaches them, so that an
+/// insertion sitting on that boundary falls inside the slice; the repeat end and the right
+/// edge are claimed only once the operation moves past them, for the same reason.
+fn set_anchors(
+    anchors: &mut [Option<i64>; 4],
+    targets: &[i64; 4],
+    ref_pos: i64,
+    len: i64,
+    q_pos: i64,
+    consumes_query: bool,
+) {
+    for (i, (anchor, target)) in anchors.iter_mut().zip(targets.iter()).enumerate() {
+        let reached = if i < 2 {
+            ref_pos + len >= *target
+        } else {
+            ref_pos + len > *target
+        };
+        if anchor.is_none() && reached {
+            *anchor = Some(if consumes_query {
+                q_pos + (*target - ref_pos).max(0)
+            } else {
+                q_pos
+            });
+        }
+    }
+}
+
+/// Whether an alignment that terminates at `ref_pos` does so close enough to the repeat
+/// that its clipped bases might be repeat sequence.
+fn clips_into_locus(ref_pos: i64, repeat_lo: i64, repeat_hi: i64) -> bool {
+    ref_pos >= repeat_lo - CLIP_SEARCH && ref_pos <= repeat_hi + CLIP_SEARCH
 }
 
 pub struct Reads {
@@ -612,43 +610,74 @@ mod slice_tests {
     }
 
     #[test]
-    fn flank_captures_an_insertion_shifted_out_of_the_interval() {
-        // 5bp insertion at 0-based 996, four bases before the annotated repeat start
-        let mut seq = vec![b'A'; 105];
-        seq[46..51].copy_from_slice(b"TTTTT"); // the insertion
-        seq[55..65].copy_from_slice(b"CGCGCGCGCG"); // 0-based 1000..1010
-        let rec = record(950, vec![Cigar::Match(46), Cigar::Ins(5), Cigar::Match(54)], &seq);
-        // without flank the insertion is missed and only the annotated interval is taken
+    fn flank_captures_a_large_insertion_shifted_out_of_the_interval() {
+        // 12bp insertion at 0-based 996, four bases before the annotated repeat start
+        let mut seq = vec![b'A'; 112];
+        seq[46..58].copy_from_slice(b"TTTTTTTTTTTT"); // the insertion
+        seq[62..72].copy_from_slice(b"CGCGCGCGCG"); // 0-based 1000..1010
+        let rec = record(950, vec![Cigar::Match(46), Cigar::Ins(12), Cigar::Match(54)], &seq);
+        // without flank only the annotated interval is taken
         let tight = repeat_sequence_from_alignment(&rec, START, END, 0).unwrap();
         assert_eq!(tight, b"CGCGCGCGCG".to_vec());
-        // with flank the allele grows by exactly the 5 inserted bases
-        let padded = repeat_sequence_from_alignment(&rec, START, END, 10).unwrap();
-        assert_eq!(padded.len(), 15);
+        // with flank the allele grows by exactly the 12 inserted bases
+        let padded = repeat_sequence_from_alignment(&rec, START, END, 30).unwrap();
+        assert_eq!(padded.len(), 22);
         assert!(padded.ends_with(b"CGCGCGCGCG"));
     }
 
     #[test]
-    fn flank_captures_a_deletion_shifted_out_of_the_interval() {
-        // 4bp deletion at 0-based 996, just before the annotated repeat start
-        let mut seq = vec![b'A'; 96];
-        seq[46..56].copy_from_slice(b"CGCGCGCGCG"); // 0-based 1000..1010
-        let rec = record(950, vec![Cigar::Match(46), Cigar::Del(4), Cigar::Match(50)], &seq);
-        let tight = repeat_sequence_from_alignment(&rec, START, END, 0).unwrap();
-        assert_eq!(tight, b"CGCGCGCGCG".to_vec());
-        // with flank the allele shrinks by exactly the 4 deleted bases
-        let padded = repeat_sequence_from_alignment(&rec, START, END, 10).unwrap();
-        assert_eq!(padded.len(), 6);
-    }
-
-    #[test]
-    fn flank_leaves_a_clean_locus_untouched() {
-        let mut seq = vec![b'A'; 100];
+    fn small_flanking_insertion_is_noise_and_is_ignored() {
+        // 1bp insertion at 0-based 1015, five bases past the repeat: ordinary ONT error
+        let mut seq = vec![b'A'; 101];
         seq[50..60].copy_from_slice(b"CGCGCGCGCG");
-        let rec = record(950, vec![Cigar::Match(100)], &seq);
-        for flank in [0, 5, 10, 25] {
+        let rec = record(950, vec![Cigar::Match(65), Cigar::Ins(1), Cigar::Match(35)], &seq);
+        for flank in [0, 10, 30] {
             let out = repeat_sequence_from_alignment(&rec, START, END, flank).unwrap();
             assert_eq!(out, b"CGCGCGCGCG".to_vec(), "flank {flank}");
         }
+    }
+
+    #[test]
+    fn deletion_outside_the_interval_does_not_shorten_the_allele() {
+        // 5bp deletion at 0-based 1012..1017, entirely past the repeat. It belongs to the
+        // flank, not to the repeat, so the allele must stay at reference length.
+        let mut seq = vec![b'A'; 95];
+        seq[50..60].copy_from_slice(b"CGCGCGCGCG");
+        let rec = record(950, vec![Cigar::Match(62), Cigar::Del(5), Cigar::Match(33)], &seq);
+        for flank in [0, 10, 30] {
+            let out = repeat_sequence_from_alignment(&rec, START, END, flank).unwrap();
+            assert_eq!(out, b"CGCGCGCGCG".to_vec(), "flank {flank}");
+        }
+    }
+
+    #[test]
+    fn deletion_outside_the_interval_never_discards_the_read() {
+        // a flanking deletion longer than the repeat itself must not empty the slice
+        let mut seq = vec![b'A'; 88];
+        seq[50..60].copy_from_slice(b"CGCGCGCGCG");
+        let rec = record(950, vec![Cigar::Match(62), Cigar::Del(12), Cigar::Match(26)], &seq);
+        let out = repeat_sequence_from_alignment(&rec, START, END, 30);
+        assert_eq!(out, Some(b"CGCGCGCGCG".to_vec()));
+    }
+
+    #[test]
+    fn rejects_a_read_clipped_near_but_outside_the_window() {
+        // 900bp soft clip ending 11 bases before the repeat: the clipped bases may well be
+        // the expansion the aligner refused to align through, so the read is unusable
+        let seq = vec![b'A'; 1000];
+        let rec = record(989, vec![Cigar::SoftClip(900), Cigar::Match(100)], &seq);
+        assert!(repeat_sequence_from_alignment(&rec, START, END, 10).is_none());
+        // the same read hard-clipped, as a supplementary alignment would carry it
+        let rec = record(989, vec![Cigar::HardClip(900), Cigar::Match(100)], &seq[..100]);
+        assert!(repeat_sequence_from_alignment(&rec, START, END, 10).is_none());
+        // a short clip far from the locus is harmless
+        let mut seq = vec![b'A'; 1000];
+        seq[50..60].copy_from_slice(b"CGCGCGCGCG");
+        let rec = record(950, vec![Cigar::Match(500), Cigar::SoftClip(500)], &seq);
+        assert_eq!(
+            repeat_sequence_from_alignment(&rec, START, END, 10),
+            Some(b"CGCGCGCGCG".to_vec())
+        );
     }
 
     #[test]

@@ -140,9 +140,10 @@ pub struct Cli {
     #[arg(long, value_name = "MODE", value_enum, default_value_t = GenotypingMode::Sensitive)]
     mode: GenotypingMode,
 
-    /// Number of flanking bases taken on either side of the repeat with --mode fast, so
-    /// that indels the aligner placed just outside the annotated interval are still captured
-    #[arg(long, default_value_t = 10)]
+    /// How far outside the annotated interval an insertion may sit and still count towards
+    /// the allele with --mode fast. Aligners place a large insertion inconsistently, often
+    /// tens of bases off the repeat; the default mirrors the tolerance of the sensitive path
+    #[arg(long, default_value_t = 20)]
     fast_flank: u32,
 }
 
@@ -183,6 +184,13 @@ fn main() {
              previous diploid representation ('1/1', './.'). Per-allele FORMAT/INFO fields (RB, \
              FRB, MRL, SUP, SC, STDEV) likewise carry a single value at these loci. Downstream \
              tools that assumed diploid genotypes may need updating."
+        );
+    }
+    if args.is_fast_mode() && args.minlen != 1 {
+        warn!(
+            "--minlen has no effect with --mode fast: the allele is read off the alignment \
+             rather than collected from insertion operations, so there is no indel length to \
+             filter on."
         );
     }
     info!("Collected arguments: {args:?}");
