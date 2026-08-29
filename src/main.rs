@@ -74,6 +74,11 @@ pub struct Cli {
     #[arg(short, long, default_value_t = 3)]
     support: usize,
 
+    /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
+    /// ambiguously mapped reads, which matters in segmental duplications
+    #[arg(long, default_value_t = 10)]
+    mapq: u8,
+
     /// Number of parallel threads to use
     #[arg(short, long, default_value_t = 1)]
     threads: usize,

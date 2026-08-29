@@ -19,8 +19,13 @@ pub struct Allele {
 }
 
 impl Allele {
-    pub fn from_consensus(consensus: Consensus, start: u32, end: u32) -> Allele {
-        let ref_len = (end - start) as i32;
+    /// `ref_len` is the length of the REF sequence written to the record, i.e. of the
+    /// annotated repeat in the reference. Taking it from the sequence itself rather than
+    /// recomputing it from the coordinates keeps `RB` and `MRL` consistent with `FRB` and
+    /// `REF`: the interval is 1-based inclusive start to BED end, so it spans
+    /// `end - start + 1` bases, and deriving `end - start` made both fields one too high.
+    pub fn from_consensus(consensus: Consensus, ref_len: usize) -> Allele {
+        let ref_len = ref_len as i32;
         match consensus.seq {
             Some(seq) => Allele {
                 length: (seq.len() as i32 - ref_len).to_string(),
@@ -99,8 +104,7 @@ impl VCFRecord {
                 consenses
                     .pop()
                     .expect("Failed getting allele1 from consenses"),
-                repeat.start,
-                repeat.end,
+                repeat_ref_sequence.len(),
             );
             (allele1, None)
         } else {
@@ -108,15 +112,13 @@ impl VCFRecord {
                 consenses
                     .pop()
                     .expect("Failed getting allele2 from consenses"),
-                repeat.start,
-                repeat.end,
+                repeat_ref_sequence.len(),
             );
             let allele1 = Allele::from_consensus(
                 consenses
                     .pop()
                     .expect("Failed getting allele1 from consenses"),
-                repeat.start,
-                repeat.end,
+                repeat_ref_sequence.len(),
             );
             (allele1, Some(allele2))
         };
@@ -715,6 +717,7 @@ fn test_write_vcf_header_from_bam() {
         pathogenic: false,
         minlen: 5,
         support: 1,
+        mapq: 10,
         somatic: false,
         unphased: true,
         find_outliers: false,
@@ -745,6 +748,7 @@ fn test_write_vcf_header_from_name() {
         pathogenic: false,
         minlen: 5,
         support: 1,
+        mapq: 10,
         somatic: false,
         unphased: true,
         find_outliers: false,
@@ -763,6 +767,41 @@ fn test_write_vcf_header_from_name() {
         fast_flank: 10,
     };
     write_vcf_header(&args);
+}
+
+#[test]
+fn test_rb_is_full_length_minus_reference_length() {
+    // the annotated repeat spans end - start + 1 reference bases, which is the length of
+    // the REF sequence written to the record; RB and MRL are measured against that
+    let consensus = Consensus {
+        seq: Some("A".repeat(30)),
+        support: 10,
+        std_dev: 1,
+        score: 5,
+        median_length: 28,
+        imprecise: false,
+    };
+    let repeat_ref_sequence = "A".repeat(9); // chr1:1001-1009 in STRdust coordinates
+    let allele = Allele::from_consensus(consensus, repeat_ref_sequence.len());
+    assert_eq!(allele.full_length, "30");
+    assert_eq!(allele.length, "21", "RB must equal FRB - len(REF)");
+    assert_eq!(allele.median_length, "19", "MRL is measured against the same length");
+}
+
+#[test]
+fn test_rb_of_a_reference_length_allele_is_zero() {
+    let repeat_ref_sequence = "CAG".repeat(5); // 15 bases
+    let consensus = Consensus {
+        seq: Some(repeat_ref_sequence.clone()),
+        support: 8,
+        std_dev: 0,
+        score: 1,
+        median_length: repeat_ref_sequence.len(),
+        imprecise: false,
+    };
+    let allele = Allele::from_consensus(consensus, repeat_ref_sequence.len());
+    assert_eq!(allele.length, "0");
+    assert_eq!(allele.median_length, "0");
 }
 
 #[test]

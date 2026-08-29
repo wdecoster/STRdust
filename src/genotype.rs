@@ -102,7 +102,9 @@ fn dbscan_qc_comparison(
         }
     }
 
-    let ref_len = (repeat.end - repeat.start) as i32;
+    // the annotated repeat spans end - start + 1 reference bases (1-based inclusive start,
+    // BED end), the same length as the REF sequence in the record
+    let ref_len = (repeat.end - repeat.start + 1) as i32;
     let dbscan_rb = dbscan_consenses
         .iter()
         .map(|c| match &c.seq {
@@ -157,10 +159,17 @@ fn check_quick_reference_and_collect_reads(
     quick_ref_reads: usize,
     unphased: bool,
     max_number_reads: isize,
+    min_mapq: u8,
 ) -> ReadCheckResult {
     // If quick check disabled, fetch reads normally
     if quick_ref_reads == 0 {
-        return match parse_bam::get_overlapping_reads(bam, repeat, unphased, max_number_reads) {
+        return match parse_bam::get_overlapping_reads(
+            bam,
+            repeat,
+            unphased,
+            max_number_reads,
+            min_mapq,
+        ) {
             Some(reads) => ReadCheckResult::NeedsAlignment(reads),
             None => ReadCheckResult::NoCoverage,
         };
@@ -188,8 +197,8 @@ fn check_quick_reference_and_collect_reads(
             Err(_) => continue,
         };
 
-        // Skip low quality reads or reads that don't fully span
-        if r.mapq() == 0
+        // Skip poorly mapped reads or reads that don't fully span
+        if r.mapq() < min_mapq
             || r.reference_start() > repeat.start.into()
             || r.reference_end() < repeat.end.into()
         {
@@ -555,6 +564,7 @@ fn genotype_repeat(
         quick_ref_reads,
         unphased,
         args.max_number_reads,
+        args.mapq,
     );
 
     // Handle no coverage case early - skip all expensive operations
@@ -1014,7 +1024,7 @@ mod tests {
         let repeat_compressed_reference = repeat.make_repeat_compressed_sequence(&fasta, flanking);
         let mut bam = parse_bam::create_bam_reader(&bam, &fasta);
         let binding =
-            crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased, 60).unwrap();
+            crate::parse_bam::get_overlapping_reads(&mut bam, &repeat, unphased, 60, 10).unwrap();
         let read = binding.phase1.first().expect("No reads found");
         let aligner = minimap2::Aligner::builder()
             .map_ont()
@@ -1050,6 +1060,7 @@ mod tests {
             pathogenic: false,
             minlen: 1,
             support: 1,
+            mapq: 10,
             somatic: false,
             unphased: false,
             find_outliers: false,
@@ -1088,6 +1099,7 @@ mod tests {
             pathogenic: false,
             minlen: 1,
             support: 1,
+            mapq: 10,
             somatic: false,
             unphased: true,
             find_outliers: false,
@@ -1120,6 +1132,7 @@ mod tests {
             pathogenic: false,
             minlen: 1,
             support: 1,
+            mapq: 10,
             somatic: false,
             unphased: true,
             find_outliers: false,
@@ -1158,6 +1171,7 @@ mod tests {
             pathogenic: false,
             minlen: 1,
             support: 1,
+            mapq: 10,
             somatic: true,
             unphased: false,
             find_outliers: false,
@@ -1202,6 +1216,7 @@ mod tests {
             pathogenic: false,
             minlen: 1,
             support: 1,
+            mapq: 10,
             somatic: true,
             // this sample is aligned without HP tags, so only the unphased path returns reads
             unphased: true,

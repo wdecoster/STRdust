@@ -58,6 +58,12 @@ fn process_batch(
             )
         })?;
 
+        // a poorly mapped read is dropped here rather than at genotyping time, so it does
+        // not count towards a target's QUICKREF verdict either
+        if record_rc.mapq() < args.mapq {
+            continue;
+        }
+
         let read_start = record_rc.reference_start() as u32;
         let read_end = record_rc.reference_end() as u32;
 

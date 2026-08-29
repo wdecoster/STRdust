@@ -49,6 +49,7 @@ SPECIFY ONE OF:
 OPTIONS:
     -m, --minlen <MINLEN>              minimal length of insertion/deletion operation [default: 1]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
+        --mapq <MAPQ>                  minimum mapping quality of a read to be used [default: 10]
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
         --sample <SAMPLE>              Sample name to use in VCF header, if not provided, the bam file name is used
         --somatic                      Print information on somatic variability
