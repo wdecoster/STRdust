@@ -251,7 +251,9 @@ fn collect_reads(
             record.seq().as_bytes()
         };
 
-        if args.unphased {
+        // a --haploid chromosome has a single haplotype, so its reads are pooled in phase 0
+        // regardless of any HP tags they carry - that is where the genotyper looks for them
+        if args.unphased || crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
             reads.phase0.push(seq);
         } else {
             match parse_bam::get_phase(record) {

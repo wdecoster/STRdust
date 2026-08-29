@@ -337,19 +337,9 @@ pub fn genotype_with_extracted_reads(
     let mut dbscan_rb: Option<String> = None;
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
-    let unphased = (args.haploid.is_some()
-        && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
-        || args.unphased;
+    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.unphased;
 
-    if args.haploid.is_some()
-        && args
-            .haploid
-            .as_ref()
-            .unwrap()
-            .split(',')
-            .collect::<Vec<&str>>()
-            .contains(&repeat.chrom.as_str())
-    {
+    if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         // Haploid chromosome
         let seq = &reads.phase0;
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
@@ -551,9 +541,7 @@ fn genotype_repeat(
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
-    let unphased = (args.haploid.is_some()
-        && args.haploid.as_ref().unwrap().contains(&repeat.chrom))
-        || args.unphased;
+    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.unphased;
 
     // Check for quick reference (0|0), no coverage (.|.), or needs alignment
     // If alignment_all is set, disable quick reference check (set to 0)
@@ -651,15 +639,7 @@ fn genotype_repeat(
     // Either the reads are from a haploid chromosome, unphased or phased by a tool like WhatsHap/hiphase/...
     // A chromosome being haploid overrides the other options, including if the alignments were phased by a tool
 
-    if args.haploid.is_some()
-        && args
-            .haploid
-            .as_ref()
-            .unwrap()
-            .split(',')
-            .collect::<Vec<&str>>()
-            .contains(&repeat.chrom.as_str())
-    {
+    if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         // if the chromosome is haploid, all reads were put in phase 0
         let seq = &reads.phase0;
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
@@ -878,7 +858,15 @@ fn find_insertions(
             continue;
         }
         let mapping = aligner.map(s.as_slice(), true, false, None, None, None).unwrap_or_else(|err| panic!("Unable to align read with seq {s:?} to repeat-compressed reference for {repeat}\n{err}", s=s.to_ascii_uppercase()));
+        // A read can align to the artificial reference more than once, which happens a lot
+        // in segmental duplications. Only the primary alignment is this read's observation
+        // of the allele: taking the others too would count one read several times towards
+        // read support and the minimum support threshold, and feed near-duplicate sequences
+        // to the clustering and the consensus.
         for read in mapping {
+            if !read.is_primary {
+                continue;
+            }
             if let Some(s) = parse_cs(read, minlen, flanking, repeat) {
                 // slice out inserted sequences from the CS tag
                 insertions.push(s.to_uppercase())
