@@ -88,6 +88,7 @@ def load(prefix, shift, auto_shift):
                 "called_gt": row["called_gt"],
                 "status": row["status"],
                 "ref_len": int(row["ref_len"]),
+                "stratum": row["stratum"],
             }
     return out, shifts
 
@@ -151,6 +152,44 @@ def consensus_bias(runs, shared):
             f"{name:>22} {n:>8} {100 * exact / n:>6.1f}% {100 * long_ / n:>8.1f}% "
             f"{100 * short / n:>9.1f}% {statistics.median(abs(d) for d in deltas):>13}"
         )
+
+
+STRATUM_ORDER = ["reference", "1-10bp", "11-50bp", "51-200bp", ">200bp"]
+
+
+def by_truth_size(runs, shared):
+    """Concordance split by how far the truth allele departs from the reference.
+
+    The stratum comes from the *truth*, so it is the same set of loci for every run and the
+    columns are directly comparable. This is the table that says whether a change bought
+    accuracy at small allele differences by giving up long expansions -- which is what
+    STRdust is for, and the thing the published benchmark found it best at. A knob that
+    improves the aggregate while the >200bp column falls is not an improvement.
+    """
+    print("\nconcordance by truth allele size (exact / <=5bp / no-call, per stratum)")
+    strata = [s for s in STRATUM_ORDER
+              if any(rows[k]["stratum"] == s for rows in runs.values() for k in shared)]
+    if not strata:
+        return
+    header = "".join(f"{s:>22}" for s in strata)
+    print(f"{'run':>22}{header}")
+    for name, rows in runs.items():
+        cells = ""
+        for stratum in strata:
+            here = [rows[k] for k in shared if rows[k]["stratum"] == stratum]
+            scored = [r for r in here if r["error"] is not None]
+            if not here:
+                cells += f"{'-':>22}"
+                continue
+            if not scored:
+                cells += f"{'0 scored':>22}"
+                continue
+            exact = 100 * sum(1 for r in scored if r["error"] == 0) / len(scored)
+            near = 100 * sum(1 for r in scored if r["error"] <= 5) / len(scored)
+            cells += f"{exact:>7.1f}%{near:>7.1f}%{len(here) - len(scored):>7}"
+        print(f"{name:>22}{cells}")
+    print(f"{'':>22}" + "".join(f"{'n=' + str(sum(1 for k in shared if next(iter(runs.values()))[k]['stratum'] == s)):>22}"
+                                for s in strata))
 
 
 def error_spectrum(runs, shared, span=5):
@@ -293,6 +332,7 @@ def main():
 
     concordance(runs, shared)
     quickref(runs, shared)
+    by_truth_size(runs, shared)
     consensus_bias(runs, shared)
     error_spectrum(runs, shared)
     by_length(runs, shared)
