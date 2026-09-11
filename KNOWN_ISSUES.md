@@ -1889,6 +1889,7 @@ The exit plan, once the measurements settle:
 | `--quickref-padding` | fold into the tolerance decision, then remove |
 | `--quickref-min-reads` | fold in, then remove |
 | `--poa-gap-open` / `--poa-match` / `--poa-mismatch` | bake the winning values in and remove |
+| `--junction-window` | bake in and remove, unless it turns out to be locus-dependent |
 
 A flag that survives should do so because someone would reasonably set it, not because it
 was convenient during tuning. Anything still hidden when this work closes should be deleted,
@@ -1904,6 +1905,12 @@ Cheap: no rebuild, and they only touch the sensitive path.
 | P2 | `--poa-gap-open 30` | as above, further; watch for real alleles being collapsed too |
 | P3 | `--poa-gap-open 8` | the opposite direction, to confirm the mechanism is the gap at all |
 | P4 | `--poa-match 5` | changes the match/gap ratio without touching the gap |
+| J1 | `--junction-window 10` | folds in less stray flank sequence (§20, #24) |
+| J2 | `--junction-window 0` | folds in none at all |
+
+`--junction-window` replaces the "edit `genotype.rs:947`, rebuild, re-run" recipe §20 called
+for, so the whole consensus matrix now runs from a single binary. Default 30, hidden, same
+exit plan as the rest.
 
 Read the error spectrum (§20.2) first: if the +1/+2 mass moves with the gap penalty, the
 consensus over-call is a scoring artefact and the fix is a better default. If it does not

@@ -98,6 +98,12 @@ pub struct Cli {
     #[arg(long, default_value_t = 0, hide = true)]
     quickref_min_reads: usize,
 
+    /// How far from the repeat/flank junction an insertion may sit and still be folded
+    /// into the allele, in the sensitive path. Wider tolerates an aligner that places the
+    /// insertion off the annotated boundary; narrower folds in less stray flank sequence
+    #[arg(long, default_value_t = 30, hide = true)]
+    junction_window: i32,
+
     /// POA gap penalty per gap base, as a positive number. Higher makes the consensus
     /// reluctant to open a gap, so a single read's insertion is less likely to be carried
     /// into it. rust-bio's POA has no affine gaps, so this is charged per base

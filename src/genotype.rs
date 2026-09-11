@@ -679,7 +679,8 @@ fn genotype_repeat(
         // if the chromosome is haploid, all reads were put in phase 0
         let seq = &reads.phase0;
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        let insertions =
+            find_insertions(seq, &aligner, args.minlen, flanking, args.junction_window, repeat);
         debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len(),);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
@@ -709,7 +710,8 @@ fn genotype_repeat(
         let seq = &reads.phase0;
         debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        let insertions =
+            find_insertions(seq, &aligner, args.minlen, flanking, args.junction_window, repeat);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
@@ -829,7 +831,8 @@ fn genotype_repeat(
         for (phase, seq) in [(1, &reads.phase1), (2, &reads.phase2)] {
             // get the sequences of this phase
             debug!("{repeat}: Phase {}: Aligning {} reads", phase, seq.len());
-            let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+            let insertions =
+                find_insertions(seq, &aligner, args.minlen, flanking, args.junction_window, repeat);
 
             debug!(
                 "{repeat}: Phase {}: Creating consensus from {} insertions",
@@ -877,7 +880,9 @@ fn get_insertions(
     repeat: &crate::repeats::RepeatInterval,
 ) -> Vec<String> {
     match aligner {
-        Some(aligner) => find_insertions(seq, aligner, args.minlen, flanking, repeat),
+        Some(aligner) => {
+            find_insertions(seq, aligner, args.minlen, flanking, args.junction_window, repeat)
+        }
         None => seq
             .iter()
             .filter(|s| !s.is_empty())
@@ -892,6 +897,7 @@ fn find_insertions(
     aligner: &Aligner<Built>,
     minlen: usize,
     flanking: u32,
+    junction_window: i32,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Vec<String> {
     let mut insertions = vec![];
@@ -912,7 +918,7 @@ fn find_insertions(
             if !read.is_primary {
                 continue;
             }
-            if let Some(s) = parse_cs(read, minlen, flanking, repeat) {
+            if let Some(s) = parse_cs(read, minlen, flanking, junction_window, repeat) {
                 // slice out inserted sequences from the CS tag
                 insertions.push(s.to_uppercase())
             }
@@ -925,6 +931,7 @@ fn parse_cs(
     read: Mapping,
     minlen: usize,
     flanking: u32,
+    junction_window: i32,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Option<String> {
     // parses the CS tag of a <read> and returns the inserted sequence if it is longer than <minlen>
@@ -944,7 +951,8 @@ fn parse_cs(
         ref_pos = ref_pos,
         cs = cs
     );
-    let interval_around_junction = flanking as i32 - 30..=flanking as i32 + 30;
+    let interval_around_junction =
+        flanking as i32 - junction_window..=flanking as i32 + junction_window;
     for cap in re.captures_iter(&cs) {
         let op = &cap[0].chars().next().unwrap();
         match op {
@@ -1075,6 +1083,7 @@ mod tests {
                 .clone(),
             minlen,
             flanking,
+            30,
             &repeat,
         );
     }
@@ -1113,6 +1122,7 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            junction_window: 30,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1158,6 +1168,7 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            junction_window: 30,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1197,6 +1208,7 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            junction_window: 30,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1242,6 +1254,7 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            junction_window: 30,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1294,6 +1307,7 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            junction_window: 30,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
