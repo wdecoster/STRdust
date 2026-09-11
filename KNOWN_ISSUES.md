@@ -1849,3 +1849,68 @@ are then re-run.
 A truth set built from a general call set will always carry some artefacts of this kind;
 the aim is not perfection but that a large variant overlapping a repeat should not be
 reported as that repeat's genotype.
+
+---
+
+## 26. POA scoring, and the tuning flags' exit plan
+
+### 26.1 The consensus scoring was never measured
+
+`src/consensus.rs` built every consensus with `Scoring::new(-12, -6, match 3 / mismatch -4)`
+under a comment saying the values were "empirically determined ... further testing on other
+repeats would be good", and — pointedly — that the goal was to "make sure the consensus does
+not get longer than the individual insertions".
+
+It does get longer, on a quarter of homozygous-reference alleles, concentrated at +1 and +2
+(§16.3, §20.2). The gap penalty is the obvious suspect: at -12 per gap base against +3 per
+match, a single read's insertion can open a node of its own and be carried into the
+consensus path. rust-bio's POA has no affine gaps and ignores `gap_extend` entirely
+(rust-bio#677), so the model is linear and three numbers are the whole of it.
+
+`--poa-gap-open`, `--poa-match` and `--poa-mismatch` now expose them, defaulting to the
+current values so nothing changes by default. Penalties are given as positive numbers on the
+command line and negated internally.
+
+This is the knob that acts directly on the dominant error, unlike the QUICKREF knobs, which
+move coverage and speed but not consensus accuracy.
+
+### 26.2 These flags are temporary, and are hidden
+
+All six tuning flags — three QUICKREF, three POA — are `hide = true`: absent from `--help`,
+absent from the README, fully functional. They exist so a sweep needs no rebuild, which is
+what lets runs be compared by binary content rather than by which branch someone had checked
+out (§23). They are **not a stable interface.**
+
+The exit plan, once the measurements settle:
+
+| flag | likely disposition |
+|---|---|
+| `--quickref-tolerance` | promote: a genuine accuracy/resolution trade a user might want |
+| `--quickref-padding` | fold into the tolerance decision, then remove |
+| `--quickref-min-reads` | fold in, then remove |
+| `--poa-gap-open` / `--poa-match` / `--poa-mismatch` | bake the winning values in and remove |
+
+A flag that survives should do so because someone would reasonably set it, not because it
+was convenient during tuning. Anything still hidden when this work closes should be deleted,
+and the comment block above the group in `src/main.rs` says so at the definition site.
+
+### 26.3 The POA arms to run
+
+Cheap: no rebuild, and they only touch the sensitive path.
+
+| arm | flags | hypothesis |
+|---|---|---|
+| P1 | `--poa-gap-open 20` | a dearer gap collapses stray insertions; +1/+2 mass should fall |
+| P2 | `--poa-gap-open 30` | as above, further; watch for real alleles being collapsed too |
+| P3 | `--poa-gap-open 8` | the opposite direction, to confirm the mechanism is the gap at all |
+| P4 | `--poa-match 5` | changes the match/gap ratio without touching the gap |
+
+Read the error spectrum (§20.2) first: if the +1/+2 mass moves with the gap penalty, the
+consensus over-call is a scoring artefact and the fix is a better default. If it does not
+move, POA scoring is exonerated and the remaining suspects are the junction fold window
+(§20) and the consensus construction itself, which `--mode fast` sidesteps entirely by
+reading length off the alignment (86.5% vs 71.9%, §14.1).
+
+**Detection is not at risk in any POA arm** — POA runs only after a locus has been routed to
+full genotyping, so it changes reported lengths, never whether an expansion is found (§25's
+detection table is invariant across every arm run so far).

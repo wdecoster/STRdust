@@ -747,6 +747,9 @@ fn test_write_vcf_header_from_bam() {
         quickref_padding: 0,
         quickref_tolerance: 0,
         quickref_min_reads: 0,
+        poa_gap_open: 12,
+        poa_match: 3,
+        poa_mismatch: 4,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
@@ -781,6 +784,9 @@ fn test_write_vcf_header_from_name() {
         quickref_padding: 0,
         quickref_tolerance: 0,
         quickref_min_reads: 0,
+        poa_gap_open: 12,
+        poa_match: 3,
+        poa_mismatch: 4,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };

@@ -82,12 +82,14 @@ fn dbscan_qc_comparison(
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             ));
             dbscan_consenses.push(crate::consensus::consensus(
                 &hap2,
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             ));
         }
         None => {
@@ -96,6 +98,7 @@ fn dbscan_qc_comparison(
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             );
             dbscan_consenses.push(c.clone());
             dbscan_consenses.push(c);
@@ -263,6 +266,19 @@ fn check_quick_reference_and_collect_reads(
 
 // when running multithreaded, the indexedreader has to be created every time again
 // this is probably expensive
+
+/// POA scoring as configured on the command line.
+///
+/// The CLI takes penalties as positive numbers because that is how aligners are usually
+/// discussed; the aligner wants them negative.
+fn poa_scoring(args: &Cli) -> crate::consensus::PoaScoring {
+    crate::consensus::PoaScoring {
+        gap_open: -args.poa_gap_open,
+        match_score: args.poa_match,
+        mismatch: -args.poa_mismatch,
+    }
+}
+
 pub fn genotype_repeat_multithreaded(
     repeat: &mut crate::repeats::RepeatInterval,
     args: &Cli,
@@ -364,8 +380,13 @@ pub fn genotype_with_extracted_reads(
         }
         // A haploid chromosome yields a single consensus / haplotype, pushed once;
         // vcf.rs reports it as a single allele value per the VCF specification.
-        let consensus =
-            crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
+        let consensus = crate::consensus::consensus(
+            &insertions,
+            args.support,
+            args.consensus_reads,
+            repeat,
+            poa_scoring(args),
+        );
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
             all_ins.push(insertions.join(":"));
@@ -429,12 +450,14 @@ pub fn genotype_with_extracted_reads(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 consenses.push(crate::consensus::consensus(
                     &phase2,
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.push(phased.hap1.join(":"));
@@ -455,6 +478,7 @@ pub fn genotype_with_extracted_reads(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 );
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
@@ -506,12 +530,14 @@ pub fn genotype_with_extracted_reads(
             args.support,
             args.consensus_reads,
             repeat,
+            poa_scoring(args),
         ));
         consenses.push(crate::consensus::consensus(
             &insertions2,
             args.support,
             args.consensus_reads,
             repeat,
+            poa_scoring(args),
         ));
         if let Some(ref mut all_ins) = all_insertions {
             all_ins.push(insertions1.join(":"));
@@ -666,8 +692,13 @@ fn genotype_repeat(
         }
         // There is only one haplotype on a haploid chromosome: a single consensus is pushed and
         // vcf.rs reports it as a single allele value (e.g. "1") per the VCF specification.
-        let consensus =
-            crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
+        let consensus = crate::consensus::consensus(
+            &insertions,
+            args.support,
+            args.consensus_reads,
+            repeat,
+            poa_scoring(args),
+        );
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
             // store all inserted sequences for identifying somatic variation
@@ -737,12 +768,14 @@ fn genotype_repeat(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 consenses.push(crate::consensus::consensus(
                     &phase2,
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 // store all inserted sequences for identifying somatic variation
                 if let Some(ref mut all_ins) = all_insertions {
@@ -758,6 +791,7 @@ fn genotype_repeat(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 );
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
@@ -807,6 +841,7 @@ fn genotype_repeat(
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             ));
 
             if let Some(ref mut all_ins) = all_insertions {
@@ -1078,6 +1113,9 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            poa_gap_open: 12,
+            poa_match: 3,
+            poa_mismatch: 4,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1120,6 +1158,9 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            poa_gap_open: 12,
+            poa_match: 3,
+            poa_mismatch: 4,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1156,6 +1197,9 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            poa_gap_open: 12,
+            poa_match: 3,
+            poa_mismatch: 4,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1198,6 +1242,9 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            poa_gap_open: 12,
+            poa_match: 3,
+            poa_mismatch: 4,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1247,6 +1294,9 @@ mod tests {
             quickref_padding: 0,
             quickref_tolerance: 0,
             quickref_min_reads: 0,
+            poa_gap_open: 12,
+            poa_match: 3,
+            poa_mismatch: 4,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };

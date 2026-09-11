@@ -20,6 +20,30 @@ const DOWNSAMPLE_SEED: u64 = 42;
 /// can be promoted to a CLI argument later if cohort experience warrants it.
 const IMPRECISE_LENGTH_CV: f64 = 0.2;
 
+/// Scoring for the POA that builds an allele consensus.
+///
+/// rust-bio's POA never reads `Scoring::gap_extend` and charges `gap_open` for every gap
+/// base, so the gap model is linear and these three numbers are the whole of it
+/// (<https://github.com/rust-bio/rust-bio/issues/677>).
+///
+/// The defaults are the values this was written with. They are implicated in the consensus
+/// running long: a gap penalty that is cheap relative to a match lets a single read's
+/// insertion open a node of its own and be carried into the consensus path, which is the
+/// +1/+2 length excess seen at homozygous-reference loci. Exposed so that can be measured
+/// rather than argued about.
+#[derive(Clone, Copy, Debug)]
+pub struct PoaScoring {
+    pub gap_open: i32,
+    pub match_score: i32,
+    pub mismatch: i32,
+}
+
+impl Default for PoaScoring {
+    fn default() -> Self {
+        Self { gap_open: -12, match_score: 3, mismatch: -4 }
+    }
+}
+
 #[derive(Clone)]
 pub struct Consensus {
     pub seq: Option<String>,
@@ -65,6 +89,7 @@ pub fn consensus(
     support: usize,
     consensus_reads: usize,
     repeat: &crate::repeats::RepeatInterval,
+    poa: PoaScoring,
 ) -> Consensus {
     if seqs.is_empty() {
         return Consensus::default();
@@ -118,7 +143,14 @@ pub fn consensus(
         // bother tuning the second argument until/unless upstream POA gains affine gaps.
         // (reported upstream: https://github.com/rust-bio/rust-bio/issues/677)
         log::info!("Creating consensus for {repeat}");
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
+        let (match_score, mismatch) = (poa.match_score, poa.mismatch);
+        let scoring = Scoring::new(
+            poa.gap_open,
+            -6,
+            move |a: u8, b: u8| {
+                if a == b { match_score } else { mismatch }
+            },
+        );
         let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
         for seq in seqs_bytes.iter().skip(1) {
             aligner.global(seq).add_to_graph();
@@ -202,7 +234,7 @@ mod tests {
     fn test_consensus_reports_median_and_not_imprecise_when_tight() {
         // near-uniform lengths (~30 bp): low CV -> not imprecise, median ~30
         let seqs: Vec<String> = (0..10).map(|i| "A".repeat(30 + i % 2)).collect();
-        let cons = consensus(&seqs, 2, 1, &dummy_repeat());
+        let cons = consensus(&seqs, 2, 1, &dummy_repeat(), PoaScoring::default());
         assert!(!cons.imprecise, "tight length distribution should not be imprecise");
         assert!((29..=31).contains(&cons.median_length), "median {}", cons.median_length);
     }
@@ -214,7 +246,7 @@ mod tests {
             .into_iter()
             .map(|l| "A".repeat(l))
             .collect();
-        let cons = consensus(&seqs, 2, 1, &dummy_repeat());
+        let cons = consensus(&seqs, 2, 1, &dummy_repeat(), PoaScoring::default());
         assert!(cons.imprecise, "wide length distribution should be flagged imprecise");
     }
 
@@ -253,6 +285,7 @@ mod tests {
                 end: 100,
                 created: None,
             },
+            PoaScoring::default(),
         );
         println!("Consensus: {}", cons.seq.unwrap());
         println!("Num reads: {}", cons.support);

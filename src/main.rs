@@ -74,22 +74,43 @@ pub struct Cli {
     #[arg(short, long, default_value_t = 3)]
     support: usize,
 
+    // ---------------------------------------------------------------------------------
+    // Tuning knobs, hidden from --help on purpose. They exist so the benchmark can sweep a
+    // parameter without a rebuild, which is what makes runs comparable by content rather
+    // than by which branch someone had checked out. They are NOT a stable interface: once
+    // the measurements settle, the winning value becomes the default and the flag goes.
+    // Do not document these in the README and do not rely on them in scripts.
+    // ---------------------------------------------------------------------------------
     /// How far outside the repeat interval a read's indels still count when deciding
     /// whether a locus can be called homozygous reference without aligning. 0 keeps the
     /// check inside the interval
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, hide = true)]
     quickref_padding: u32,
 
     /// How much net length difference a read may show and still count as reference-like in
     /// that check. 0 requires an exact match, which at a tandem repeat rejects almost every
     /// read once any padding is used
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, hide = true)]
     quickref_tolerance: i64,
 
     /// Minimum number of reads that must have been inspected before a locus may be called
     /// homozygous reference without aligning. 0 accepts a single read
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, hide = true)]
     quickref_min_reads: usize,
+
+    /// POA gap penalty per gap base, as a positive number. Higher makes the consensus
+    /// reluctant to open a gap, so a single read's insertion is less likely to be carried
+    /// into it. rust-bio's POA has no affine gaps, so this is charged per base
+    #[arg(long, default_value_t = 12, hide = true)]
+    poa_gap_open: i32,
+
+    /// POA score for a matching base, as a positive number
+    #[arg(long, default_value_t = 3, hide = true)]
+    poa_match: i32,
+
+    /// POA penalty for a mismatching base, as a positive number
+    #[arg(long, default_value_t = 4, hide = true)]
+    poa_mismatch: i32,
 
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications
