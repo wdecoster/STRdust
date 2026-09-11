@@ -2015,3 +2015,93 @@ can — *at what size does sizing break, and does it fail loudly (no-call) or qu
 (undersized)?* Undersizing is the dangerous answer and is what item 4 predicts. Everything
 else in this document moves averages; this one decides whether a pathogenic expansion is
 reported at all.
+
+---
+
+## 28. The consensus sweep: the over-call is stray junction insertions
+
+Run 2026-09-11/12, 10,000 loci, seed 1, corrected truth, one md5-gated binary
+(`9015030012cd0b1aedd3608ae4331b67` from `ba05a42`), nine arms, no rebuilds.
+
+### 28.1 Results
+
+All arms below have **identical no-call counts (574)** unless stated, so these are not bought
+by declining to answer.
+
+| arm | exact | vs base | reference | 1-10bp | 11-50bp | verdict |
+|---|---|---|---|---|---|---|
+| `--minlen 0` | 34.2% | **-18.8** | 36.6% | 21.5% | 29.6% | rejected |
+| `--poa-gap-open 8` | 51.5% | -1.5 | 54.8% | 34.4% | 45.7% | control, worse as predicted |
+| `--poa-match 5` | 52.5% | -0.5 | 55.8% | 35.3% | 46.9% | control, worse as predicted |
+| **base** (defaults) | 53.0% | — | 56.4% | 35.4% | 46.1% | current |
+| `--poa-gap-open 20` | 56.0% | +3.0 | 59.6% | 37.7% | 47.3% | good |
+| `--poa-gap-open 30` | 58.3% | +5.3 | 62.2% | 38.8% | 48.4% | good |
+| `--junction-window 10` | 62.1% | **+9.1** | 66.1% | 41.3% | 53.9% | good |
+| **`--minlen 5`** | **64.5%** | **+11.5** | 68.7% | 42.9% | 56.9% | **best** |
+| `--junction-window 0` | *82.5%* | — | *87.1%* | *52.2%* | *65.2%* | **artefact, see 28.3** |
+
+Every improving arm improves **every** stratum, including `1-10bp` — the small-allele
+resolution axis. This is the opposite of the QUICKREF tolerance knob (§24), which bought the
+aggregate by giving that axis away.
+
+### 28.2 The mechanism, and that the knobs are not interchangeable
+
+Three knobs improve, by two different routes, visible in the error spectrum at truth
+homozygous-reference loci:
+
+| arm | +1 bin | +2 and beyond | how |
+|---|---|---|---|
+| base | 8.0% | 8.4% / 3.7% / 2.5% | — |
+| `--poa-gap-open 30` | **7.7%** | 7.3% / 3.1% / 1.9% | the consensus refuses to absorb insertions |
+| `--minlen 5` | 8.3% | **4.2%** / 1.8% / 1.3% | stray insertions never reach it, filtered by size |
+| `--junction-window 10` | 8.1% | **5.4%** / 2.2% / 1.6% | same, filtered by distance from the junction |
+
+So the dominant error is **small stray insertions near the junction being folded into the
+allele** — `parse_cs` concatenates every one inside the window (§27.3) — and it can be
+attacked either by keeping them out or by making the POA reluctant to take them.
+
+`minlen` and `junction-window` have near-identical spectra, so they are probably filtering
+much the same insertions and may not compound with each other. The gap penalty works
+differently and is the only knob that touches the **+1 bin at all** — which remains 30% of
+all over-calls and is, after this sweep, the largest unexplained piece.
+
+`--poa-match 5` is a weaker version of lowering the gap penalty (it makes a gap relatively
+cheaper), confirming the effect is the gap-to-match **ratio**. It earns no place as a
+separate flag.
+
+### 28.3 `--junction-window 0` is survivorship, not a result
+
+It scores 82.5% exact on **2,138 of 10,000 loci**, having no-called 7,862 including 6,391
+reference loci. With a zero-width window only an insertion landing exactly on the junction
+counts, so almost everything is rejected and the survivors are the easy cases.
+
+This is the turnover predicted for the window: aligners genuinely misplace a repeat's
+insertion by a few bases, so zero tolerance discards real signal. **It is also the clearest
+argument for keeping no-call counts beside every concordance number** — the headline alone
+reads as the best arm in the sweep by 18 points.
+
+### 28.4 `--minlen` 5 -> 1 was a regression, now measured
+
+The dose-response is clean and monotonic: `--minlen` 0 / 1 / 5 gives 34.2% / 53.0% / 64.5%
+exact, improving every stratum. §19.2 found the default was changed from 5 to 1 in `02d9540`
+(2025-11-14), a one-line change inside a commit titled "add min_haplotype_fraction parameter
+to CLI and related functions", with no test and no mention in the message. **That change cost
+about 11 points of exact concordance.**
+
+It also settles §19's semantic question in the direction §19.4 guessed but could not show:
+the strict `>` is load-bearing. Making `--minlen 1` mean "1 and longer" would land on the
+`--minlen 0` column, i.e. -18.8 points. The fix is `>=` **with the default set to 2 or
+higher**, never `>=` at the current default.
+
+### 28.5 Not yet known
+
+- **Where the optima are.** Every improving knob was still improving at the edge of its
+  tested range. `--poa-gap-open` 45 and 70 are running; `--minlen` 3 and 10 are not yet run.
+  A knob that only ever improves across its tested range is a knob whose range is too small.
+- **Whether they compound.** `--minlen 5` + `--poa-gap-open 30` act on different parts of the
+  spectrum and should add; `--minlen` + `--junction-window` probably overlap. Untested.
+- **Seed 2.** Nothing here is replicated. The effects are 3-11 points against seed-to-seed
+  noise of 0.3-1.1 (§24.6), so they should survive, but no default moves until they do.
+- **Recall falls as precision rises** across every improving arm (65.1% -> 62.0% for
+  `--minlen 5`). Worth understanding before choosing a value, not just tallying exact matches.
+- **The +1 bin.** Untouched by everything except the gap penalty, and then barely.
