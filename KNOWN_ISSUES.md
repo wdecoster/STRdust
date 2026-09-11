@@ -1716,8 +1716,13 @@ The arms, all on the same 50,000 loci and `--seed 1`, all gated on the binary md
 
 ### 24.5 What to read, and the decision rules
 
-1. **D2 must reproduce run C: 1,042 fires.** If it does not, the knobs are not faithful and
-   nothing else in D is interpretable. This is the first number to check.
+1. **D2 must reproduce #30.** On the 50k sample that is literal: 1,042 fires. On the local
+   10,000-locus sample (§24.7) it cannot be, because the loci differ — there the check is
+   that **D2 against the local `main` arm reproduces C against C2 in direction and rough
+   magnitude**: firing roughly halving, exact concordance down about a point. The knobs
+   already reproduce #30 exactly on the chr7 test data (§24.2, 140 both ways), so a local
+   mismatch would point at the sample, not the code. Either way this is the first number to
+   check: if D2 does not behave like #30, nothing else in D is interpretable.
 2. **D1 against C2** prices the coordinate fix on its own. Expect a small loss (it removed
    16 of 253 locally); if it costs materially more than that, the boundary fix is not as
    free as §23.3 assumed and should be reconsidered rather than merged by default.
