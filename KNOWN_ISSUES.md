@@ -1921,3 +1921,97 @@ reading length off the alignment (86.5% vs 71.9%, §14.1).
 **Detection is not at risk in any POA arm** — POA runs only after a locus has been routed to
 full genotyping, so it changes reported lengths, never whether an expansion is found (§25's
 detection table is invariant across every arm run so far).
+
+---
+
+## 27. Independent parameter audit, 2026-09-11
+
+An independent read-only pass over the codebase looking for anything tunable that could move
+a called allele, deliberately not steered toward the knobs already exposed. It found more
+than expected, including one confirmed source of non-reproducibility. Fixes in `cd5d7c9`.
+
+### 27.1 Read downsampling was unseeded — confirmed, and quantified
+
+`downsample_reads_inplace` (`src/parse_bam.rs`) used `rand::rng()`, the OS-seeded thread
+RNG, while `src/consensus.rs` has seeded its own downsampling with a constant since it was
+written, under a comment giving the reason: the subset kept is a performance measure, not a
+genotyping decision. Two identical invocations could therefore report different allele
+lengths at any locus above the read cap.
+
+**Confirmed against the benchmark, not just argued:** of the three loci that differed between
+two runs of identical code over 50,000 loci (§21.2), **two sit exactly at the per-haplotype
+cap** — `SUP=20,30` and `SUP=30,29`. The cap truncates to exactly 30, so `SUP=30` is its
+signature.
+
+**But it is rarer than it sounds on this data.** Per-haplotype support here: median 10,
+p99.9 = 23, maximum 30. Only **2 of 19,070 haplotype observations** reach the cap and none
+reach the 60-read unphased cap, so the injected noise is ~2 loci per 10,000 — about 0.02%,
+two orders of magnitude below the 0.3-1.1 point seed-to-seed sampling noise (§24.6). It was
+therefore **not** worth re-baselining the completed matrices over; the fix is carried into
+every subsequent run instead. On deeper data (the 90 GB CRAM, for instance) it scales with
+how often the cap is hit and matters much more.
+
+**Still unexplained:** the third differing locus had `SUP=2,4` against `2,3` — low coverage,
+so downsampling cannot be the cause, and the *support count itself* changed. A second
+non-determinism source exists, rarer than this one, and is not yet identified.
+
+### 27.2 Two off-by-one bugs, both real, both inert here
+
+- **`Batch::new` took the batch end from `repeats.last()`** (`src/batching.rs`) though repeats
+  sort by *start*, so an interval nested inside an earlier, longer one is last while ending
+  first. `create_batches` already tracked the correct maximum and discarded it. The fetch
+  region could stop inside a long repeat and starve it of the reads covering its tail.
+  **Zero nested pairs exist in the adotto catalog** (0 of 4,952 batches), so nothing measured
+  here changes; it would bite a user whose BED has overlapping or nested regions.
+- **`VCFRecord::single_read` still used `end - start`** (`src/vcf.rs`), the last survivor of
+  #22, making single-read calls one base too long, and underflowing on a contracted allele.
+  Reachable only with `--unphased` and exactly one read.
+
+Both verified inert on this data rather than assumed: 400 loci produce a byte-identical VCF
+with and without them, so the seeding change remains solely attributable.
+
+### 27.3 The findings worth acting on next
+
+Ranked by the audit, with the mechanism that makes each matter:
+
+1. **`parse_cs` sums insertions and never subtracts deletions** (`src/genotype.rs`). Every
+   insertion inside the junction window is *concatenated*; the `'-'` branch only advances
+   `ref_pos`. So **`--junction-window` is one-sided**: widening can only lengthen alleles,
+   narrowing can only shorten them. This is a structural explanation for the 25.9%-too-long
+   against 2.3%-too-short asymmetry, and for why `--mode fast` is more accurate — it derives
+   the allele from a reference span, so deletions shorten it automatically. **Prediction: the
+   junction-window sweep should move length monotonically. If it shows an optimum, a second
+   mechanism is cancelling the first, and that is worth more than the chosen value.**
+2. **`remove_outliers` trims at ±2 std dev before the POA** (`src/consensus.rs`), with a
+   `std_dev < 5` short circuit that disables it entirely at clean loci. Symmetric trimming on
+   an asymmetric distribution: at an expanded locus it cuts the longest reads, biasing short.
+   It is the only length filter on the always-live path, and it decides which reads the POA
+   ever sees — so it should be swept **before** the POA scoring, to separate "the POA invents
+   bases" from "the POA is fed a truncated distribution".
+3. **`consensus()` applies `--support` *after* outlier removal**, so a 4-read haplotype that
+   loses two reads to trimming becomes a no-call despite having had support. A product of two
+   parameters rather than either alone, and a concrete contributor to the ~6% no-call rate.
+4. **`is_primary`-only in `find_insertions` plus minimap2's `map_ont` defaults**
+   (`zdrop=400`, `max_gap=5000`) — a large enough expansion can be split across alignments
+   with the non-primary piece discarded, **silently undersizing** rather than no-calling.
+   With `flanking = 5000` capping sizable expansions outright, this is the only item on the
+   detection axis that no queued sweep touches. See §27.4.
+5. **The POA is seeded by `seqs_bytes[0]`** — the first sampled read's indels become the
+   backbone the others align onto. Worth testing whether the +1/+2 excess is seed-read
+   dependent by sweeping `DOWNSAMPLE_SEED` alone, which is now meaningful because the
+   downsampling is deterministic.
+
+Unphased-only, so not on the current benchmark's path but high-consequence if `--unphased` is
+used: `find_roots`' dissimilarity threshold of `5.0` (`src/phase_insertions.rs`) means a
+genuine minority expansion supported by few reads is **discarded and the reference allele
+split in two to replace it**, producing a confident `0/0`. `EXPANSION_OUTLIER` is the only
+signal that this fired, and it is INFO-only.
+
+### 27.4 The experiment the benchmark cannot do
+
+A **synthetic expansion ladder**: reads carrying 100/500/1000/2000/4000/8000 bp insertions at
+a single locus, genotyped with defaults. It answers the question no random sample of HG002
+can — *at what size does sizing break, and does it fail loudly (no-call) or quietly
+(undersized)?* Undersizing is the dangerous answer and is what item 4 predicts. Everything
+else in this document moves averages; this one decides whether a pathogenic expansion is
+reported at all.
