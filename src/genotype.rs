@@ -1075,6 +1075,9 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            quickref_padding: 0,
+            quickref_tolerance: 0,
+            quickref_min_reads: 0,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1114,6 +1117,9 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            quickref_padding: 0,
+            quickref_tolerance: 0,
+            quickref_min_reads: 0,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1147,6 +1153,9 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            quickref_padding: 0,
+            quickref_tolerance: 0,
+            quickref_min_reads: 0,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1186,6 +1195,9 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            quickref_padding: 0,
+            quickref_tolerance: 0,
+            quickref_min_reads: 0,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1232,6 +1244,9 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            quickref_padding: 0,
+            quickref_tolerance: 0,
+            quickref_min_reads: 0,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };

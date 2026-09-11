@@ -74,6 +74,23 @@ pub struct Cli {
     #[arg(short, long, default_value_t = 3)]
     support: usize,
 
+    /// How far outside the repeat interval a read's indels still count when deciding
+    /// whether a locus can be called homozygous reference without aligning. 0 keeps the
+    /// check inside the interval
+    #[arg(long, default_value_t = 0)]
+    quickref_padding: u32,
+
+    /// How much net length difference a read may show and still count as reference-like in
+    /// that check. 0 requires an exact match, which at a tandem repeat rejects almost every
+    /// read once any padding is used
+    #[arg(long, default_value_t = 0)]
+    quickref_tolerance: i64,
+
+    /// Minimum number of reads that must have been inspected before a locus may be called
+    /// homozygous reference without aligning. 0 accepts a single read
+    #[arg(long, default_value_t = 0)]
+    quickref_min_reads: usize,
+
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications
     #[arg(long, default_value_t = 10)]

@@ -7,15 +7,23 @@ use rust_htslib::bam::record::Aux;
 use std::env;
 use url::Url;
 
-/// Calculate length differences from reference for quick reference check
-/// Counts ALL indels/clips regardless of size within the specified region
-/// Used for fast 0|0 detection where even small variants matter
+/// Net length difference from the reference over `[start - 1, end]`, counting every indel
+/// and clip regardless of size. Used to decide whether a locus can be called homozygous
+/// reference without aligning, where even a one-base difference disqualifies it.
+///
+/// `start` is 1-based (as in [`crate::repeats::RepeatInterval`]) while `reference_position`
+/// walks in 0-based coordinates, so the bound is `start - 1`; the comparison is inclusive
+/// at both ends because an aligner overwhelmingly places a repeat's indel on the repeat's
+/// own first base, and excluding the boundary made the check blind to exactly the events it
+/// exists to detect.
 pub fn calculate_all_length_diff_from_cigar(
     record: &rust_htslib::bam::Record,
     start: u32,
     end: u32,
 ) -> i64 {
     let mut length_diff: i64 = 0;
+    // the repeat occupies 0-based [start - 1, end); an indel on either boundary belongs to it
+    let start = start.saturating_sub(1);
     let mut reference_position = record.reference_start() as u32;
 
     for entry in record.cigar().iter() {
@@ -26,18 +34,18 @@ pub fn calculate_all_length_diff_from_cigar(
                 reference_position += *len;
             }
             rust_htslib::bam::record::Cigar::Del(len) => {
-                if start < reference_position && reference_position < end {
+                if start <= reference_position && reference_position <= end {
                     length_diff -= i64::from(*len);
                 }
                 reference_position += *len;
             }
             rust_htslib::bam::record::Cigar::SoftClip(len)
-                if start < reference_position && reference_position < end =>
+                if start <= reference_position && reference_position <= end =>
             {
                 length_diff += i64::from(*len);
             }
             rust_htslib::bam::record::Cigar::Ins(len)
-                if start < reference_position && reference_position < end =>
+                if start <= reference_position && reference_position <= end =>
             {
                 length_diff += i64::from(*len);
             }
@@ -557,6 +565,70 @@ fn test_get_phase() {
         .expect("Failed to read first record from bam");
     let phase = get_phase(&record.unwrap());
     assert_eq!(phase, 2);
+}
+
+#[cfg(test)]
+mod length_diff_tests {
+    use super::*;
+    use rust_htslib::bam::record::{Cigar, CigarString, Record};
+
+    fn record(pos: i64, cigar: Vec<Cigar>) -> Record {
+        let mut rec = Record::new();
+        let query_len: u32 = cigar
+            .iter()
+            .map(|op| match op {
+                Cigar::Match(l)
+                | Cigar::Equal(l)
+                | Cigar::Diff(l)
+                | Cigar::Ins(l)
+                | Cigar::SoftClip(l) => *l,
+                _ => 0,
+            })
+            .sum();
+        let seq = vec![b'A'; query_len as usize];
+        let qual = vec![30u8; query_len as usize];
+        rec.set(b"read", Some(&CigarString(cigar)), &seq, &qual);
+        rec.set_pos(pos);
+        rec
+    }
+
+    // repeat at 1-based 1001-1010, i.e. 0-based [1000, 1010)
+    const START: u32 = 1001;
+    const END: u32 = 1010;
+
+    #[test]
+    fn counts_an_insertion_at_the_first_base_of_the_repeat() {
+        // Aligners overwhelmingly park a repeat's insertion on the repeat's first base.
+        // Missing it here made QUICKREF call such loci homozygous reference.
+        let rec = record(950, vec![Cigar::Match(50), Cigar::Ins(6), Cigar::Match(50)]);
+        assert_eq!(calculate_all_length_diff_from_cigar(&rec, START, END), 6);
+    }
+
+    #[test]
+    fn counts_an_indel_at_the_last_base_of_the_repeat() {
+        let rec = record(950, vec![Cigar::Match(59), Cigar::Ins(4), Cigar::Match(41)]);
+        assert_eq!(calculate_all_length_diff_from_cigar(&rec, START, END), 4);
+        let rec = record(950, vec![Cigar::Match(59), Cigar::Del(4), Cigar::Match(41)]);
+        assert_eq!(calculate_all_length_diff_from_cigar(&rec, START, END), -4);
+    }
+
+    #[test]
+    fn counts_an_indel_in_the_middle_of_the_repeat() {
+        let rec = record(950, vec![Cigar::Match(55), Cigar::Del(3), Cigar::Match(45)]);
+        assert_eq!(calculate_all_length_diff_from_cigar(&rec, START, END), -3);
+    }
+
+    #[test]
+    fn ignores_an_indel_outside_the_window() {
+        let rec = record(950, vec![Cigar::Match(20), Cigar::Ins(9), Cigar::Match(80)]);
+        assert_eq!(calculate_all_length_diff_from_cigar(&rec, START, END), 0);
+    }
+
+    #[test]
+    fn a_clean_read_reports_no_difference() {
+        let rec = record(950, vec![Cigar::Match(100)]);
+        assert_eq!(calculate_all_length_diff_from_cigar(&rec, START, END), 0);
+    }
 }
 
 #[cfg(test)]

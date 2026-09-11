@@ -744,6 +744,9 @@ fn test_write_vcf_header_from_bam() {
         max_number_reads: 60,
         max_locus: None,
         alignment_all: false,
+        quickref_padding: 0,
+        quickref_tolerance: 0,
+        quickref_min_reads: 0,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
@@ -775,6 +778,9 @@ fn test_write_vcf_header_from_name() {
         max_number_reads: 60,
         max_locus: None,
         alignment_all: false,
+        quickref_padding: 0,
+        quickref_tolerance: 0,
+        quickref_min_reads: 0,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };

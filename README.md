@@ -62,6 +62,9 @@ OPTIONS:
         --phasing <STRATEGY>           How to split unphased reads into haplotypes: 'ward', 'dbscan' or 'both' (only with --unphased) [default: ward]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
+        --quickref-padding <N>         How far outside the interval a read's indels count in the fast reference check [default: 0]
+        --quickref-tolerance <N>       Net length difference a read may show and still count as reference-like there [default: 0]
+        --quickref-min-reads <N>       Reads that must be inspected before a locus is called reference without aligning [default: 0]
         --mode <MODE>                  How to recover the repeat sequence from a read: 'sensitive' or 'fast' [default: sensitive]
         --fast-flank <FAST_FLANK>      How far outside the interval an insertion still counts, with --mode fast [default: 20]
         --sorted                       Sort output by chrom, start and end

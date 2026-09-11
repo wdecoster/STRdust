@@ -11,10 +11,12 @@ use std::{io, sync::Mutex};
 use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
 
 /// Per-target bookkeeping while scanning a batch: which of the batch's stored records
-/// overlap this target, and whether any of them showed a length difference (QUICKREF).
+/// overlap this target, whether any of them showed a length difference (QUICKREF), and how
+/// many were actually inspected for it.
 struct TargetInfo {
     has_variation: bool,
     record_indices: Vec<usize>,
+    reads_checked: usize,
 }
 
 /// Process a batch of nearby STR targets with optimized single-fetch approach
@@ -84,6 +86,7 @@ fn process_batch(
                 let info = target_info.entry(target_idx).or_insert_with(|| TargetInfo {
                     has_variation: false,
                     record_indices: Vec::new(),
+                    reads_checked: 0,
                 });
 
                 info.record_indices.push(future_idx);
@@ -93,12 +96,16 @@ fn process_batch(
                 if !args.alignment_all && !info.has_variation {
                     let diff = parse_bam::calculate_all_length_diff_from_cigar(
                         &record_rc,
-                        target.start,
-                        target.end,
+                        target.start.saturating_sub(args.quickref_padding),
+                        target.end + args.quickref_padding,
                     );
-                    if diff != 0 {
+                    // padding and tolerance belong together: widening the window without one
+                    // rejects nearly every read, because a tandem repeat almost always has
+                    // some indel noise in its flanks
+                    if diff.abs() > args.quickref_tolerance {
                         info.has_variation = true;
                     }
+                    info.reads_checked += 1;
                 }
             }
         }
@@ -128,9 +135,14 @@ fn process_batch(
                     }
                 }
             }
-            Some(info) if !args.alignment_all && !info.has_variation => {
-                // QUICKREF: All CIGAR diffs were 0 - output 0|0 immediately
-                // Only use this path if --alignment-all is NOT set
+            Some(info)
+                if !args.alignment_all
+                    && !info.has_variation
+                    && info.reads_checked >= args.quickref_min_reads =>
+            {
+                // QUICKREF: every inspected read was reference-like within
+                // --quickref-tolerance, and enough of them were inspected - output 0|0
+                // immediately. Only use this path if --alignment-all is NOT set
                 let mut repeat_mut = repeat.clone();
                 if args.debug {
                     repeat_mut.set_time_stamp();
