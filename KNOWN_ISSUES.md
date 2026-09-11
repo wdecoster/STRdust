@@ -1690,13 +1690,17 @@ which bytes produced it *and* cannot silently be the wrong ones. Tested in both 
 
 `~/Downloads/fix_strdust/run_D/` — copy the directory next to the data and run `RUN.sh`:
 
+Built from `a435f9a` with the tree clean, so the binary maps to a commit rather than to a
+working state — the provenance failure of §23 in miniature. `make musl` on
+`feat/quickref-tolerance` reproduces this md5 exactly.
+
 | file | md5 |
 |---|---|
-| `STRdust-quickref-knobs` | `0e21900e9c92ad9bd4464be51dfe0d03` |
+| `STRdust-quickref-knobs` | `fda021812c9a72128d9eaebe63ef9a8a` |
 | `benchmark_truth.py` | `fe8be95a41f00597010d8813181c281c` |
 | `compare_runs.py` | `43773176cd5f0c9d0fcc523d691ca86b` |
 | `quickref_paired.py` | `275b1672baffc1e985d57f5007d23f8d` |
-| `RUN.sh` | `5e0a93ac37a721d810e6b61c5684b7ab` |
+| `RUN.sh` | `51ed288c6ae4a4835aa79557c15697f2` |
 
 The arms, all on the same 50,000 loci and `--seed 1`, all gated on the binary md5:
 
