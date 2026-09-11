@@ -1775,3 +1775,77 @@ is a difference *between arms* and the arms only need to match each other.
 
 The local baseline arm is `main` itself (`5e5f1b8d…`) rather than C2, so the matrix is
 self-contained and does not depend on the 50k series or its provenance.
+
+---
+
+## 25. The truth set attributed whole spanning deletions to tiny repeats
+
+Found 2026-09-11 while characterising the length-error distribution of run D.
+
+### 25.1 What was wrong
+
+`read_truth_over_repeats` attributes a variant to a repeat when the two *overlap*, then sums
+the variant's whole per-haplotype length change into the locus. A deletion reaching far past
+the repeat therefore donated its entire length:
+
+```
+chr22:22893684  ref_len=61   truth allele = -145777   (2390x the locus length)
+chr15:84180336  ref_len=116  truth allele = -78923    (680x)
+chr3:146669771  ref_len=46   truth allele = -4902     (107x)
+```
+
+A 61 bp repeat cannot contract by 145 kb. No genotyper can reproduce these, and STRdust
+mostly **no-called** them — the correct response, scored as failure.
+
+### 25.2 Small overall, decisive in one stratum
+
+19 alleles across 15 of 10,000 loci — 0.15%, invisible in the headline numbers. But the
+stratum is assigned by truth allele size, so every artefact lands in the largest one:
+
+| stratum | loci with an impossible truth allele |
+|---|---|
+| 1-10bp, 11-50bp, 51-200bp, reference | 0% |
+| **>200bp** | **15 of 38 — 39.5%** |
+
+Dropping them from `main`'s `>200bp` stratum: 38 loci → 23, **14 no-calls → 1**, exact
+41.7% → 45.5%, ≤5 bp 83.3% → 90.9%. Nearly every no-call in the stratum was a locus whose
+truth was nonsense.
+
+**This invalidates §15.4 step 4's reading**, which took the `>200bp` stratum as evidence that
+"neither path is convincing at long expansions" and proposed a run enriched for long
+expansions to decide `fast` versus `sensitive`. That stratum was ~40% artefact and its
+recall was an artefact almost entirely. The question is still open; the evidence offered for
+it was not evidence.
+
+### 25.3 The fix
+
+`clamp_to_locus` restricts a deletion's contribution to the bases it actually removes from
+the locus — the overlap of the deleted interval with the repeat. Insertions are not clamped:
+the inserted bases enter at a position inside the locus, so their whole length belongs to it.
+Deleted bases start one base after the VCF position, per the anchor-base convention.
+
+Verified on ten boundary cases (spanning, half-covering, starting inside and running past,
+ending exactly at the locus start, one base in, fully contained, insertion, SNV) and end to
+end: a 5 kb deletion spanning a 60 bp locus goes from `[-5000, 0]` to `[-60, 0]` while a
+contained 10 bp deletion and a 30 bp insertion at neighbouring loci are untouched. On inputs
+with no spanning deletion the truth set is byte-identical.
+
+`TRUTH_CACHE_VERSION` is bumped to 2, so every existing cache rebuilds rather than silently
+serving pre-fix truth.
+
+### 25.4 What this invalidates, and what it does not
+
+The truth set has changed, so **runs scored before this fix are not comparable with runs
+scored after it** on any stratified number. Within-run and within-matrix comparisons made
+before the fix remain valid among themselves — every arm of run D seed 1 and seed 2 was
+scored against the same truth.
+
+The fix was deliberately *not* applied while seed 2 was running: `run_matrix.sh` starts a
+fresh Python process per arm, so editing the staged script mid-matrix would have scored
+later arms against different truth than earlier ones — the §23 failure in a new costume.
+The staged copy in `~/testdata/bench/` is updated only once seed 2 finishes, and both seeds
+are then re-run.
+
+A truth set built from a general call set will always carry some artefacts of this kind;
+the aim is not perfection but that a large variant overlapping a repeat should not be
+reported as that repeat's genotype.

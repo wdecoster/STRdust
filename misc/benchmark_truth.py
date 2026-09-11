@@ -289,6 +289,32 @@ def haplotype_deltas(ref, alts, genotype):
     return out, phased
 
 
+def clamp_to_locus(parsed, var_start, locus_start, locus_end):
+    """Restrict a record's deleted bases to the ones actually inside the locus.
+
+    A variant is attributed to a repeat when it *overlaps* it, but a deletion reaching well
+    past the repeat only removes the repeat bases it covers. Counting its whole length
+    produced truth alleles like a 61 bp locus contracting by 145,777 bp, which no genotyper
+    can reproduce and which STRdust correctly no-called -- scored as failure. The artefacts
+    were rare overall (0.15% of loci) but concentrated entirely in the long-expansion
+    stratum, where they were ~40% of the loci and nearly all of its no-calls.
+
+    Insertions are not clamped: the inserted bases enter at a position inside the locus, so
+    their whole length belongs to it. Deleted bases start one base after the VCF position,
+    the usual anchor-base convention.
+    """
+    deltas, phased = parsed
+    clamped = []
+    for delta, is_ref in deltas:
+        if delta < 0:
+            deleted_start = var_start + 1
+            deleted_end = deleted_start - delta
+            overlap = min(locus_end, deleted_end) - max(locus_start, deleted_start)
+            delta = -max(0, overlap)
+        clamped.append((delta, is_ref))
+    return clamped, phased
+
+
 def read_truth_over_repeats(
     vcf_path, repeat_bed, confident, regions_filter, max_loci, sample_loci=None, seed=0
 ):
@@ -342,7 +368,10 @@ def read_truth_over_repeats(
                     per_locus.setdefault((chrom, index), []).append(None)
                 continue
             for index in hits:
-                per_locus.setdefault((chrom, index), []).append(parsed)
+                locus_start, locus_end = spans[index]
+                per_locus.setdefault((chrom, index), []).append(
+                    clamp_to_locus(parsed, var_start, locus_start, locus_end)
+                )
 
     loci = {}
     bed = []
@@ -735,7 +764,7 @@ def plot(rows, path):
 
 # bump when anything that changes the *content* of the truth set changes: the parsing, the
 # confident-region semantics, the sampling. A pure speed-up does not need a bump.
-TRUTH_CACHE_VERSION = 1
+TRUTH_CACHE_VERSION = 2
 
 
 def truth_cache_key(args, regions_filter):
