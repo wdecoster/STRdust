@@ -1733,3 +1733,40 @@ The arms, all on the same 50,000 loci and `--seed 1`, all gated on the binary md
 
 Nothing here is merged. `feat/quickref-tolerance` is local only, and #30 stays unmerged
 pending D (§23.3).
+
+### 24.6 Replication across seeds
+
+`--sample-loci N --seed S` draws a random subset of the catalog, so two seeds are two
+independent draws of loci from the same data. Every conclusion from run D that leads to a
+default change should be confirmed on a second seed before the change is made.
+
+This is cheap, and it is the only control available for the thing that has bitten this
+investigation repeatedly: a number that looks decisive on one sample. Run D's arms differ
+from each other by fractions of a point in places, and §21 already established a run-to-run
+noise floor of ~0.006% of loci from threading alone — sampling noise across 10,000 loci is
+considerably larger than that.
+
+Rule: **a difference that does not reproduce at a second seed is not a result.** Two seeds
+agreeing on direction and roughly on magnitude is enough; they will not agree exactly, and
+should not be expected to.
+
+Outputs are tagged `n<loci>s<seed>` so batches never collide.
+
+### 24.7 Running it locally
+
+The benchmark data now lives on the laptop (`~/testdata`), which takes the server and the
+file-shuttling out of the loop. 12 cores against the server's 24, so a 50,000-locus arm is
+roughly an hour; the matrix runs at **10,000 loci** instead, because every question it asks
+is a difference *between arms* and the arms only need to match each other.
+
+`~/testdata/bench/` holds both binaries, the three scripts, and:
+
+- `preflight.sh` — inputs, indexes, both binary md5s, and an actual read fetch from the CRAM.
+- `run_matrix.sh [n_loci] [seed] [threads]` — the five arms, each md5-gated, skipping arms
+  already finished so an interrupted run resumes. Ends by printing the comparison and the
+  `binary_md5` each arm recorded.
+- `go.sh` — index (atomically, via a temp name) → preflight → 300-locus smoke → the matrix.
+  `go.sh replicate` runs the same matrix at seed 2 per §24.6.
+
+The local baseline arm is `main` itself (`5e5f1b8d…`) rather than C2, so the matrix is
+self-contained and does not depend on the 50k series or its provenance.
