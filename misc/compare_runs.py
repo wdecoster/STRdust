@@ -154,6 +154,50 @@ def consensus_bias(runs, shared):
         )
 
 
+def expansion_detection(runs, shared, thresholds=(50, 100, 200, 500)):
+    """Did the caller *find* the expansion, regardless of whether it sized it correctly.
+
+    For a pathogenic repeat the clinically relevant failure is missing an expansion, not
+    reporting it a few bases short: a no-call and a 3 bp error are not the same kind of
+    mistake, and exact-length concordance scores them as if the second were worse. This
+    table asks the detection question instead, over loci whose truth carries a *positive*
+    (expanded) allele of at least T:
+
+      found      longest called allele >= T        - sized right and detected
+      partial    longest called allele >= T/2      - undersized but unmistakably expanded
+      short      called, but reported under T/2    - a false negative that looks like a call
+      no-call    nothing reported                  - a false negative that is at least visible
+
+    `found` and `partial` together are what matters for screening; `short` is the dangerous
+    column, because a confidently wrong small number does not prompt a second look.
+    """
+    print("\nexpansion detection: loci whose truth has an expanded allele >= T")
+    print(f"{'run':>22}{'T':>7}{'loci':>7}{'found':>9}{'+partial':>10}{'short':>8}{'no-call':>9}")
+    for name, rows in runs.items():
+        for threshold in thresholds:
+            here = [rows[k] for k in shared
+                    if rows[k]["truth"] and max(rows[k]["truth"]) >= threshold]
+            if not here:
+                continue
+            found = partial = short = missing = 0
+            for row in here:
+                if not row["called"]:
+                    missing += 1
+                    continue
+                longest = max(row["called"])
+                if longest >= threshold:
+                    found += 1
+                elif longest >= threshold / 2:
+                    partial += 1
+                else:
+                    short += 1
+            n = len(here)
+            print(f"{name:>22}{threshold:>7}{n:>7}{100 * found / n:>8.1f}%"
+                  f"{100 * (found + partial) / n:>9.1f}%{100 * short / n:>7.1f}%"
+                  f"{100 * missing / n:>8.1f}%")
+        print()
+
+
 STRATUM_ORDER = ["reference", "1-10bp", "11-50bp", "51-200bp", ">200bp"]
 
 
@@ -333,6 +377,7 @@ def main():
     concordance(runs, shared)
     quickref(runs, shared)
     by_truth_size(runs, shared)
+    expansion_detection(runs, shared)
     consensus_bias(runs, shared)
     error_spectrum(runs, shared)
     by_length(runs, shared)
