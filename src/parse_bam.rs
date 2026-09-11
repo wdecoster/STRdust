@@ -1,4 +1,6 @@
 use log::warn;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
@@ -6,6 +8,10 @@ use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::Aux;
 use std::env;
 use url::Url;
+
+/// Fixed seed for read downsampling, mirroring `consensus::DOWNSAMPLE_SEED`. Both exist so
+/// that two runs with the same arguments produce the same genotypes.
+const DOWNSAMPLE_SEED: u64 = 42;
 
 /// Net length difference from the reference over `[start - 1, end]`, counting every indel
 /// and clip regardless of size. Used to decide whether a locus can be called homozygous
@@ -305,7 +311,14 @@ pub fn create_bam_reader(bamf: &str, fasta: &str) -> bam::IndexedReader {
     bam
 }
 
-/// Downsample a vector of reads to a maximum number in-place
+/// Downsample a vector of reads to a maximum number in-place.
+///
+/// Seeded with a constant, for the same reason [`crate::consensus`] seeds its own
+/// downsampling: which reads are kept is a performance measure, not a genotyping decision,
+/// so it must not make the output depend on the run. With the thread RNG this used
+/// previously, any locus above the read cap could report a different allele length on a
+/// second identical invocation, which silently put a floor under how small a difference a
+/// benchmark could resolve.
 pub fn downsample_reads_inplace(phase_reads: &mut Vec<Vec<u8>>, max_reads: usize) {
     let n_reads = phase_reads.len();
     if n_reads <= max_reads {
@@ -314,7 +327,7 @@ pub fn downsample_reads_inplace(phase_reads: &mut Vec<Vec<u8>>, max_reads: usize
 
     // Use partial_shuffle for efficient random selection
     // Shuffles the first max_reads elements randomly from the full vector
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(DOWNSAMPLE_SEED);
     phase_reads.partial_shuffle(&mut rng, max_reads);
 
     // Keep only the first max_reads elements

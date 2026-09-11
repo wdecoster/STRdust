@@ -349,10 +349,21 @@ impl VCFRecord {
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
             alt_seq: Some(seq.to_string()),
-            length: ((seq.len() as u32 - (repeat.end - repeat.start)).to_string(), ".".to_string()),
+            // RB is measured against the reference sequence actually emitted, which is
+            // end - start + 1 bases; `end - start` here was the last survivor of #22 and
+            // made every single-read call one base too long. Saturating because a read
+            // shorter than the reference is a contraction, not an underflow.
+            length: (
+                (seq.len() as u32)
+                    .saturating_sub(repeat_ref_seq.len() as u32)
+                    .to_string(),
+                ".".to_string(),
+            ),
             full_length: ((seq.len() as u32).to_string(), ".".to_string()),
             median_length: (
-                (seq.len() as u32 - (repeat.end - repeat.start)).to_string(),
+                (seq.len() as u32)
+                    .saturating_sub(repeat_ref_seq.len() as u32)
+                    .to_string(),
                 ".".to_string(),
             ),
             support: ("1".to_string(), ".".to_string()),
