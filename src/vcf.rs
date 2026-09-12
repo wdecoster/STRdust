@@ -129,7 +129,12 @@ impl VCFRecord {
                     "Genotyping {repeat}:{repeat_ref_sequence} with {} and {}",
                     allele1.seq, allele2.seq,
                 );
-                let gts = determine_genotypes(&repeat_ref_sequence, &allele1.seq, &allele2.seq);
+                let gts = determine_genotypes(
+                    &repeat_ref_sequence,
+                    &allele1.seq,
+                    &allele2.seq,
+                    similarity_rule(args),
+                );
                 debug!(
                     "Genotype result for {repeat}: {}|{} (ref len: {}, allele1 len: {}, allele2 len: {})",
                     gts.0,
@@ -142,7 +147,11 @@ impl VCFRecord {
             }
             None => {
                 debug!("Genotyping haploid {repeat}:{repeat_ref_sequence} with {}", allele1.seq);
-                let gt = determine_haploid_genotype(&repeat_ref_sequence, &allele1.seq);
+                let gt = determine_haploid_genotype(
+                    &repeat_ref_sequence,
+                    &allele1.seq,
+                    similarity_rule(args),
+                );
                 debug!("Haploid genotype result for {repeat}: {gt}");
                 // The second slot is unused for haploid records (not emitted by Display).
                 (gt, ".".to_string())
@@ -392,10 +401,20 @@ fn length_ratio(seq1: &str, seq2: &str) -> f32 {
     length1.min(length2) as f32 / length1.max(length2) as f32
 }
 
+/// The similarity rule as configured on the command line.
+pub fn similarity_rule(args: &Cli) -> SimilarityRule {
+    SimilarityRule {
+        max_edits: args.ref_max_edits,
+        divisor: args.ref_edit_divisor,
+        inclusive: args.ref_edit_inclusive,
+    }
+}
+
 fn determine_genotypes(
     repeat_ref_sequence: &str,
     allele1: &str,
     allele2: &str,
+    rule: SimilarityRule,
 ) -> (String, String) {
     // STR genotyping logic with clear decision matrix
     //
@@ -411,14 +430,14 @@ fn determine_genotypes(
     if allele1 == "." && allele2 == "." {
         return (String::from("."), String::from("."));
     } else if allele1 == "." {
-        let gt2 = if is_similar_to_ref(allele2, repeat_ref_sequence) {
+        let gt2 = if is_similar_to_ref_with(allele2, repeat_ref_sequence, rule) {
             "0"
         } else {
             "1"
         };
         return (String::from("."), String::from(gt2));
     } else if allele2 == "." {
-        let gt1 = if is_similar_to_ref(allele1, repeat_ref_sequence) {
+        let gt1 = if is_similar_to_ref_with(allele1, repeat_ref_sequence, rule) {
             "0"
         } else {
             "1"
@@ -427,8 +446,8 @@ fn determine_genotypes(
     }
 
     // Determine if each allele matches reference
-    let allele1_is_ref = is_similar_to_ref(allele1, repeat_ref_sequence);
-    let allele2_is_ref = is_similar_to_ref(allele2, repeat_ref_sequence);
+    let allele1_is_ref = is_similar_to_ref_with(allele1, repeat_ref_sequence, rule);
+    let allele2_is_ref = is_similar_to_ref_with(allele2, repeat_ref_sequence, rule);
 
     // Determine genotypes based on reference matching
     // Only compute alleles_same if needed (when neither matches ref)
@@ -455,10 +474,14 @@ fn determine_genotypes(
 
 // Genotype a single allele on a haploid chromosome: "0" (reference), "1" (expansion/non-ref),
 // or "." (missing). The VCF spec asks for a single allele value at haploid loci.
-fn determine_haploid_genotype(repeat_ref_sequence: &str, allele: &str) -> String {
+fn determine_haploid_genotype(
+    repeat_ref_sequence: &str,
+    allele: &str,
+    rule: SimilarityRule,
+) -> String {
     if allele == "." {
         String::from(".")
-    } else if is_similar_to_ref(allele, repeat_ref_sequence) {
+    } else if is_similar_to_ref_with(allele, repeat_ref_sequence, rule) {
         String::from("0")
     } else {
         String::from("1")
@@ -466,6 +489,57 @@ fn determine_haploid_genotype(repeat_ref_sequence: &str, allele: &str) -> String
 }
 
 // Check if an allele is similar enough to reference to be called as ref (0)
+/// How much an allele may differ from the reference and still be reported as reference.
+///
+/// Three thresholds were stacked here and had to be separated before any could be measured:
+/// a 0.9 length-ratio prefilter, a `len/20` floor division, and a strictly-less-than
+/// comparison that quietly costs one more edit. The effective tolerance was therefore
+/// `floor(len/20) - 1` edits: zero below 40 bases, then growing with the reference length
+/// for no reason connected to read noise.
+///
+/// Measured consequence: of the loci a corrected consensus reports as 1-2 bases from the
+/// reference, 94 of 98 were being rounded to 0/0 here rather than by the length estimate.
+/// The allele length was right in RB all along; the genotype logic discarded it.
+#[derive(Clone, Copy, Debug)]
+pub struct SimilarityRule {
+    /// Fixed edit tolerance, when >= 0. Negative keeps the length-scaled rule below.
+    pub max_edits: i32,
+    /// Divisor for the length-scaled rule (20 = 5% of the reference length).
+    pub divisor: usize,
+    /// Compare with `<=` rather than `<`, so the stated tolerance is the real one.
+    pub inclusive: bool,
+}
+
+impl Default for SimilarityRule {
+    fn default() -> Self {
+        Self { max_edits: -1, divisor: 20, inclusive: false }
+    }
+}
+
+fn is_similar_to_ref_with(allele: &str, reference: &str, rule: SimilarityRule) -> bool {
+    if allele == reference {
+        return true;
+    }
+    if length_ratio(allele, reference) < 0.9 {
+        return false;
+    }
+    let threshold = if rule.max_edits >= 0 {
+        rule.max_edits as usize
+    } else {
+        reference.len().checked_div(rule.divisor).unwrap_or(0)
+    };
+    if threshold == 0 && !rule.inclusive {
+        return false;
+    }
+    let edit_distance = levenshtein(allele, reference);
+    if rule.inclusive {
+        edit_distance <= threshold
+    } else {
+        edit_distance < threshold
+    }
+}
+
+#[allow(dead_code)]
 fn is_similar_to_ref(allele: &str, reference: &str) -> bool {
     // Exact match
     if allele == reference {
@@ -759,6 +833,9 @@ fn test_write_vcf_header_from_bam() {
         quickref_tolerance: 0,
         quickref_min_reads: 0,
         junction_window: 30,
+        ref_max_edits: -1,
+        ref_edit_divisor: 20,
+        ref_edit_inclusive: false,
         poa_medoid_seed: false,
         poa_trim_fraction: 0.0,
         poa_gap_open: 12,
@@ -799,6 +876,9 @@ fn test_write_vcf_header_from_name() {
         quickref_tolerance: 0,
         quickref_min_reads: 0,
         junction_window: 30,
+        ref_max_edits: -1,
+        ref_edit_divisor: 20,
+        ref_edit_inclusive: false,
         poa_medoid_seed: false,
         poa_trim_fraction: 0.0,
         poa_gap_open: 12,
@@ -850,7 +930,8 @@ fn test_determine_genotypes() {
     let repeat_ref_sequence = "ATCATCATCATC";
     let allele1 = "ATCATCATCATC";
     let allele2 = "ATCATCATCATC";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "0");
     assert_eq!(genotype2, "0");
 }
@@ -860,7 +941,8 @@ fn test_determine_genotypes2() {
     let repeat_ref_sequence = "ATCATCATCATC";
     let allele1 = "ATCATCATCATC";
     let allele2 = "ATCATCATCATG";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "0");
     assert_eq!(genotype2, "1");
 }
@@ -870,7 +952,8 @@ fn test_determine_genotypes3() {
     let repeat_ref_sequence = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
     let allele1 = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
     let allele2 = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATG";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "1");
     assert_eq!(genotype2, "0");
 }
@@ -880,7 +963,8 @@ fn test_determine_genotypes4() {
     let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
     let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGA";
     let allele2 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "1");
     assert_eq!(genotype2, "2");
 }
@@ -890,7 +974,8 @@ fn test_determine_genotypes5() {
     let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
     let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
     let allele2 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "1");
     assert_eq!(genotype2, "1");
 }
@@ -900,7 +985,8 @@ fn test_determine_genotypes6() {
     let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
     let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
     let allele2 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGTA";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "1");
     assert_eq!(genotype2, "1");
 }
@@ -910,7 +996,8 @@ fn test_determine_genotypes7() {
     let repeat_ref_sequence = "GGAGGAGGAGGAGGA";
     let allele1 = "GGAGGAGGAGGAGGAGGAGGAGGAAGGAGGAGGAGGAGGAGGAGGA";
     let allele2 = ".";
-    let (genotype1, genotype2) = determine_genotypes(repeat_ref_sequence, allele1, allele2);
+    let (genotype1, genotype2) =
+        determine_genotypes(repeat_ref_sequence, allele1, allele2, SimilarityRule::default());
     assert_eq!(genotype1, "1");
     assert_eq!(genotype2, ".");
 }
@@ -919,12 +1006,25 @@ fn test_determine_genotypes7() {
 fn test_determine_haploid_genotype() {
     let repeat_ref_sequence = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
     // Reference-matching allele -> 0
-    assert_eq!(determine_haploid_genotype(repeat_ref_sequence, repeat_ref_sequence), "0");
+    assert_eq!(
+        determine_haploid_genotype(
+            repeat_ref_sequence,
+            repeat_ref_sequence,
+            SimilarityRule::default()
+        ),
+        "0"
+    );
     // Expanded allele -> 1
     let expanded = "ATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATCATC";
-    assert_eq!(determine_haploid_genotype(repeat_ref_sequence, expanded), "1");
+    assert_eq!(
+        determine_haploid_genotype(repeat_ref_sequence, expanded, SimilarityRule::default()),
+        "1"
+    );
     // Missing allele -> .
-    assert_eq!(determine_haploid_genotype(repeat_ref_sequence, "."), ".");
+    assert_eq!(
+        determine_haploid_genotype(repeat_ref_sequence, ".", SimilarityRule::default()),
+        "."
+    );
 }
 
 // A minimal record builder for testing the ploidy-aware Display output.

@@ -114,6 +114,20 @@ pub struct Cli {
     #[arg(long, default_value_t = 3, hide = true)]
     poa_match: i32,
 
+    /// Fixed edit distance an allele may differ from the reference and still be reported
+    /// as reference. Negative keeps the length-scaled rule
+    #[arg(long, default_value_t = -1, hide = true, allow_hyphen_values = true)]
+    ref_max_edits: i32,
+
+    /// Divisor for the length-scaled reference-similarity threshold (20 = 5% of REF)
+    #[arg(long, default_value_t = 20, hide = true)]
+    ref_edit_divisor: usize,
+
+    /// Compare the edit distance with <= rather than <, so the stated tolerance is the
+    /// real one rather than one edit tighter
+    #[arg(long, default_value_t = false, hide = true)]
+    ref_edit_inclusive: bool,
+
     /// Seed the POA graph with the read closest to the cluster median length instead of
     /// the first sampled read, whose indels would otherwise become the graph's backbone
     #[arg(long, default_value_t = false, hide = true)]
