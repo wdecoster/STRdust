@@ -36,12 +36,33 @@ pub struct PoaScoring {
     pub gap_open: i32,
     pub match_score: i32,
     pub mismatch: i32,
+    /// Seed the POA graph with the read whose length is closest to the cluster median,
+    /// rather than whichever read happened to be sampled first.
+    pub medoid_seed: bool,
 }
 
 impl Default for PoaScoring {
     fn default() -> Self {
-        Self { gap_open: -12, match_score: 3, mismatch: -4 }
+        Self { gap_open: -12, match_score: 3, mismatch: -4, medoid_seed: false }
     }
+}
+
+/// Index of the read whose length is closest to the cluster median.
+///
+/// The first read added to a POA graph is its backbone: every other read is aligned onto it,
+/// so its indels are structurally privileged and end up in the consensus. Taking whichever
+/// read was sampled first makes that an arbitrary choice. The read at the median length is
+/// the one least likely to drag the consensus off the cluster's centre. Ties go to the
+/// earlier read, so the choice stays deterministic.
+fn medoid_index(seqs: &[Vec<u8>]) -> usize {
+    let mut lengths: Vec<usize> = seqs.iter().map(|s| s.len()).collect();
+    lengths.sort_unstable();
+    let median = lengths[lengths.len() / 2];
+    seqs.iter()
+        .enumerate()
+        .min_by_key(|(_, s)| s.len().abs_diff(median))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
 }
 
 #[derive(Clone)]
@@ -151,9 +172,17 @@ pub fn consensus(
                 if a == b { match_score } else { mismatch }
             },
         );
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        for seq in seqs_bytes.iter().skip(1) {
-            aligner.global(seq).add_to_graph();
+        let seed = if poa.medoid_seed {
+            medoid_index(&seqs_bytes)
+        } else {
+            0
+        };
+        debug!("{repeat}: seeding POA graph with read {seed} of {}", seqs_bytes.len());
+        let mut aligner = Aligner::new(scoring, &seqs_bytes[seed]);
+        for (i, seq) in seqs_bytes.iter().enumerate() {
+            if i != seed {
+                aligner.global(seq).add_to_graph();
+            }
         }
         debug!("Added all sequences to graph");
 

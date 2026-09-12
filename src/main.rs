@@ -114,6 +114,11 @@ pub struct Cli {
     #[arg(long, default_value_t = 3, hide = true)]
     poa_match: i32,
 
+    /// Seed the POA graph with the read closest to the cluster median length instead of
+    /// the first sampled read, whose indels would otherwise become the graph's backbone
+    #[arg(long, default_value_t = false, hide = true)]
+    poa_medoid_seed: bool,
+
     /// POA penalty for a mismatching base, as a positive number
     #[arg(long, default_value_t = 4, hide = true)]
     poa_mismatch: i32,
