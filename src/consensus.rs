@@ -1,5 +1,10 @@
-use bio::alignment::{pairwise::Scoring, poa::Aligner};
+use bio::alignment::{
+    pairwise::Scoring,
+    poa::{Aligner, POAGraph},
+};
 use log::debug;
+use petgraph::Incoming;
+use petgraph::visit::Topo;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
@@ -39,12 +44,84 @@ pub struct PoaScoring {
     /// Seed the POA graph with the read whose length is closest to the cluster median,
     /// rather than whichever read happened to be sampled first.
     pub medoid_seed: bool,
+    /// Fraction of the cluster's reads an edge must carry for the consensus to run through
+    /// it at either end. 0 disables trimming and uses rust-bio's own `consensus()`.
+    pub trim_fraction: f64,
 }
 
 impl Default for PoaScoring {
     fn default() -> Self {
-        Self { gap_open: -12, match_score: 3, mismatch: -4, medoid_seed: false }
+        Self {
+            gap_open: -12,
+            match_score: 3,
+            mismatch: -4,
+            medoid_seed: false,
+            trim_fraction: 0.0,
+        }
     }
+}
+
+/// Consensus through the POA graph, refusing to run out along poorly supported ends.
+///
+/// rust-bio's `Aligner::consensus()` picks its endpoint with `max_by_key` over a cumulative
+/// score to which every edge contributes a weight of at least 1. The score therefore
+/// increases strictly along every edge, so the argmax is *always a sink*: the consensus runs
+/// to the deepest point in the graph rather than the best supported one. One read in fifteen
+/// that extends a single base past the others creates a deeper sink and wins, with no vote
+/// taken -- which is why the reported allele is one base too long on 8% of alleles at loci
+/// that are truly homozygous reference, why the excess is 29:1 one-sided, and why it gets
+/// *worse* with more reads instead of better.
+///
+/// The interior path choice upstream makes (heaviest edge first) is sound and is kept. Only
+/// the ends are corrected: a terminal base is dropped unless the edge reaching it carries at
+/// least `min_weight` reads. Reported upstream alongside rust-bio#677.
+fn trimmed_consensus(graph: &POAGraph, min_weight: i32) -> Vec<u8> {
+    let node_count = graph.node_count();
+    // (weight of the best incoming edge, cumulative score, that predecessor's index)
+    let mut best: Vec<(i32, i32, usize)> = vec![(0, 0, usize::MAX); node_count];
+    let mut topo = Topo::new(graph);
+    while let Some(node) = topo.next(graph) {
+        let mut choice: (i32, i32, usize) = (0, 0, usize::MAX);
+        for neighbour in graph.neighbors_directed(node, Incoming) {
+            let index = neighbour.index();
+            let weight: i32 = graph
+                .edges_connecting(neighbour, node)
+                .map(|e| *e.weight())
+                .sum();
+            let score = weight + best[index].1;
+            if (weight, score, index) > choice {
+                choice = (weight, score, index);
+            }
+        }
+        best[node.index()] = choice;
+    }
+
+    let Some(end) = (0..node_count).max_by_key(|&i| best[i].1) else {
+        return Vec::new();
+    };
+    let mut path = Vec::new();
+    let mut pos = end;
+    while pos != usize::MAX {
+        path.push(pos);
+        pos = best[pos].2;
+    }
+    path.reverse();
+
+    // drop trailing nodes reached by an edge too few reads support, then leading nodes whose
+    // edge into the rest is equally thin. The first node of the path has no incoming edge,
+    // so it is judged by the edge leaving it.
+    while path.len() > 1 && best[path[path.len() - 1]].0 < min_weight {
+        path.pop();
+    }
+    let mut start = 0;
+    while start + 1 < path.len() && best[path[start + 1]].0 < min_weight {
+        start += 1;
+    }
+
+    path[start..]
+        .iter()
+        .map(|&i| graph.raw_nodes()[i].weight)
+        .collect()
 }
 
 /// Index of the read whose length is closest to the cluster median.
@@ -186,7 +263,14 @@ pub fn consensus(
         }
         debug!("Added all sequences to graph");
 
-        let consensus = aligner.consensus();
+        let consensus = if poa.trim_fraction > 0.0 {
+            let min_weight = (poa.trim_fraction * seqs_bytes.len() as f64)
+                .ceil()
+                .max(1.0) as i32;
+            trimmed_consensus(aligner.graph(), min_weight)
+        } else {
+            aligner.consensus()
+        };
         debug!("Created consensus");
         let score = aligner.global(&consensus).alignment().score;
         debug!("Calculated score");

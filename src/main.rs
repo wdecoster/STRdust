@@ -119,6 +119,12 @@ pub struct Cli {
     #[arg(long, default_value_t = false, hide = true)]
     poa_medoid_seed: bool,
 
+    /// Fraction of a cluster's reads that must support an edge for the consensus to run
+    /// through it at either end. Guards against rust-bio's consensus walking out along a
+    /// single read's overhang. 0 keeps rust-bio's own endpoint choice
+    #[arg(long, default_value_t = 0.0, hide = true)]
+    poa_trim_fraction: f64,
+
     /// POA penalty for a mismatching base, as a positive number
     #[arg(long, default_value_t = 4, hide = true)]
     poa_mismatch: i32,

@@ -15,6 +15,9 @@ log = "0.4.27"
 rayon = "1.5.3"
 rust-htslib = { git = "https://github.com/wdecoster/rust-htslib", features = ["s3", "curl"] }
 bio = "4.0.0"
+# for our own POA consensus traversal over bio::alignment::poa::POAGraph;
+# must stay on the same major version as the petgraph that bio exposes
+petgraph = "0.8"
 minimap2 = { version = "0.1.20", features = ["htslib"] }
 kodama = "0.3.0"
 regex = "1.11.1"

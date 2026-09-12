@@ -277,6 +277,7 @@ fn poa_scoring(args: &Cli) -> crate::consensus::PoaScoring {
         match_score: args.poa_match,
         mismatch: -args.poa_mismatch,
         medoid_seed: args.poa_medoid_seed,
+        trim_fraction: args.poa_trim_fraction,
     }
 }
 
@@ -1125,6 +1126,7 @@ mod tests {
             quickref_min_reads: 0,
             junction_window: 30,
             poa_medoid_seed: false,
+            poa_trim_fraction: 0.0,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1172,6 +1174,7 @@ mod tests {
             quickref_min_reads: 0,
             junction_window: 30,
             poa_medoid_seed: false,
+            poa_trim_fraction: 0.0,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1213,6 +1216,7 @@ mod tests {
             quickref_min_reads: 0,
             junction_window: 30,
             poa_medoid_seed: false,
+            poa_trim_fraction: 0.0,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1260,6 +1264,7 @@ mod tests {
             quickref_min_reads: 0,
             junction_window: 30,
             poa_medoid_seed: false,
+            poa_trim_fraction: 0.0,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
@@ -1314,6 +1319,7 @@ mod tests {
             quickref_min_reads: 0,
             junction_window: 30,
             poa_medoid_seed: false,
+            poa_trim_fraction: 0.0,
             poa_gap_open: 12,
             poa_match: 3,
             poa_mismatch: 4,
