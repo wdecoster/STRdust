@@ -2328,3 +2328,71 @@ outranks everything else on this list.
 - **Everything is measured on one sample**, HG002 at ~30x ONT, one catalog, one chemistry.
   Seeds control locus sampling, not that. The *orderings* in this document should generalise;
   the absolute numbers should not be quoted as universal.
+
+---
+
+## 31. Closing measurements, 2026-09-13
+
+### 31.1 `--priority expanded` replicates on held-out loci
+
+Seed 7, never used for tuning or any earlier held-out check, 50,000 loci:
+
+| | seed 1 | seed 7 |
+|---|---|---|
+| CPU | −14.8% | **−13.5%** |
+| exact | +0.9 | **+0.9** |
+| F1 | +2.5 | +2.1 |
+| `1-10bp` | −5.4 | −6.3 |
+| `>200bp` | −0.6 | −0.7 |
+| reference no-calls | 3,060 → 1,652 | 3,147 → 1,737 |
+
+The accuracy gain was the part most at risk of being noise — +0.9 against 0.3-1.1 points of
+seed-to-seed variation — and it reproduced exactly. The cost stays confined to the strata the
+mechanism predicts, and long expansions are untouched.
+
+Note it fires QUICKREF on 18,078 loci instead of 2,059 and *scores more loci overall*
+(47,913 vs 46,464): a locus answered cheaply at ~99% precision is one that full genotyping
+does not get to answer wrongly, or fail to answer at all.
+
+### 31.2 QUICKREF earns its place on the sensitive path, and only there
+
+50,000 loci, `--alignment-all` as the off switch, everything else identical:
+
+| mode | QUICKREF on | off | verdict |
+|---|---|---|---|
+| **fast** | 6,628.8 s, 85.2% | **6,319.8 s**, 85.1% | costs 309 s (+4.9%) for +0.1 exact |
+| **sensitive** | **34,406.9 s**, 81.6% | 35,773.6 s, 81.2% | saves 1,367 s (−3.8%) *and* +0.4 exact |
+
+Its rationale — skip work at loci that are homozygous reference anyway — holds where the work
+skipped is realignment plus POA, and evaporates where the allele is read off the existing
+alignment. **Do not remove it**: `--mode sensitive` still needs it. But on the default path
+it is now an accuracy contribution, not a speed one.
+
+Incidental and larger than either: **sensitive costs 34,407 s against fast's ~6,500 s**, a 5×
+difference, while also being less accurate (§29.5). That is the strongest argument for the
+new default.
+
+### 31.3 Unphased: Ward is right, DBSCAN is mistuned
+
+50,000 loci, `--mode fast`, phased as the ceiling:
+
+| | exact | F1 | reference | 1-10bp | 11-50bp | 51-200bp | >200bp |
+|---|---|---|---|---|---|---|---|
+| phased | 85.2% | 68.8 | 90.7% | 57.4% | 72.2% | 78.9% | 80.6% |
+| ward | 75.2% | 59.3 | 80.3% | 47.4% | 66.3% | 66.4% | 77.0% |
+| dbscan | *81.9%* | 66.1 | **94.4%** | 24.7% | **19.1%** | **15.5%** | **19.7%** |
+
+**DBSCAN's better aggregate is an artefact of stratum weighting**: best of the three at
+homozygous-reference loci, catastrophic at every locus that varies, and reference loci are
+82% of the sample. Same trap as §28.3's `jw0` and §24's tolerance arm, caught the same way.
+
+Unphased Ward loses ~10 points against phased, which is less than expected, and both no-call
+far less than the phased path (8 and 4 against 3,060) — the clustering always produces two
+haplotypes, whether or not they are right.
+
+Filed as **#32** with the parameter analysis: `DBSCAN_LENGTH_WEIGHT = 0.3` deliberately
+downweights length, which is exactly what separates two same-motif alleles at an ordinary
+heterozygous locus, and `AUTO_K` seeds from the *median* read, which at a het expanded locus
+is a reference read. Neither has ever been swept. **This benchmark cannot show DBSCAN at its
+best** — it scores lengths, and DBSCAN's case is composition at similar length — so a
+compositional test set built from the truth VCF's sequences is needed before any verdict.
