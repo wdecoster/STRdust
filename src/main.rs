@@ -45,10 +45,10 @@ pub enum PhasingStrategy {
 /// What to optimise when deciding whether an allele counts as reference.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Priority {
-    /// Skip genotyping at loci whose reads all look near-reference, and report the rest as
-    /// for `balanced`. Fastest; gives up resolution below ~3 bases. For expansion
-    /// screening, where a 1-3 base difference is not the question being asked.
-    Screening,
+    /// Prioritise finding expanded alleles over resolving small ones. Loci whose reads all
+    /// look near-reference are reported as reference without being genotyped, which is
+    /// faster and costs resolution below ~3 bases. Long expansions are unaffected.
+    Expanded,
     /// Report a variant unless the allele matches the reference exactly. Highest recall.
     Sensitive,
     /// Tolerate 2% of the reference length. Best balance of recall and precision.
@@ -118,11 +118,16 @@ pub struct Cli {
     #[arg(long, default_value_t = 30, hide = true)]
     junction_window: i32,
 
-    /// How readily an allele is reported as reference rather than as a variant. Affects
-    /// only the emitted genotype (GT); the measured allele lengths in RB, FRB and MRL are
-    /// identical under all three. 'sensitive' calls a locus variant unless the allele
-    /// matches the reference exactly, 'precise' requires a clear difference, 'balanced'
-    /// sits between them
+    /// What to prioritise when deciding whether an allele counts as reference.
+    ///
+    /// 'sensitive', 'balanced' and 'precise' change only the emitted genotype (GT): the
+    /// measured allele lengths in RB, FRB and MRL are byte-identical under all three, so if
+    /// you work from the lengths rather than the genotype they change nothing for you.
+    ///
+    /// 'expanded' is different in kind. It reports a locus as reference *without genotyping
+    /// it* when every read looks near-reference, so at those loci RB and MRL are 0 rather
+    /// than a measured value. Faster, and it gives up resolution below ~3 bases; long
+    /// expansions are unaffected
     #[arg(long, value_enum, default_value_t = Priority::Balanced)]
     priority: Priority,
 
@@ -267,7 +272,7 @@ impl Cli {
     /// Net CIGAR length difference a read may show and still count as reference-like in the
     /// fast reference check (QUICKREF).
     ///
-    /// Only `--priority screening` loosens this. Measured on 50,000 loci: a tolerance of 3
+    /// Only `--priority expanded` loosens this. Measured on 50,000 loci: a tolerance of 3
     /// fires on 18,078 loci instead of 2,059 and cuts CPU by 15%, while *improving* exact
     /// concordance by 0.9 points and F1 by 2.5 - because a locus QUICKREF answers is one
     /// full genotyping does not get to answer wrongly. The cost is confined to the strata
@@ -276,7 +281,7 @@ impl Cli {
     /// genotyped*, not just how the result is labelled.
     pub fn quickref_tolerance(&self) -> i64 {
         match self.priority {
-            Priority::Screening => 3,
+            Priority::Expanded => 3,
             _ => 0,
         }
     }

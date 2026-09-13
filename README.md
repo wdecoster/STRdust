@@ -48,7 +48,7 @@ SPECIFY ONE OF:
 
 OPTIONS:
     -m, --minlen <MINLEN>              minimal length of an insertion at the junction to count towards the allele [default: 3]
-        --priority <PRIORITY>          'screening', 'sensitive', 'balanced' or 'precise' [default: balanced]
+        --priority <PRIORITY>          'expanded', 'sensitive', 'balanced' or 'precise' [default: balanced]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
         --mapq <MAPQ>                  minimum mapping quality of a read to be used [default: 10]
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
@@ -184,10 +184,12 @@ If you use this tool, please consider citing our [publication](https://genome.cs
 
 ## Choosing a genotype priority
 
-`--priority` decides how different an allele must be from the reference before STRdust
-reports it as a variant. **It affects only the emitted genotype (`GT`). The measured allele
-lengths in `RB`, `FRB` and `MRL` are identical under all three settings** — if you work from
-the lengths rather than the genotype, this flag changes nothing for you.
+`--priority` decides what to optimise when reporting an allele as reference or as a variant.
+
+For `sensitive`, `balanced` and `precise` it affects **only the emitted genotype (`GT`)** —
+the measured allele lengths in `RB`, `FRB` and `MRL` are byte-identical under all three, so
+if you work from the lengths rather than the genotype these change nothing for you.
+`expanded` is different in kind and is described below.
 
 Measured on 10,000 randomly sampled loci of the adotto v1.2.1 catalog against the GIAB HG002
 tandem-repeat truth set, ~30x ONT. Recall and precision are over loci whose truth genotype is
@@ -199,15 +201,16 @@ non-reference — that is, "did we report this polymorphic locus as polymorphic"
 | `balanced` (default) | 85.5% | 58.7% | 69.6 |
 | `precise` | 39.9% | 91.8% | 55.7 |
 
-`screening` is the fourth setting and differs in kind from the other three: it **changes
+`expanded` is the fourth setting and differs in kind from the other three: it **changes
 which loci are genotyped**, not just how the result is labelled. Loci whose reads all look
 near-reference within 3 bases are reported as reference without being genotyped at all. On
 50,000 loci that fires on 18,078 loci instead of 2,059 and cuts CPU by 15%, while slightly
 *improving* overall concordance — a locus answered cheaply is one that full genotyping does
 not get to answer wrongly. The price is resolution below ~3 bases: exact concordance at loci
 whose true allele differs by 1-10 bp falls from 57.4% to 52.0%. Long expansions are
-unaffected. Use it when the question is "is there an expansion here", not "exactly how long
-is this allele".
+unaffected. Because those loci are never genotyped, `RB` and `MRL` are `0` there rather than a measured
+value — unlike the other three settings, this one does change the reported lengths. Use it
+when the question is "is there an expansion here", not "exactly how long is this allele".
 
 Use `sensitive` when a missed locus is worse than a false one — screening, or any workflow
 where candidates are reviewed downstream. Use `precise` when every reported variant will be

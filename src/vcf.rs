@@ -417,9 +417,9 @@ pub fn similarity_rule(args: &Cli) -> SimilarityRule {
         };
     }
     match args.priority {
-        // screening folds small differences away by skipping the locus entirely; what it
+        // `expanded` folds small differences away by skipping the locus entirely; what it
         // does report is labelled as for balanced
-        crate::Priority::Screening | crate::Priority::Balanced => {
+        crate::Priority::Expanded | crate::Priority::Balanced => {
             SimilarityRule { max_edits: -1, divisor: 50, inclusive: false }
         }
         crate::Priority::Sensitive => {
