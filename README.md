@@ -211,7 +211,8 @@ whose true allele differs by 1-10 bp falls from 57.4% to 52.0%. Long expansions 
 unaffected. At those loci `RB` and `MRL` are `0` and `SUP`/`SC` are `.`: the zero is a real finding — the
 check established that every read matches the reference length — while the dots record that
 no consensus was built. Unlike the other three settings this one does change the reported
-lengths, because loci it answers are never measured by the consensus. Use it when the
+lengths — often by supplying them where the consensus path would have produced none at all,
+since a locus the check answers is a locus that is never left as a no-call. Use it when the
 question is "is there an expansion here", not "exactly how long is this allele".
 
 Use `sensitive` when a missed locus is worse than a false one — screening, or any workflow

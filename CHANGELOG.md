@@ -51,7 +51,9 @@ of that is one upstream bug; the rest is defaults that had never been measured.
   faster and improves overall concordance, at the cost of resolution below ~3 bases
   (`1-10bp` exact falls about 6 points). Long expansions are unaffected. At skipped loci
   `RB` and `MRL` are `0` — a real finding rather than a placeholder, since the check
-  established every read matches the reference length — while `SUP` and `SC` are `.`.
+  established every read matches the reference length — while `SUP` and `SC` are `.`. Note
+  this often *adds* length information: many such loci would otherwise have been no-calls
+  with `RB` of `.`.
 
 - **Reference calls now use the same `FORMAT` as every other record.** Loci called
   homozygous reference by the fast CIGAR check previously emitted `GT:SUP`, dropping `RB`,
