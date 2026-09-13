@@ -49,8 +49,15 @@ of that is one upstream bug; the rest is defaults that had never been measured.
   `MRL` are byte-identical under all three. `expanded` differs in kind: it reports a locus as
   reference *without genotyping it* when every read looks near-reference, which is ~14%
   faster and improves overall concordance, at the cost of resolution below ~3 bases
-  (`1-10bp` exact falls about 6 points). Long expansions are unaffected. Under `expanded`,
-  `RB` and `MRL` are `0` at skipped loci rather than a measured length.
+  (`1-10bp` exact falls about 6 points). Long expansions are unaffected. At skipped loci
+  `RB` and `MRL` are `0` — a real finding rather than a placeholder, since the check
+  established every read matches the reference length — while `SUP` and `SC` are `.`.
+
+- **Reference calls now use the same `FORMAT` as every other record.** Loci called
+  homozygous reference by the fast CIGAR check previously emitted `GT:SUP`, dropping `RB`,
+  `FRB` and `MRL` even though all three were known. A `FORMAT` that varies between records
+  in one file breaks any reader that indexes the sample column positionally, and the omission
+  discarded a genuine measurement. They now report `RB=0`, `FRB=len(REF)`, `MRL=0`.
 
 ### Fixed
 

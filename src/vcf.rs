@@ -286,7 +286,12 @@ impl VCFRecord {
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
-            alt_seq: None,
+            // "." as the ALT, but through the normal FORMAT rather than a shortened one:
+            // QUICKREF established that every read matches the reference length, so RB 0 and
+            // FRB = len(REF) are measurements, not placeholders, and dropping them lost real
+            // information. A FORMAT that varies between records in one file also breaks any
+            // reader that indexes the sample column positionally.
+            alt_seq: Some(".".to_string()),
             length: ("0".to_string(), "0".to_string()),
             full_length: (repeat_ref_seq.len().to_string(), repeat_ref_seq.len().to_string()),
             median_length: ("0".to_string(), "0".to_string()),
@@ -684,20 +689,8 @@ impl fmt::Display for VCFRecord {
                     sc = self.per_allele(&self.score),
                 )
             }
-            None => {
-                write!(
-                    f,
-                    "{chrom}\t{start}\t.\t{ref}\t.\t.\t.\t{flags}END={end}{somatic}\tGT:SUP\t{gt}:{sup}",
-                    chrom = self.chrom,
-                    start = self.start,
-                    flags = self.flags,
-                    end = self.end,
-                    ref = self.ref_seq,
-                    somatic = self.somatic_info_field,
-                    gt = self.genotype_field(),
-                    sup = self.per_allele(&self.support),
-                )
-            }
+            // every constructor now supplies an ALT, even if it is "."
+            None => unreachable!("VCFRecord::alt_seq is always set"),
         }
     }
 }
@@ -1097,8 +1090,10 @@ fn test_display_phased_record_uses_phased_separator() {
 
 #[test]
 fn test_info_field_has_no_empty_key() {
-    // A record without an ALT still must not end its INFO field on a bare ';'
-    let record = test_record(false, ("0", "0"), None);
+    // A reference call - ALT ".", as QUICKREF emits - must not end its INFO on a bare ';'.
+    // This used to be constructed with no ALT at all; that state no longer exists, since
+    // every record now goes through the same FORMAT.
+    let record = test_record(false, ("0", "0"), Some("."));
     let line = format!("{record}");
     let info = line.split('\t').nth(7).unwrap();
     assert!(!info.ends_with(';'), "INFO must not end in an empty key: {info}");

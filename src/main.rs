@@ -125,9 +125,10 @@ pub struct Cli {
     /// you work from the lengths rather than the genotype they change nothing for you.
     ///
     /// 'expanded' is different in kind. It reports a locus as reference *without genotyping
-    /// it* when every read looks near-reference, so at those loci RB and MRL are 0 rather
-    /// than a measured value. Faster, and it gives up resolution below ~3 bases; long
-    /// expansions are unaffected
+    /// it* when every read looks near-reference: RB and MRL are 0 there, which is a real
+    /// finding (every read matched the reference length) rather than a placeholder, but SUP
+    /// and SC are '.' because no consensus was built. Faster, and it gives up resolution
+    /// below ~3 bases; long expansions are unaffected
     #[arg(long, value_enum, default_value_t = Priority::Balanced)]
     priority: Priority,
 
