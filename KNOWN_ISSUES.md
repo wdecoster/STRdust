@@ -75,7 +75,14 @@ Four independent contributors were identified, in rough order of expected impact
 
 ## 3. Open: #31 — no tolerance for read noise
 
-**This is the main outstanding problem.**
+> **SUPERSEDED in its diagnosis — see §29.** This section's measurement stands: STRdust did
+> call far too many loci non-reference. Its *explanation* was wrong. Two thirds of the
+> over-calling was `rust-bio`'s POA consensus running to the deepest sink (§29.1), and most
+> of the remainder was `is_similar_to_ref` rounding real 1-2 base alleles to reference
+> (§29.6). False non-reference calls at truth-hom-ref loci fell from 25.2% to 7.9% by fixing
+> those two, without touching the tolerance this section proposes. Kept because the
+> measurement and the reasoning that led from it to the wrong culprit are the record of how
+> the diagnosis was found.
 
 ### Measurement
 
@@ -958,6 +965,8 @@ the **tolerant-QUICKREF experiment**, then the **flank-folding test** at
 
 ## 17. Run C is staged — how to run it and what to do with the result
 
+> **Executed; see §21-§23.** The run was mislabelled and the verdict on #30 inverted twice before the binaries were identified by content.
+
 Written 2026-09-11, at the same point in the cycle as §15: the run is queued, not started.
 
 ### 17.1 What is staged
@@ -1238,6 +1247,8 @@ default drifting under the operator a second time (§19.2).
 ---
 
 ## 20. Run D: the junction-inflation matrix
+
+> **Superseded by §28.** The matrix was replaced by a single-binary sweep once the knobs became CLI flags, and its `--junction-window 0` arm turned out to test a position one base from the junction (§29, and the note at `src/main.rs`).
 
 Designed 2026-09-11, not yet run. This replaces "change 30 to 10 and see" (§15.4 step 3) and
 answers §19 by measurement instead of by prior.
@@ -1632,6 +1643,8 @@ numbers are read.
 
 ## 24. Run D is staged: QUICKREF padding × tolerance, one binary, four arms
 
+> **Executed; see §28 and §29.4.** The tolerant-QUICKREF arm it was built around was measured, found to buy coverage by flattening 1-3 bp alleles, and the knobs were retired.
+
 Staged 2026-09-11 on branch `feat/quickref-tolerance` (off `main`, CI green: fmt, clippy,
 87 unit + 5 integration tests). This replaces §20's separate flank-folding matrix as the next
 run; §20 still stands for the `minlen` question.
@@ -1875,6 +1888,15 @@ This is the knob that acts directly on the dominant error, unlike the QUICKREF k
 move coverage and speed but not consensus accuracy.
 
 ### 26.2 These flags are temporary, and are hidden
+
+> **Outcome, for the record (§29.4).** All six were resolved differently from the guesses
+> below: `--poa-gap-open`, `--poa-match` and `--poa-mismatch` were **retired** rather than
+> retuned, because they contribute −0.1 once the consensus endpoint is fixed; the three
+> `--quickref-*` knobs were **retired** because no setting of them is one a user would
+> choose; `--junction-window` is **kept hidden**, being a no-op on the default path (15 loci
+> in 50,000); and `--poa-trim-fraction` and `--poa-medoid-seed` stayed hidden but had their
+> **defaults changed** to the measured optimum. The user-facing knob that emerged was one
+> nobody had predicted: `--priority` (§29.6).
 
 All six tuning flags — three QUICKREF, three POA — are `hide = true`: absent from `--help`,
 absent from the README, fully functional. They exist so a sweep needs no rebuild, which is
@@ -2245,3 +2267,64 @@ homozygous reference — at 99.0% precision, and on the fast path what it skips 
 more than the check itself. It now buys ~0.3 points and 338 rescued loci at a 5% CPU cost,
 which is the opposite of its purpose. Whether it belongs to `--mode sensitive` only depends
 on the sensitive-mode measurement, still running.
+
+---
+
+## 30. Still outstanding
+
+A deliberate list, so the things not done are as visible as the things done.
+
+### 30.1 The experiment that matters most, and has never been run
+
+**A synthetic expansion ladder** (§27.4): reads carrying 100/500/1000/2000/4000/8000 bp
+insertions at one locus, genotyped with defaults. It is the only planned experiment that
+addresses *silently undersized* expansions, and no amount of HG002 benchmarking substitutes
+for it, because the truth set contains what it contains.
+
+The mechanism it tests: `find_insertions` keeps only `read.is_primary`, and minimap2's
+`map_ont` defaults (`zdrop=400`, `max_gap=5000`) can split a sufficiently large insertion
+across alignments — the non-primary piece is discarded and the allele comes back **short
+rather than absent**. `flanking = 5000` caps it from the other side. Detection measured on
+real data (92.2% found, 1.0% `short`) cannot distinguish "the truth set has few enormous
+alleles" from "we size them wrongly", and a ladder can.
+
+This is the one item where a missed pathogenic expansion is the failure mode, so it
+outranks everything else on this list.
+
+### 30.2 Measured but unexplained, or unmeasured
+
+- **The unphased path has never been benchmarked.** It panicked under `--threads N`
+  (§29.7); the crash is fixed, the accuracy is unknown. `find_roots`' dissimilarity
+  threshold of 5.0 can discard a minority expansion and split the reference allele in two to
+  replace it — a confident `0/0` where an expansion exists, with `EXPANSION_OUTLIER` as the
+  only (INFO-only) signal.
+- **`remove_outliers` at length-variable loci.** Ruled out for the +1 bin — it is inactive
+  on 96.8% of homozygous-reference alleles because their cluster std dev is below 5 — but its
+  symmetric ±2 SD trimming on an asymmetric distribution remains a candidate for
+  under-calling at long loci, where it *is* active. Never tested.
+- **A second non-determinism source.** Of the three loci differing between two runs of
+  identical code (§21.2), two were the unseeded downsampler (§27.1). The third had
+  `SUP=2,4` against `2,3` — low coverage, so downsampling cannot be the cause, and the
+  support count itself changed. Unidentified.
+- **The 2m18s arm.** One benchmark arm finished in 2m18s where comparable arms take 13+
+  minutes, scoring a full 9,294 loci. Probably page cache on the CRAM after many passes, but
+  that is a guess and the number was used.
+
+### 30.3 Owed to others
+
+- **Report the POA endpoint bug upstream.** `Aligner::consensus()` picks its endpoint by
+  `max_by_key` over a strictly increasing score, so it is always a sink — wrong for any
+  noisy-read use, not just ours. Alongside the existing rust-bio#677. Noted in
+  `src/consensus.rs`, not filed.
+- **#31 has no comment from us** although §29 largely explains it, and the issue still
+  names the similarity threshold as the cause.
+- **§12's loose end**: the §4.5 QUICKREF measurement is still recorded only here.
+
+### 30.4 Process debt
+
+- **`misc/` has no tests and CI does not touch it** (§18.5), and it now carries the harness,
+  three analysis scripts and the truth-set construction whose bug (§25) silently distorted a
+  whole stratum.
+- **Everything is measured on one sample**, HG002 at ~30x ONT, one catalog, one chemistry.
+  Seeds control locus sampling, not that. The *orderings* in this document should generalise;
+  the absolute numbers should not be quoted as universal.
