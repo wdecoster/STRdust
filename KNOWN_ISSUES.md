@@ -2105,3 +2105,143 @@ higher**, never `>=` at the current default.
 - **Recall falls as precision rises** across every improving arm (65.1% -> 62.0% for
   `--minlen 5`). Worth understanding before choosing a value, not just tallying exact matches.
 - **The +1 bin.** Untouched by everything except the gap penalty, and then barely.
+
+---
+
+## 29. The +1 bin was a bug in rust-bio's POA, not a parameter
+
+2026-09-12/13. This section supersedes the tuning conclusions of §28: most of what those
+knobs appeared to buy was a partial workaround for a single upstream defect.
+
+### 29.1 The diagnosis
+
+`bio::alignment::poa::Aligner::consensus()` chooses its endpoint with `max_by_key` over a
+cumulative score to which **every edge contributes a weight of at least 1**. The score
+therefore increases strictly along every edge, so the argmax is **provably always a sink**:
+the consensus runs to the deepest point in the graph rather than the best supported one.
+A global alignment forces a read longer than every graph path to emit its surplus as
+insertion nodes, and surplus at either terminus creates a deeper sink that wins regardless of
+how little supports it — one read in fifteen, with no vote taken.
+
+Three independent lines of evidence, none of which any other hypothesis predicts:
+
+| evidence | value |
+|---|---|
+| consensus longer than the median read, vs shorter | **29 : 1** |
+| P(too long \| median read is exactly reference), 0-4 reads | 14.9% |
+| … 10-14 reads | 26.9% |
+| … 15-19 reads | **32.6%** |
+
+**The defect gets worse with more reads.** A consensus cannot do that; an estimator tracking
+the maximum can. And `MRL`, the median read length of the same cluster, is 91.9% exact where
+the consensus is 71.2% — and is **invariant across every scoring and filtering arm tried**,
+because the reads were never wrong.
+
+It also explains the signature §28 could not: surplus in the *interior* forms a weight-1
+bubble that the heaviest-edge choice rejects — that is the +2/+3/+4 mass, which raising
+`--poa-gap-open` did drain — while surplus at a *terminus* wins on depth, which no score can
+touch. Hence +1 sat at ~8% through every scoring change.
+
+### 29.2 The fix, and why no fork was needed
+
+`Aligner::graph()` is public and `POAGraph` is a plain petgraph graph, so the corrected
+traversal lives in `src/consensus.rs` (`trimmed_consensus`): the same heaviest-edge walk,
+with the ends corrected — a terminal base is dropped unless the edge reaching it carries
+`--poa-trim-fraction` of the cluster's reads. No fork (a git dependency cannot be published
+to crates.io) and no vendored module (~500 lines frozen at 4.0.0 to fix ~30).
+
+**Worth reporting upstream**: the endpoint selection is wrong for any noisy-read use.
+
+### 29.3 What it is worth
+
+| | seed 1 (tuning) | seed 3 | seed 4 | seed 5 | seed 6 |
+|---|---|---|---|---|---|
+| base | 53.0% | 53.4% | 53.7% | 52.8% | 53.6% |
+| trim 0.35 | 79.4% | 79.4% | 79.7% | — | — |
+| best combination | 80.8% | — | — | 80.8% | 81.4% |
+| **`fast` + trim 0.35** | — | — | — | **84.6%** | **85.0%** |
+
+**+26.0 points on seeds never used for tuning**, against +26.4 where it was tuned — no
+measurable selection effect despite comparing well over thirty arms. 0.35 is the optimum of
+a six-point ladder (0.10/0.20/0.35/0.40/0.45/0.50) and turns over on both sides; above it
+the −1 bin grows, which is real sequence being cut rather than one-read overhangs.
+
+### 29.4 The tuning knobs were measuring the same defect
+
+Once the endpoint is corrected, the knobs of §28 collapse:
+
+| on top of trim | gain |
+|---|---|
+| `--poa-gap-open 30` | **−0.1** |
+| `--minlen 3` | +1.4 |
+| `--poa-medoid-seed` | +0.3 |
+| `--junction-window 10` | +0.5 |
+
+`--poa-gap-open`'s standalone +5.3 (and +11.4 at 70) was almost entirely an indirect
+mitigation of the sink rule. It, `--poa-match` and `--poa-mismatch` were retired rather than
+given new defaults.
+
+### 29.5 `--mode fast` wins everywhere, including where it was expected to lose
+
+On 5,072 loci that actually carry an expansion over 200 bp:
+
+| arm | exact | ≤5bp | no-calls |
+|---|---|---|---|
+| sensitive | 46.1% | 88.3% | 594 |
+| sensitive + trim + minlen | 69.1% | 91.6% | 606 |
+| fast | 63.1% | 91.9% | 498 |
+| **fast + trim** | **71.9%** | **92.6%** | 498 |
+
+Detection on that set: 92.2% found for `fast` against 91.7% for sensitive, with `short`
+(silently undersized) at 1.0% for both. So ~7% of real expansions are missed by either mode,
+almost always as a visible no-call. `fast` also builds its ALT through the same POA, which is
+why trimming improves it by 8 points too — its advantage comes from cleaner *per-read*
+alleles, not from avoiding the consensus.
+
+`--mode` therefore defaults to `fast` (breaking), and `--minlen` is a no-op on that path.
+
+### 29.6 `--priority`, replacing a threshold nobody chose
+
+The recall cost attributed to trimming was not trimming: of 98 loci that moved from variant
+to reference, **94 still had a called length differing from the reference** — `is_similar_to_ref`
+was rounding them away. Median REF length 77, so `floor(77/20)` with a strict `<` tolerated
+2 edits. The length was correct in `RB` all along.
+
+| `--priority` | recall | precision | F1 |
+|---|---|---|---|
+| `sensitive` | 99.0% | 54.2% | 70.1 |
+| `balanced` (new default) | 85.5% | 58.7% | 69.6 |
+| `precise` | 39.9% | 91.8% | 55.7 |
+| *old default* | *52.1%* | *83.0%* | *64.0* |
+
+The old rule was on no frontier. **The setting affects only the emitted `GT`; `RB`, `FRB` and
+`MRL` are byte-identical under all three**, verified.
+
+§13.4's "no threshold rule fixes the over-calling" was measured against a length distribution
+distorted by the sink bug and does not carry forward.
+
+### 29.7 Two bugs found by trying to benchmark untested paths
+
+- **`--unphased --threads N` panicked** with `RefCell already borrowed`. `with_reader` held
+  the thread-local borrow across the caller's closure; `call.rs` is already inside a
+  `par_iter` when it takes a reader, and `phase_insertions` starts a nested one, which
+  work-stealing can schedule onto the same thread. Load-dependent, invisible on phased input.
+  Fixed in `aed861d`. **The unphased path is still unbenchmarked.**
+- **Read downsampling was unseeded** (§27.1), confirmed as the cause of 2 of the 3
+  differing loci in §21.2, though it fires on only ~0.02% of loci at this depth.
+
+### 29.8 QUICKREF's rationale has inverted
+
+It exists to save time on loci that are homozygous reference anyway. Measured on 50,000 loci
+in `fast` mode:
+
+| | CPU seconds | exact | scored |
+|---|---|---|---|
+| QUICKREF on | 6,628.8 | 85.2% | 46,579 |
+| QUICKREF off | **6,319.8** | 85.1% | 46,241 |
+
+**Turning it off is ~5% faster.** It fires on 4.1% of loci — 5.0% of the 82% that are truly
+homozygous reference — at 99.0% precision, and on the fast path what it skips costs barely
+more than the check itself. It now buys ~0.3 points and 338 rescued loci at a 5% CPU cost,
+which is the opposite of its purpose. Whether it belongs to `--mode sensitive` only depends
+on the sensitive-mode measurement, still running.
