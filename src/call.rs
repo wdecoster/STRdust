@@ -11,12 +11,10 @@ use std::{io, sync::Mutex};
 use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
 
 /// Per-target bookkeeping while scanning a batch: which of the batch's stored records
-/// overlap this target, whether any of them showed a length difference (QUICKREF), and how
-/// many were actually inspected for it.
+/// overlap this target, and whether any of them showed a length difference (QUICKREF).
 struct TargetInfo {
     has_variation: bool,
     record_indices: Vec<usize>,
-    reads_checked: usize,
 }
 
 /// Process a batch of nearby STR targets with optimized single-fetch approach
@@ -86,7 +84,6 @@ fn process_batch(
                 let info = target_info.entry(target_idx).or_insert_with(|| TargetInfo {
                     has_variation: false,
                     record_indices: Vec::new(),
-                    reads_checked: 0,
                 });
 
                 info.record_indices.push(future_idx);
@@ -112,7 +109,6 @@ fn process_batch(
                     if diff != 0 {
                         info.has_variation = true;
                     }
-                    info.reads_checked += 1;
                 }
             }
         }
