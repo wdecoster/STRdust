@@ -362,7 +362,7 @@ pub fn genotype_with_extracted_reads(
     let mut dbscan_rb: Option<String> = None;
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
-    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.unphased;
+    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.is_unphased();
 
     if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         // Haploid chromosome
@@ -418,7 +418,7 @@ pub fn genotype_with_extracted_reads(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len());
-        let phased = match args.phasing_strategy {
+        let phased = match args.phasing_strategy() {
             crate::PhasingStrategy::Ward => crate::phase_insertions::split(
                 &insertions,
                 repeat,
@@ -493,7 +493,7 @@ pub fn genotype_with_extracted_reads(
         if expansion_outlier_flagged(&insertions, &consenses) {
             flags.push("EXPANSION_OUTLIER".to_string());
         }
-        if matches!(args.phasing_strategy, crate::PhasingStrategy::Both) {
+        if matches!(args.phasing_strategy(), crate::PhasingStrategy::Both) {
             let (discordant, dbscan_rb_str) =
                 dbscan_qc_comparison(&insertions, repeat, args, &consenses);
             if discordant {
@@ -576,7 +576,7 @@ fn genotype_repeat(
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
-    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.unphased;
+    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.is_unphased();
 
     // Check for quick reference (0|0), no coverage (.|.), or needs alignment
     // If alignment_all is set, disable quick reference check (set to 0)
@@ -705,7 +705,7 @@ fn genotype_repeat(
             // store all inserted sequences for identifying somatic variation
             all_ins.push(insertions.join(":"));
         }
-    } else if args.unphased {
+    } else if args.is_unphased() {
         // get the sequences
         let seq = &reads.phase0;
         debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
@@ -738,7 +738,7 @@ fn genotype_repeat(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = match args.phasing_strategy {
+        let phased = match args.phasing_strategy() {
             crate::PhasingStrategy::Ward => crate::phase_insertions::split(
                 &insertions,
                 repeat,
@@ -818,7 +818,7 @@ fn genotype_repeat(
         if expansion_outlier_flagged(&insertions, &consenses) {
             flags.push("EXPANSION_OUTLIER".to_string());
         }
-        if matches!(args.phasing_strategy, crate::PhasingStrategy::Both) {
+        if matches!(args.phasing_strategy(), crate::PhasingStrategy::Both) {
             let (discordant, dbscan_rb_str) =
                 dbscan_qc_comparison(&insertions, repeat, args, &consenses);
             if discordant {
@@ -1106,10 +1106,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: false,
-            unphased: false,
+            unphased: None,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1152,10 +1151,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: false,
-            unphased: true,
+            unphased: Some(crate::PhasingStrategy::Ward),
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: Some(String::from("chr7")),
@@ -1192,10 +1190,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: false,
-            unphased: true,
+            unphased: Some(crate::PhasingStrategy::Ward),
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1238,10 +1235,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: true,
-            unphased: false,
+            unphased: None,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1291,10 +1287,9 @@ mod tests {
             mapq: 10,
             somatic: true,
             // this sample is aligned without HP tags, so only the unphased path returns reads
-            unphased: true,
+            unphased: Some(crate::PhasingStrategy::Ward),
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,

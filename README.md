@@ -54,13 +54,15 @@ OPTIONS:
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
         --sample <SAMPLE>              Sample name to use in VCF header, if not provided, the bam file name is used
         --somatic                      Print information on somatic variability
-        --unphased                     Reads are not phased, will cluster the reads to phase expansions
+        --unphased <STRATEGY>          Reads are not phased: cluster them with 'ward', 'dbscan' or 'both'
+                                       ward: length-weighted Levenshtein — the general choice
+                                       dbscan: k-mer composition — for alleles differing in motif, not length
+                                       both: run both, report Ward, flag discordance (QC for complicated regions)
         --consensus-reads              Maximum number of reads to use to build the consensus sequence [default: 20]
         --max-number-reads             Max number of reads to extract per locus for genotyping (-1 for all reads) [default: 60]
         --max-locus <MAX_LOCUS>        Maximum locus size to consider; larger intervals are filtered out
         --find-outliers                Identify poorly supported outlier expansions (only with --unphased)
         --min-haplotype-fraction <F>   Minimum fraction of reads for a cluster to be a haplotype (only with --unphased) [default: 0.1]
-        --phasing <STRATEGY>           How to split unphased reads into haplotypes: 'ward', 'dbscan' or 'both' (only with --unphased) [default: ward]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
         --mode <MODE>                  How to recover the repeat sequence from a read: 'fast' or 'sensitive' [default: fast]

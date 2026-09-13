@@ -181,9 +181,19 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     somatic: bool,
 
-    /// Reads are not phased
-    #[arg(long, default_value_t = false)]
-    unphased: bool,
+    /// Reads are not phased: split them into haplotypes with the given strategy.
+    /// 'ward': length-weighted Levenshtein with hierarchical clustering — the general
+    /// choice, and the one to use when alleles differ mainly in length.
+    /// 'dbscan': k-mer composition — separates alleles that differ in motif composition
+    /// rather than in length, which Ward's length-weighted distance tends to merge.
+    /// 'both': run Ward and additionally DBSCAN, reporting the Ward call but flagging
+    /// substantial length discordance (DISCORDANT_LENGTH / DBSCAN_RB) — a QC mode for
+    /// complicated regions where neither strategy should be trusted silently.
+    ///
+    /// A value is required: the strategies suit different situations and the right one is
+    /// a property of the locus, not a default worth hiding.
+    #[arg(long, value_name = "STRATEGY", value_enum)]
+    unphased: Option<PhasingStrategy>,
 
     /// Identify poorly supported outlier expansions (only with --unphased)
     #[arg(long, default_value_t = false)]
@@ -192,14 +202,6 @@ pub struct Cli {
     /// Minimum fraction of reads required for a cluster to be considered a haplotype (only with --unphased)
     #[arg(long, default_value_t = 0.1)]
     min_haplotype_fraction: f32,
-
-    /// Strategy for splitting unphased reads into haplotypes (only with --unphased).
-    /// 'ward': length-weighted Levenshtein + hierarchical clustering (default).
-    /// 'dbscan': k-mer composition features + DBSCAN (experimental, robust to length-variable expansions).
-    /// 'both': QC mode that reports the Ward call but also runs DBSCAN and flags substantial
-    /// length discordance (DISCORDANT_LENGTH / DBSCAN_RB) for review.
-    #[arg(long = "phasing", value_name = "STRATEGY", value_enum, default_value_t = PhasingStrategy::Ward)]
-    phasing_strategy: PhasingStrategy,
 
     /// comma-separated list of haploid (sex) chromosomes
     #[arg(long)]
@@ -257,6 +259,18 @@ impl Cli {
     }
 }
 
+impl Cli {
+    /// Whether reads must be split into haplotypes by clustering.
+    pub fn is_unphased(&self) -> bool {
+        self.unphased.is_some()
+    }
+
+    /// The clustering strategy, meaningful only when [`Cli::is_unphased`] is true.
+    pub fn phasing_strategy(&self) -> PhasingStrategy {
+        self.unphased.unwrap_or(PhasingStrategy::Ward)
+    }
+}
+
 fn is_file(pathname: &str) -> Result<String, String> {
     if pathname.starts_with("http")
         || pathname.starts_with("https://")
@@ -276,7 +290,7 @@ fn is_file(pathname: &str) -> Result<String, String> {
 fn main() {
     env_logger::init();
     let args = Cli::parse();
-    if args.find_outliers && !args.unphased {
+    if args.find_outliers && !args.is_unphased() {
         warn!("--find-outliers is only effective with --unphased");
     }
     if args.haploid.is_some() {

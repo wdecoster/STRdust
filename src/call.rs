@@ -183,7 +183,7 @@ fn process_batch(
 
                 // Check if we have enough reads
                 if reads.is_empty() {
-                    if args.unphased {
+                    if args.is_unphased() {
                         debug!("Cannot genotype {repeat}: no reads found");
                     } else {
                         debug!(
@@ -270,7 +270,7 @@ fn collect_reads(
 
         // a --haploid chromosome has a single haplotype, so its reads are pooled in phase 0
         // regardless of any HP tags they carry - that is where the genotyper looks for them
-        if args.unphased || crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
+        if args.is_unphased() || crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
             reads.phase0.push(seq);
         } else {
             match parse_bam::get_phase(record) {
@@ -305,7 +305,7 @@ fn enough_support(
 ) -> bool {
     if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         reads.phase0.len() >= args.support
-    } else if args.unphased {
+    } else if args.is_unphased() {
         reads.phase0.len() >= 2 * args.support
     } else {
         reads.phase1.len() >= args.support && reads.phase2.len() >= args.support
