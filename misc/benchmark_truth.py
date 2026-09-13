@@ -410,12 +410,18 @@ def resolve_locus(records):
     ploidy = max(len(deltas) for deltas, _phased in records)
     # only *length-changing* heterozygous records need phase: a het SNV inside the repeat
     # contributes 0 to both haplotypes whichever way it is assigned
-    ambiguous = [
-        deltas
+    varying = [
+        (deltas, phased)
         for deltas, phased in records
-        if not phased and len({delta for delta, _is_ref in deltas}) > 1
+        if len({delta for delta, _is_ref in deltas}) > 1
     ]
-    if len(ambiguous) > 1:
+    # A single unphased heterozygous record is only safe when it is the *only* record that
+    # differs between haplotypes. With anything else varying - phased or not - its
+    # orientation relative to that record is unknown: phased 0|10 plus unphased 5/0 is
+    # consistent with both [5, 10] and [0, 15], and taking the listed order invents truth.
+    if any(not phased for _deltas, phased in varying) and len(varying) > 1:
+        return None
+    if sum(1 for _deltas, phased in varying if not phased) > 1:
         return None
     totals = [0] * ploidy
     for deltas, _phased in records:

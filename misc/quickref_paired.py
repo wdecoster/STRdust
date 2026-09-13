@@ -76,6 +76,9 @@ def main():
     quickref_right = sum(1 for k in fired if is_exact(left[k]))
     full_right = sum(1 for k in fired if is_exact(right[k]))
     full_wrong = sum(1 for k in fired if is_exact(right[k]) is False)
+    # a correction requires QUICKREF to be right where the other run is wrong; counting
+    # every wrong call there would credit QUICKREF for loci it also got wrong
+    corrected = sum(1 for k in fired if is_exact(left[k]) and is_exact(right[k]) is False)
     full_nocall = sum(1 for k in fired if is_exact(right[k]) is None)
     both_wrong = sum(1 for k in fired if not is_exact(left[k]) and is_exact(right[k]) is not True)
     # a rescue is a locus QUICKREF got *right* that the other run failed to call at all;
@@ -100,7 +103,7 @@ def main():
         print(f"\n  where {args.full_run} produced a call at all: "
               f"{full_right}/{called} = {full_right / called:.1%} exact")
     print(f"  QUICKREF's contribution: {rescued} loci rescued from no-call, "
-          f"{full_wrong} corrected")
+          f"{corrected} corrected")
 
     truth_classes = collections.Counter(left[k]["truth_gt"] for k in fired)
     print("\n  truth genotype of the loci it fired on:")

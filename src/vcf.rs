@@ -367,17 +367,13 @@ impl VCFRecord {
             // end - start + 1 bases; `end - start` here was the last survivor of #22 and
             // made every single-read call one base too long. Saturating because a read
             // shorter than the reference is a contraction, not an underflow.
-            length: (
-                (seq.len() as u32)
-                    .saturating_sub(repeat_ref_seq.len() as u32)
-                    .to_string(),
-                ".".to_string(),
-            ),
+            // signed, like Allele::from_consensus: a read shorter than the reference is a
+            // contraction and must report a negative RB. Saturating here reported every
+            // single-read contraction as 0 while the ALT was visibly shorter than REF.
+            length: ((seq.len() as i32 - repeat_ref_seq.len() as i32).to_string(), ".".to_string()),
             full_length: ((seq.len() as u32).to_string(), ".".to_string()),
             median_length: (
-                (seq.len() as u32)
-                    .saturating_sub(repeat_ref_seq.len() as u32)
-                    .to_string(),
+                (seq.len() as i32 - repeat_ref_seq.len() as i32).to_string(),
                 ".".to_string(),
             ),
             support: ("1".to_string(), ".".to_string()),

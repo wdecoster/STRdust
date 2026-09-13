@@ -2396,3 +2396,38 @@ heterozygous locus, and `AUTO_K` seeds from the *median* read, which at a het ex
 is a reference read. Neither has ever been swept. **This benchmark cannot show DBSCAN at its
 best** — it scores lengths, and DBSCAN's case is composition at similar length — so a
 compositional test set built from the truth VCF's sequences is needed before any verdict.
+
+
+---
+
+## 32. Known limitation: the consensus endpoint is corrected, not chosen
+
+Raised in review of the v1.0.0 PR, verified, and left in place deliberately.
+
+`trimmed_consensus` (§29.2) corrects rust-bio's endpoint by walking back from the
+highest-scoring node and then dropping terminal bases carried by fewer than
+`--poa-trim-fraction` of the reads. That fixes the sink rule but **only along the path the
+unmodified score already chose**. Where a graph forks near an end, a long weakly-supported
+branch can out-score a short well-supported one, because the score is the sum of edge
+weights:
+
+```
+12 reads, min_weight = ceil(0.35 * 12) = 5
+  branch A: 13 nodes, edge weight 1  -> cumulative 13, every edge below min_weight
+  branch B:  2 nodes, edge weight 6  -> cumulative 12, every edge above min_weight
+```
+
+The argmax picks A, traceback follows A, and trimming pops all of A back to the branch
+point — **B's two well-supported bases are never emitted, so the consensus is two bases
+short.** Trimming can retreat to a fork; it cannot cross to the sibling.
+
+The principled fix is to make the path selection support-aware — restrict the per-node
+predecessor choice to edges meeting `min_weight`, falling back to the unrestricted choice
+only when no supported predecessor exists — rather than trimming a path chosen without
+regard to support.
+
+**Not done for 1.0** because it changes the traversal rather than its endpoint, so the
+0.35 optimum and the +26.0 point result would both need re-deriving. The current form is
+measured and replicated; a better one would have to earn the same evidence. The residual is
+second-order: it makes some consensuses slightly *short*, in the opposite direction to the
+defect it fixes, and the −1 bin stays at 3.9% against +1's 3.3% after trimming.
