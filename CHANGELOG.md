@@ -87,8 +87,11 @@ of that is one upstream bug; the rest is defaults that had never been measured.
 
 - All measurements come from one sample, one chemistry and one catalog. The orderings should
   generalise; the absolute numbers should not be quoted as universal.
-- `KNOWN_ISSUES.md` records the full investigation, including conclusions that were
-  overturned and the experiments still outstanding.
+- The investigation behind this release was kept in `KNOWN_ISSUES.md`, which is retired at
+  1.0.0. Everything still outstanding became an issue (#32, #34-#38); the document itself
+  remains in history at
+  [`3fba652a171d01b89cb723cfa02f3cf6494b6693`](https://github.com/wdecoster/STRdust/blob/3fba652a171d01b89cb723cfa02f3cf6494b6693/KNOWN_ISSUES.md),
+  including the conclusions that were overturned along the way.
 
 ## [0.21.0]
 
