@@ -106,7 +106,7 @@ fn process_batch(
                         target.start,
                         target.end,
                     );
-                    if diff != 0 {
+                    if diff.abs() > args.quickref_tolerance() {
                         info.has_variation = true;
                     }
                 }

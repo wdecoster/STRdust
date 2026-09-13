@@ -417,11 +417,13 @@ pub fn similarity_rule(args: &Cli) -> SimilarityRule {
         };
     }
     match args.priority {
+        // screening folds small differences away by skipping the locus entirely; what it
+        // does report is labelled as for balanced
+        crate::Priority::Screening | crate::Priority::Balanced => {
+            SimilarityRule { max_edits: -1, divisor: 50, inclusive: false }
+        }
         crate::Priority::Sensitive => {
             SimilarityRule { max_edits: 0, divisor: 20, inclusive: false }
-        }
-        crate::Priority::Balanced => {
-            SimilarityRule { max_edits: -1, divisor: 50, inclusive: false }
         }
         crate::Priority::Precise => SimilarityRule { max_edits: -1, divisor: 20, inclusive: true },
     }

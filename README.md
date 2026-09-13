@@ -48,7 +48,7 @@ SPECIFY ONE OF:
 
 OPTIONS:
     -m, --minlen <MINLEN>              minimal length of an insertion at the junction to count towards the allele [default: 3]
-        --priority <PRIORITY>          how readily an allele is reported as reference: 'sensitive', 'balanced' or 'precise' [default: balanced]
+        --priority <PRIORITY>          'screening', 'sensitive', 'balanced' or 'precise' [default: balanced]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
         --mapq <MAPQ>                  minimum mapping quality of a read to be used [default: 10]
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
@@ -198,6 +198,16 @@ non-reference — that is, "did we report this polymorphic locus as polymorphic"
 | `sensitive` | 99.0% | 54.2% | 70.1 |
 | `balanced` (default) | 85.5% | 58.7% | 69.6 |
 | `precise` | 39.9% | 91.8% | 55.7 |
+
+`screening` is the fourth setting and differs in kind from the other three: it **changes
+which loci are genotyped**, not just how the result is labelled. Loci whose reads all look
+near-reference within 3 bases are reported as reference without being genotyped at all. On
+50,000 loci that fires on 18,078 loci instead of 2,059 and cuts CPU by 15%, while slightly
+*improving* overall concordance — a locus answered cheaply is one that full genotyping does
+not get to answer wrongly. The price is resolution below ~3 bases: exact concordance at loci
+whose true allele differs by 1-10 bp falls from 57.4% to 52.0%. Long expansions are
+unaffected. Use it when the question is "is there an expansion here", not "exactly how long
+is this allele".
 
 Use `sensitive` when a missed locus is worse than a false one — screening, or any workflow
 where candidates are reviewed downstream. Use `precise` when every reported variant will be

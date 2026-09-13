@@ -45,6 +45,10 @@ pub enum PhasingStrategy {
 /// What to optimise when deciding whether an allele counts as reference.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Priority {
+    /// Skip genotyping at loci whose reads all look near-reference, and report the rest as
+    /// for `balanced`. Fastest; gives up resolution below ~3 bases. For expansion
+    /// screening, where a 1-3 base difference is not the question being asked.
+    Screening,
     /// Report a variant unless the allele matches the reference exactly. Highest recall.
     Sensitive,
     /// Tolerate 2% of the reference length. Best balance of recall and precision.
@@ -260,6 +264,23 @@ impl Cli {
 }
 
 impl Cli {
+    /// Net CIGAR length difference a read may show and still count as reference-like in the
+    /// fast reference check (QUICKREF).
+    ///
+    /// Only `--priority screening` loosens this. Measured on 50,000 loci: a tolerance of 3
+    /// fires on 18,078 loci instead of 2,059 and cuts CPU by 15%, while *improving* exact
+    /// concordance by 0.9 points and F1 by 2.5 - because a locus QUICKREF answers is one
+    /// full genotyping does not get to answer wrongly. The cost is confined to the strata
+    /// it should be: 1-10bp falls 57.4% -> 52.0% and 51-200bp 78.9% -> 73.3%, with long
+    /// expansions untouched. Unlike the other three settings this changes *which loci are
+    /// genotyped*, not just how the result is labelled.
+    pub fn quickref_tolerance(&self) -> i64 {
+        match self.priority {
+            Priority::Screening => 3,
+            _ => 0,
+        }
+    }
+
     /// Whether reads must be split into haplotypes by clustering.
     pub fn is_unphased(&self) -> bool {
         self.unphased.is_some()
