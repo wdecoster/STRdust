@@ -1500,7 +1500,7 @@ where the same loci went through full genotyping:
 | no call in B | 361 | 15.8% |
 | QUICKREF wrong as well | 34 | 1.5% |
 
-**348 loci rescued from no-call and 574 corrected.** Full genotyping manages 59.0% on loci
+**348 loci rescued from no-call and 553 corrected.** Full genotyping manages 59.0% on loci
 QUICKREF gets 98.1% right — and only 70.1% even where it produces a call at all, against
 90.3% on the narrower set C fires on (§16.2). The loci #30 newly admits are *harder* for the
 aligner than the ones QUICKREF already had, which is exactly where a cheap correct answer is
@@ -2431,3 +2431,33 @@ regard to support.
 measured and replicated; a better one would have to earn the same evidence. The residual is
 second-order: it makes some consensuses slightly *short*, in the opposite direction to the
 defect it fixes, and the −1 bin stays at 3.9% against +1's 3.3% after trimming.
+
+
+---
+
+## 33. What the v1.0.0 review changed, and what it did not invalidate
+
+Six of seven review findings were real (§32 records the seventh as a deliberate limitation).
+Assessed for whether any measurement in this document has to be repeated:
+
+| change | effect on results already recorded |
+|---|---|
+| `resolve_locus` ambiguity | **none, measured**: 0 loci of 138,473 on chr1 are newly skipped and 0 have altered truth. The GIAB TR truth VCF is fully phased, so the ambiguous combination never arises. The bug was real and unreachable here. |
+| `single_read` signed RB/MRL | reachable only with `--unphased` and exactly one insertion, so at most a handful of loci in the two unphased arms (§31.3). The conclusion there is a 50-point gap; this cannot move it. |
+| `quickref_paired` "corrected" | **one quoted number was wrong**: the C2 pairing is 553 corrected, not 574 — the difference being loci where QUICKREF was also wrong. Corrected in §22.3. |
+| README and changelog wording | documentation only. |
+
+### 33.1 The one that mattered was not a review finding
+
+Making the `FORMAT` uniform (so reference calls carry `RB=0` rather than omitting the field)
+broke the harness's *detection* of those calls: `read_strdust` labelled a locus
+`quickref_reference` only when `RB` was **absent**. Every future run would have reported zero
+QUICKREF firings — silently, with no error, and the QUICKREF footprint table would simply
+have shown zeros.
+
+Past results are unaffected, because binary and harness were consistent when each run was
+made. Fixed to key off the `QUICKREF` INFO flag, which is what actually identifies them.
+
+This is the second time a change to the output format has quietly altered what the benchmark
+measures (§25 was the first, in the truth set). Both were caught by asking what a change
+invalidates rather than by a test — `misc/` still has none.

@@ -590,12 +590,14 @@ def compare(truth_loci, calls, mode):
             )
             continue
         if call["lengths"] is None:
-            status = "quickref_reference" if call["quickref"] else "no_call"
             # QUICKREF means STRdust called the locus homozygous reference without
             # aligning, so the called lengths are zeros rather than missing
+            status = "quickref_reference" if call["quickref"] else "no_call"
             called = [0] * len(truth["lengths"]) if call["quickref"] else None
         else:
-            status = "called"
+            # the flag, not the absence of RB: since 1.0.0 reference calls carry RB=0 like
+            # every other record, so "no lengths" no longer identifies them
+            status = "quickref_reference" if call["quickref"] else "called"
             called = call["lengths"]
         if called is None:
             rows.append(
@@ -770,7 +772,10 @@ def plot(rows, path):
 
 # bump when anything that changes the *content* of the truth set changes: the parsing, the
 # confident-region semantics, the sampling. A pure speed-up does not need a bump.
-TRUTH_CACHE_VERSION = 2
+# 3: resolve_locus now skips a locus whenever an unphased heterozygous length-changing
+#    record sits alongside any other haplotype-varying record, since its orientation
+#    relative to that record is unknown.
+TRUTH_CACHE_VERSION = 3
 
 
 def truth_cache_key(args, regions_filter):
