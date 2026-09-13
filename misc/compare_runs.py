@@ -95,7 +95,7 @@ def load(prefix, shift, auto_shift):
 
 def concordance(runs, shared):
     print("\nlength and genotype concordance, on loci common to every run")
-    header = f"{'run':>22} {'scored':>7} {'exact':>7} {'<=1bp':>7} {'<=5bp':>7} {'GT':>7} {'recall':>7} {'prec':>7}"
+    header = f"{'run':>22} {'scored':>7} {'exact':>7} {'<=1bp':>7} {'<=5bp':>7} {'GT':>7} {'recall':>7} {'prec':>7} {'F1':>7}"
     print(header)
     for name, rows in runs.items():
         sub = [rows[key] for key in shared]
@@ -105,13 +105,19 @@ def concordance(runs, shared):
         called_var = [r for r in gt if r["called_gt"] != "0/0"]
         hits = sum(1 for r in truth_var if r["called_gt"] != "0/0")
         pct = lambda n, d: f"{100 * n / d:6.1f}%" if d else "      -"
+        f1 = (
+            2 * hits / (len(truth_var) + len(called_var))
+            if (len(truth_var) + len(called_var))
+            else 0.0
+        )
         print(
             f"{name:>22} {len(scored):>7} "
             f"{pct(sum(1 for r in scored if r['error'] == 0), len(scored))} "
             f"{pct(sum(1 for r in scored if r['error'] <= 1), len(scored))} "
             f"{pct(sum(1 for r in scored if r['error'] <= 5), len(scored))} "
             f"{pct(sum(1 for r in gt if r['called_gt'] == r['truth_gt']), len(gt))} "
-            f"{pct(hits, len(truth_var))} {pct(hits, len(called_var))}"
+            f"{pct(hits, len(truth_var))} {pct(hits, len(called_var))} "
+            f"{100 * f1:6.1f}%"
         )
 
 

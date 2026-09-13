@@ -28,14 +28,16 @@ const IMPRECISE_LENGTH_CV: f64 = 0.2;
 /// Scoring for the POA that builds an allele consensus.
 ///
 /// rust-bio's POA never reads `Scoring::gap_extend` and charges `gap_open` for every gap
-/// base, so the gap model is linear and these three numbers are the whole of it
-/// (<https://github.com/rust-bio/rust-bio/issues/677>).
+/// base, so the gap model is linear (<https://github.com/rust-bio/rust-bio/issues/677>).
 ///
-/// The defaults are the values this was written with. They are implicated in the consensus
-/// running long: a gap penalty that is cheap relative to a match lets a single read's
-/// insertion open a node of its own and be carried into the consensus path, which is the
-/// +1/+2 length excess seen at homozygous-reference loci. Exposed so that can be measured
-/// rather than argued about.
+/// These were once tunable, on the theory that a gap penalty cheap relative to a match let
+/// a single read's insertion open its own node and be carried into the consensus. Measured
+/// against the GIAB HG002 truth set that theory was half right: raising the gap penalty
+/// from 12 to 70 did gain 11 points on its own, but *nothing* on top of `trim_fraction`
+/// (-0.1), because both were addressing the same defect and trimming addresses it at the
+/// source. The knobs were therefore retired rather than given new defaults; the values
+/// below are the originals and should not be changed without re-measuring, since no
+/// experiment has ever shown them to matter once the consensus endpoint is correct.
 #[derive(Clone, Copy, Debug)]
 pub struct PoaScoring {
     pub gap_open: i32,

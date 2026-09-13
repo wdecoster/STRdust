@@ -42,6 +42,17 @@ pub enum PhasingStrategy {
     Both,
 }
 
+/// What to optimise when deciding whether an allele counts as reference.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    /// Report a variant unless the allele matches the reference exactly. Highest recall.
+    Sensitive,
+    /// Tolerate 2% of the reference length. Best balance of recall and precision.
+    Balanced,
+    /// Require a clear difference before reporting a variant. Highest precision.
+    Precise,
+}
+
 // The arguments end up in the Cli struct
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Tool to genotype STRs from long reads", long_about = None)]
@@ -66,8 +77,11 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pathogenic: bool,
 
-    /// minimal length of insertion/deletion operation
-    #[arg(short, long, default_value_t = 1)]
+    /// Minimal length of an insertion at the repeat junction for it to count towards the
+    /// allele. Insertions shorter than this are read noise far more often than sequence:
+    /// dropping to 1 in 02d9540 cost about 11 points of allele-length concordance against
+    /// the GIAB HG002 truth set, and restoring a threshold recovers it
+    #[arg(short, long, default_value_t = 3)]
     minlen: usize,
 
     /// minimal number of supporting reads per haplotype
@@ -104,23 +118,32 @@ pub struct Cli {
     #[arg(long, default_value_t = 30, hide = true)]
     junction_window: i32,
 
-    /// POA gap penalty per gap base, as a positive number. Higher makes the consensus
-    /// reluctant to open a gap, so a single read's insertion is less likely to be carried
-    /// into it. rust-bio's POA has no affine gaps, so this is charged per base
-    #[arg(long, default_value_t = 12, hide = true)]
-    poa_gap_open: i32,
+    /// How readily an allele is reported as reference rather than as a variant. Affects
+    /// only the emitted genotype (GT); the measured allele lengths in RB, FRB and MRL are
+    /// identical under all three. 'sensitive' calls a locus variant unless the allele
+    /// matches the reference exactly, 'precise' requires a clear difference, 'balanced'
+    /// sits between them
+    #[arg(long, value_enum, default_value_t = Priority::Balanced)]
+    priority: Priority,
 
-    /// POA score for a matching base, as a positive number
-    #[arg(long, default_value_t = 3, hide = true)]
-    poa_match: i32,
-
+    // The three --ref-* knobs below are how --priority's three settings were derived, and
+    // are kept hidden rather than deleted so the mapping can be re-derived if the consensus
+    // changes again. Measured on 10,000 loci, fast + trim 0.35, recall/precision/F1 at
+    // truth-variant loci:
+    //     max_edits 0            99.0 / 54.2 / 70.1   -> priority sensitive
+    //     divisor 50 (2% of REF) 85.5 / 58.7 / 69.6   -> priority balanced
+    //     divisor 20, inclusive  39.9 / 91.8 / 55.7   -> priority precise
+    //     divisor 20, strict     52.1 / 83.0 / 64.0   <- the old default, on no frontier
+    // Note `inclusive` LOOSENS the rule (more alleles called reference), which is the
+    // opposite of what the name suggests on first reading.
     /// Fixed edit distance an allele may differ from the reference and still be reported
-    /// as reference. Negative keeps the length-scaled rule
+    /// as reference. Negative defers to --priority
     #[arg(long, default_value_t = -1, hide = true, allow_hyphen_values = true)]
     ref_max_edits: i32,
 
-    /// Divisor for the length-scaled reference-similarity threshold (20 = 5% of REF)
-    #[arg(long, default_value_t = 20, hide = true)]
+    /// Divisor for the length-scaled reference-similarity threshold (20 = 5% of REF).
+    /// 0 defers to --priority
+    #[arg(long, default_value_t = 0, hide = true)]
     ref_edit_divisor: usize,
 
     /// Compare the edit distance with <= rather than <, so the stated tolerance is the
@@ -130,18 +153,20 @@ pub struct Cli {
 
     /// Seed the POA graph with the read closest to the cluster median length instead of
     /// the first sampled read, whose indels would otherwise become the graph's backbone
-    #[arg(long, default_value_t = false, hide = true)]
+    #[arg(long, default_value_t = true, hide = true)]
     poa_medoid_seed: bool,
 
+    // 0.35 is the optimum of a six-point ladder (0.10/0.20/0.35/0.40/0.45/0.50) on 10,000
+    // loci; it turns over on both sides, and above it the -1 bin grows, which is real
+    // sequence being cut rather than one-read overhangs. The fraction maps to
+    // ceil(fraction * n_reads), so its effective value is an integer that shifts with
+    // depth - an absolute read count would be a cleaner parameterisation if this is ever
+    // revisited.
     /// Fraction of a cluster's reads that must support an edge for the consensus to run
     /// through it at either end. Guards against rust-bio's consensus walking out along a
     /// single read's overhang. 0 keeps rust-bio's own endpoint choice
-    #[arg(long, default_value_t = 0.0, hide = true)]
+    #[arg(long, default_value_t = 0.35, hide = true)]
     poa_trim_fraction: f64,
-
-    /// POA penalty for a mismatching base, as a positive number
-    #[arg(long, default_value_t = 4, hide = true)]
-    poa_mismatch: i32,
 
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications
@@ -209,9 +234,16 @@ pub struct Cli {
     alignment_all: bool,
 
     /// How to recover the repeat sequence from a read.
-    /// 'sensitive': re-align every read to a repeat-compressed reference (default).
-    /// 'fast': cut the repeat straight out of the alignment already in the BAM/CRAM.
-    #[arg(long, value_name = "MODE", value_enum, default_value_t = GenotypingMode::Sensitive)]
+    /// 'fast': cut the repeat straight out of the alignment already in the BAM/CRAM
+    /// (default).
+    /// 'sensitive': re-align every read to a repeat-compressed reference.
+    ///
+    /// 'fast' is both quicker and more accurate against the GIAB HG002 truth set, including
+    /// at long expansions, which was the case it was expected to lose: re-aligning
+    /// reconstructs each read's allele by concatenating insertions near the junction, which
+    /// folds in stray flanking sequence and cannot subtract deletions, while cutting from
+    /// the alignment derives the allele from a reference span and gets both for free.
+    #[arg(long, value_name = "MODE", value_enum, default_value_t = GenotypingMode::Fast)]
     mode: GenotypingMode,
 
     /// How far outside the annotated interval an insertion may sit and still count towards

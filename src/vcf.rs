@@ -403,10 +403,27 @@ fn length_ratio(seq1: &str, seq2: &str) -> f32 {
 
 /// The similarity rule as configured on the command line.
 pub fn similarity_rule(args: &Cli) -> SimilarityRule {
-    SimilarityRule {
-        max_edits: args.ref_max_edits,
-        divisor: args.ref_edit_divisor,
-        inclusive: args.ref_edit_inclusive,
+    // the hidden knobs win when set, so a sweep can still address the three thresholds
+    // separately; otherwise the rule comes from --priority
+    if args.ref_max_edits >= 0 || args.ref_edit_divisor > 0 || args.ref_edit_inclusive {
+        return SimilarityRule {
+            max_edits: args.ref_max_edits,
+            divisor: if args.ref_edit_divisor > 0 {
+                args.ref_edit_divisor
+            } else {
+                20
+            },
+            inclusive: args.ref_edit_inclusive,
+        };
+    }
+    match args.priority {
+        crate::Priority::Sensitive => {
+            SimilarityRule { max_edits: 0, divisor: 20, inclusive: false }
+        }
+        crate::Priority::Balanced => {
+            SimilarityRule { max_edits: -1, divisor: 50, inclusive: false }
+        }
+        crate::Priority::Precise => SimilarityRule { max_edits: -1, divisor: 20, inclusive: true },
     }
 }
 
@@ -833,14 +850,12 @@ fn test_write_vcf_header_from_bam() {
         quickref_tolerance: 0,
         quickref_min_reads: 0,
         junction_window: 30,
+        priority: crate::Priority::Balanced,
         ref_max_edits: -1,
-        ref_edit_divisor: 20,
+        ref_edit_divisor: 0,
         ref_edit_inclusive: false,
-        poa_medoid_seed: false,
-        poa_trim_fraction: 0.0,
-        poa_gap_open: 12,
-        poa_match: 3,
-        poa_mismatch: 4,
+        poa_medoid_seed: true,
+        poa_trim_fraction: 0.35,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
@@ -876,14 +891,12 @@ fn test_write_vcf_header_from_name() {
         quickref_tolerance: 0,
         quickref_min_reads: 0,
         junction_window: 30,
+        priority: crate::Priority::Balanced,
         ref_max_edits: -1,
-        ref_edit_divisor: 20,
+        ref_edit_divisor: 0,
         ref_edit_inclusive: false,
-        poa_medoid_seed: false,
-        poa_trim_fraction: 0.0,
-        poa_gap_open: 12,
-        poa_match: 3,
-        poa_mismatch: 4,
+        poa_medoid_seed: true,
+        poa_trim_fraction: 0.35,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };

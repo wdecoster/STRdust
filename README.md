@@ -47,7 +47,8 @@ SPECIFY ONE OF:
         --pathogenic                   Genotype the pathogenic STRs from STRchive
 
 OPTIONS:
-    -m, --minlen <MINLEN>              minimal length of insertion/deletion operation [default: 1]
+    -m, --minlen <MINLEN>              minimal length of an insertion at the junction to count towards the allele [default: 3]
+        --priority <PRIORITY>          how readily an allele is reported as reference: 'sensitive', 'balanced' or 'precise' [default: balanced]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
         --mapq <MAPQ>                  minimum mapping quality of a read to be used [default: 10]
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
@@ -62,7 +63,7 @@ OPTIONS:
         --phasing <STRATEGY>           How to split unphased reads into haplotypes: 'ward', 'dbscan' or 'both' (only with --unphased) [default: ward]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
-        --mode <MODE>                  How to recover the repeat sequence from a read: 'sensitive' or 'fast' [default: sensitive]
+        --mode <MODE>                  How to recover the repeat sequence from a read: 'fast' or 'sensitive' [default: fast]
         --fast-flank <FAST_FLANK>      How far outside the interval an insertion still counts, with --mode fast [default: 20]
         --sorted                       Sort output by chrom, start and end
         --debug                        Debug mode
@@ -177,3 +178,30 @@ quality standards, and CI are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## CITATION
 
 If you use this tool, please consider citing our [publication](https://genome.cshlp.org/content/early/2024/08/15/gr.279265.124).
+
+
+## Choosing a genotype priority
+
+`--priority` decides how different an allele must be from the reference before STRdust
+reports it as a variant. **It affects only the emitted genotype (`GT`). The measured allele
+lengths in `RB`, `FRB` and `MRL` are identical under all three settings** — if you work from
+the lengths rather than the genotype, this flag changes nothing for you.
+
+Measured on 10,000 randomly sampled loci of the adotto v1.2.1 catalog against the GIAB HG002
+tandem-repeat truth set, ~30x ONT. Recall and precision are over loci whose truth genotype is
+non-reference — that is, "did we report this polymorphic locus as polymorphic":
+
+| `--priority` | recall | precision | F1 |
+|---|---|---|---|
+| `sensitive` | 99.0% | 54.2% | 70.1 |
+| `balanced` (default) | 85.5% | 58.7% | 69.6 |
+| `precise` | 39.9% | 91.8% | 55.7 |
+
+Use `sensitive` when a missed locus is worse than a false one — screening, or any workflow
+where candidates are reviewed downstream. Use `precise` when every reported variant will be
+taken at face value. `balanced` is the default because it has essentially the same F1 as
+`sensitive` with materially better precision.
+
+These figures are from one sample and one chemistry; the ordering should carry over, the
+absolute numbers should not be quoted as universal. They also describe *genotype* calls, not
+detection of long expansions, which is far less sensitive to this setting.
