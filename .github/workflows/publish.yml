@@ -75,6 +75,18 @@ jobs:
       if: '!matrix.use_cross'
       run: cargo test --release
 
+    # Release binaries carry ~170 MB of DWARF because [profile.release] sets debug = true,
+    # which is wanted for local profiling and not for a download. --strip-debug rather than a
+    # full strip: it recovers 167 of those 170 MB while keeping the symbol table, so a panic
+    # from a user still produces a backtrace with function names in it. macOS keeps debug
+    # info in a separate .dSYM, so its binary is already small and is left alone.
+    - name: Strip debug info from Linux binaries
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        ls -l ${{ matrix.artifact_name }}
+        strip --strip-debug ${{ matrix.artifact_name }}
+        ls -l ${{ matrix.artifact_name }}
+
     - name: Upload binaries to release
       uses: svenstaro/upload-release-action@v2
       with:
