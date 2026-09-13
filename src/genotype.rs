@@ -82,12 +82,14 @@ fn dbscan_qc_comparison(
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             ));
             dbscan_consenses.push(crate::consensus::consensus(
                 &hap2,
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             ));
         }
         None => {
@@ -96,6 +98,7 @@ fn dbscan_qc_comparison(
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             );
             dbscan_consenses.push(c.clone());
             dbscan_consenses.push(c);
@@ -263,6 +266,19 @@ fn check_quick_reference_and_collect_reads(
 
 // when running multithreaded, the indexedreader has to be created every time again
 // this is probably expensive
+
+/// POA scoring as configured on the command line.
+///
+/// The CLI takes penalties as positive numbers because that is how aligners are usually
+/// discussed; the aligner wants them negative.
+fn poa_scoring(args: &Cli) -> crate::consensus::PoaScoring {
+    crate::consensus::PoaScoring {
+        medoid_seed: args.poa_medoid_seed,
+        trim_fraction: args.poa_trim_fraction,
+        ..Default::default()
+    }
+}
+
 pub fn genotype_repeat_multithreaded(
     repeat: &mut crate::repeats::RepeatInterval,
     args: &Cli,
@@ -346,7 +362,7 @@ pub fn genotype_with_extracted_reads(
     let mut dbscan_rb: Option<String> = None;
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
-    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.unphased;
+    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.is_unphased();
 
     if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         // Haploid chromosome
@@ -364,8 +380,13 @@ pub fn genotype_with_extracted_reads(
         }
         // A haploid chromosome yields a single consensus / haplotype, pushed once;
         // vcf.rs reports it as a single allele value per the VCF specification.
-        let consensus =
-            crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
+        let consensus = crate::consensus::consensus(
+            &insertions,
+            args.support,
+            args.consensus_reads,
+            repeat,
+            poa_scoring(args),
+        );
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
             all_ins.push(insertions.join(":"));
@@ -397,7 +418,7 @@ pub fn genotype_with_extracted_reads(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len());
-        let phased = match args.phasing_strategy {
+        let phased = match args.phasing_strategy() {
             crate::PhasingStrategy::Ward => crate::phase_insertions::split(
                 &insertions,
                 repeat,
@@ -429,12 +450,14 @@ pub fn genotype_with_extracted_reads(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 consenses.push(crate::consensus::consensus(
                     &phase2,
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.push(phased.hap1.join(":"));
@@ -455,6 +478,7 @@ pub fn genotype_with_extracted_reads(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 );
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
@@ -469,7 +493,7 @@ pub fn genotype_with_extracted_reads(
         if expansion_outlier_flagged(&insertions, &consenses) {
             flags.push("EXPANSION_OUTLIER".to_string());
         }
-        if matches!(args.phasing_strategy, crate::PhasingStrategy::Both) {
+        if matches!(args.phasing_strategy(), crate::PhasingStrategy::Both) {
             let (discordant, dbscan_rb_str) =
                 dbscan_qc_comparison(&insertions, repeat, args, &consenses);
             if discordant {
@@ -506,12 +530,14 @@ pub fn genotype_with_extracted_reads(
             args.support,
             args.consensus_reads,
             repeat,
+            poa_scoring(args),
         ));
         consenses.push(crate::consensus::consensus(
             &insertions2,
             args.support,
             args.consensus_reads,
             repeat,
+            poa_scoring(args),
         ));
         if let Some(ref mut all_ins) = all_insertions {
             all_ins.push(insertions1.join(":"));
@@ -550,7 +576,7 @@ fn genotype_repeat(
 
     // alignments can be extracted in an unphased manner, if the chromosome is --haploid or the --unphased is set
     // this means that --haploid overrides the phases which could be present in the bam file
-    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.unphased;
+    let unphased = crate::vcf::chrom_is_haploid(args, &repeat.chrom) || args.is_unphased();
 
     // Check for quick reference (0|0), no coverage (.|.), or needs alignment
     // If alignment_all is set, disable quick reference check (set to 0)
@@ -653,7 +679,8 @@ fn genotype_repeat(
         // if the chromosome is haploid, all reads were put in phase 0
         let seq = &reads.phase0;
         debug!("{repeat}: Haploid: Aligning {} reads", seq.len());
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        let insertions =
+            find_insertions(seq, &aligner, args.minlen, flanking, args.junction_window, repeat);
         debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len(),);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
@@ -666,19 +693,25 @@ fn genotype_repeat(
         }
         // There is only one haplotype on a haploid chromosome: a single consensus is pushed and
         // vcf.rs reports it as a single allele value (e.g. "1") per the VCF specification.
-        let consensus =
-            crate::consensus::consensus(&insertions, args.support, args.consensus_reads, repeat);
+        let consensus = crate::consensus::consensus(
+            &insertions,
+            args.support,
+            args.consensus_reads,
+            repeat,
+            poa_scoring(args),
+        );
         consenses.push(consensus);
         if let Some(ref mut all_ins) = all_insertions {
             // store all inserted sequences for identifying somatic variation
             all_ins.push(insertions.join(":"));
         }
-    } else if args.unphased {
+    } else if args.is_unphased() {
         // get the sequences
         let seq = &reads.phase0;
         debug!("{repeat}: Unphased: Aligning {} reads", seq.len());
         // align the reads to the new repeat-compressed reference
-        let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+        let insertions =
+            find_insertions(seq, &aligner, args.minlen, flanking, args.junction_window, repeat);
         if insertions.len() < args.support {
             // Return a missing genotype if not enough insertions are found
             // this is too lenient - the support parameter is meant to be per haplotype
@@ -705,7 +738,7 @@ fn genotype_repeat(
         }
 
         debug!("{repeat}: Phasing {} insertions", insertions.len(),);
-        let phased = match args.phasing_strategy {
+        let phased = match args.phasing_strategy() {
             crate::PhasingStrategy::Ward => crate::phase_insertions::split(
                 &insertions,
                 repeat,
@@ -737,12 +770,14 @@ fn genotype_repeat(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 consenses.push(crate::consensus::consensus(
                     &phase2,
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 ));
                 // store all inserted sequences for identifying somatic variation
                 if let Some(ref mut all_ins) = all_insertions {
@@ -758,6 +793,7 @@ fn genotype_repeat(
                     args.support,
                     args.consensus_reads,
                     repeat,
+                    poa_scoring(args),
                 );
                 consenses.push(consensus.clone());
                 consenses.push(consensus);
@@ -782,7 +818,7 @@ fn genotype_repeat(
         if expansion_outlier_flagged(&insertions, &consenses) {
             flags.push("EXPANSION_OUTLIER".to_string());
         }
-        if matches!(args.phasing_strategy, crate::PhasingStrategy::Both) {
+        if matches!(args.phasing_strategy(), crate::PhasingStrategy::Both) {
             let (discordant, dbscan_rb_str) =
                 dbscan_qc_comparison(&insertions, repeat, args, &consenses);
             if discordant {
@@ -795,7 +831,8 @@ fn genotype_repeat(
         for (phase, seq) in [(1, &reads.phase1), (2, &reads.phase2)] {
             // get the sequences of this phase
             debug!("{repeat}: Phase {}: Aligning {} reads", phase, seq.len());
-            let insertions = find_insertions(seq, &aligner, args.minlen, flanking, repeat);
+            let insertions =
+                find_insertions(seq, &aligner, args.minlen, flanking, args.junction_window, repeat);
 
             debug!(
                 "{repeat}: Phase {}: Creating consensus from {} insertions",
@@ -807,6 +844,7 @@ fn genotype_repeat(
                 args.support,
                 args.consensus_reads,
                 repeat,
+                poa_scoring(args),
             ));
 
             if let Some(ref mut all_ins) = all_insertions {
@@ -842,7 +880,9 @@ fn get_insertions(
     repeat: &crate::repeats::RepeatInterval,
 ) -> Vec<String> {
     match aligner {
-        Some(aligner) => find_insertions(seq, aligner, args.minlen, flanking, repeat),
+        Some(aligner) => {
+            find_insertions(seq, aligner, args.minlen, flanking, args.junction_window, repeat)
+        }
         None => seq
             .iter()
             .filter(|s| !s.is_empty())
@@ -857,6 +897,7 @@ fn find_insertions(
     aligner: &Aligner<Built>,
     minlen: usize,
     flanking: u32,
+    junction_window: i32,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Vec<String> {
     let mut insertions = vec![];
@@ -877,7 +918,7 @@ fn find_insertions(
             if !read.is_primary {
                 continue;
             }
-            if let Some(s) = parse_cs(read, minlen, flanking, repeat) {
+            if let Some(s) = parse_cs(read, minlen, flanking, junction_window, repeat) {
                 // slice out inserted sequences from the CS tag
                 insertions.push(s.to_uppercase())
             }
@@ -890,6 +931,7 @@ fn parse_cs(
     read: Mapping,
     minlen: usize,
     flanking: u32,
+    junction_window: i32,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Option<String> {
     // parses the CS tag of a <read> and returns the inserted sequence if it is longer than <minlen>
@@ -909,7 +951,8 @@ fn parse_cs(
         ref_pos = ref_pos,
         cs = cs
     );
-    let interval_around_junction = flanking as i32 - 30..=flanking as i32 + 30;
+    let interval_around_junction =
+        flanking as i32 - junction_window..=flanking as i32 + junction_window;
     for cap in re.captures_iter(&cs) {
         let op = &cap[0].chars().next().unwrap();
         match op {
@@ -1040,6 +1083,7 @@ mod tests {
                 .clone(),
             minlen,
             flanking,
+            30,
             &repeat,
         );
     }
@@ -1062,10 +1106,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: false,
-            unphased: false,
+            unphased: None,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1075,6 +1118,13 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            junction_window: 30,
+            priority: crate::Priority::Balanced,
+            ref_max_edits: -1,
+            ref_edit_divisor: 0,
+            ref_edit_inclusive: false,
+            poa_medoid_seed: true,
+            poa_trim_fraction: 0.35,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1101,10 +1151,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: false,
-            unphased: true,
+            unphased: Some(crate::PhasingStrategy::Ward),
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: Some(String::from("chr7")),
@@ -1114,6 +1163,13 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            junction_window: 30,
+            priority: crate::Priority::Balanced,
+            ref_max_edits: -1,
+            ref_edit_divisor: 0,
+            ref_edit_inclusive: false,
+            poa_medoid_seed: true,
+            poa_trim_fraction: 0.35,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1134,10 +1190,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: false,
-            unphased: true,
+            unphased: Some(crate::PhasingStrategy::Ward),
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1147,6 +1202,13 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            junction_window: 30,
+            priority: crate::Priority::Balanced,
+            ref_max_edits: -1,
+            ref_edit_divisor: 0,
+            ref_edit_inclusive: false,
+            poa_medoid_seed: true,
+            poa_trim_fraction: 0.35,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1173,10 +1235,9 @@ mod tests {
             support: 1,
             mapq: 10,
             somatic: true,
-            unphased: false,
+            unphased: None,
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1186,6 +1247,13 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            junction_window: 30,
+            priority: crate::Priority::Balanced,
+            ref_max_edits: -1,
+            ref_edit_divisor: 0,
+            ref_edit_inclusive: false,
+            poa_medoid_seed: true,
+            poa_trim_fraction: 0.35,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1219,10 +1287,9 @@ mod tests {
             mapq: 10,
             somatic: true,
             // this sample is aligned without HP tags, so only the unphased path returns reads
-            unphased: true,
+            unphased: Some(crate::PhasingStrategy::Ward),
             find_outliers: false,
             min_haplotype_fraction: 0.1,
-            phasing_strategy: crate::PhasingStrategy::Ward,
             threads: 1,
             sample: None,
             haploid: None,
@@ -1232,6 +1299,13 @@ mod tests {
             max_number_reads: 60,
             max_locus: None,
             alignment_all: false,
+            junction_window: 30,
+            priority: crate::Priority::Balanced,
+            ref_max_edits: -1,
+            ref_edit_divisor: 0,
+            ref_edit_inclusive: false,
+            poa_medoid_seed: true,
+            poa_trim_fraction: 0.35,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };

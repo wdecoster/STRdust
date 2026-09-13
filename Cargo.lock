@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "STRdust"
-version = "0.21.0"
+version = "1.0.0"
 dependencies = [
  "bio",
  "clap",
@@ -17,6 +17,7 @@ dependencies = [
  "libc",
  "log",
  "minimap2",
+ "petgraph",
  "rand 0.10.1",
  "rayon",
  "regex",

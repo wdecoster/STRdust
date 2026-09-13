@@ -47,22 +47,25 @@ SPECIFY ONE OF:
         --pathogenic                   Genotype the pathogenic STRs from STRchive
 
 OPTIONS:
-    -m, --minlen <MINLEN>              minimal length of insertion/deletion operation [default: 1]
+    -m, --minlen <MINLEN>              minimal length of an insertion at the junction to count towards the allele [default: 3]
+        --priority <PRIORITY>          'expanded', 'sensitive', 'balanced' or 'precise' [default: balanced]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
         --mapq <MAPQ>                  minimum mapping quality of a read to be used [default: 10]
     -t, --threads <THREADS>            Number of parallel threads to use [default: 1]
         --sample <SAMPLE>              Sample name to use in VCF header, if not provided, the bam file name is used
         --somatic                      Print information on somatic variability
-        --unphased                     Reads are not phased, will cluster the reads to phase expansions
+        --unphased <STRATEGY>          Reads are not phased: cluster them with 'ward', 'dbscan' or 'both'
+                                       ward: length-weighted Levenshtein — the general choice
+                                       dbscan: k-mer composition — for alleles differing in motif, not length
+                                       both: run both, report Ward, flag discordance (QC for complicated regions)
         --consensus-reads              Maximum number of reads to use to build the consensus sequence [default: 20]
         --max-number-reads             Max number of reads to extract per locus for genotyping (-1 for all reads) [default: 60]
         --max-locus <MAX_LOCUS>        Maximum locus size to consider; larger intervals are filtered out
         --find-outliers                Identify poorly supported outlier expansions (only with --unphased)
         --min-haplotype-fraction <F>   Minimum fraction of reads for a cluster to be a haplotype (only with --unphased) [default: 0.1]
-        --phasing <STRATEGY>           How to split unphased reads into haplotypes: 'ward', 'dbscan' or 'both' (only with --unphased) [default: ward]
         --haploid <HAPLOID>            comma-separated list of haploid (sex) chromosomes
         --alignment-all                Always use full alignment (disable fast reference check via CIGAR)
-        --mode <MODE>                  How to recover the repeat sequence from a read: 'sensitive' or 'fast' [default: sensitive]
+        --mode <MODE>                  How to recover the repeat sequence from a read: 'fast' or 'sensitive' [default: fast]
         --fast-flank <FAST_FLANK>      How far outside the interval an insertion still counts, with --mode fast [default: 20]
         --sorted                       Sort output by chrom, start and end
         --debug                        Debug mode
@@ -75,18 +78,18 @@ OPTIONS:
 - BED files can be provided in plain text or gzipped format (`.bed` or `.bed.gz`)
 - Lowering the number of consensus reads may lead to lesser accurate alternative allele sequences (selecting randomly from the reads), but may greatly improve speed. Note that in the case of somatic length variation, a small number of randomly selected reads may lead to a bias and not be representative of the true repeat length.
 - Genotyping known pathogenic repeats with the `--pathogenic` flag will return a VCF with the pathogenic STRs from STRchive, but currently only for the GRCh38 reference.
-- For unphased data (`--unphased`), STRdust splits the reads into (at most) two haplotypes before building consensus. Three strategies are available via `--phasing`:
-  - `ward` (default): hierarchical (Ward) clustering on a **length-weighted Levenshtein distance**. The distance is dominated by how much two reads differ in length, so reads are grouped primarily by length. Robust for the common case where alleles differ mainly in length, but it tends to fragment a single length-variable expansion across several length bins.
+- For unphased data (`--unphased`), STRdust splits the reads into (at most) two haplotypes before building consensus. Three strategies are available, chosen with the value of `--unphased`:
+  - `ward`: hierarchical (Ward) clustering on a **length-weighted Levenshtein distance**. The distance is dominated by how much two reads differ in length, so reads are grouped primarily by length. Robust for the common case where alleles differ mainly in length, but it tends to fragment a single length-variable expansion across several length bins.
   - `dbscan` (experimental): DBSCAN on **length-invariant k-mer composition feature vectors**, i.e. it groups reads by their *sequence composition* (which motif they are made of) rather than primarily by length. This is the key difference from `ward`: two reads of the same motif cluster together even when their lengths differ a lot, so a length-variable expansion is kept together as one allele. The trade-off is that the reference and expanded alleles must differ in composition for DBSCAN to separate them. The two largest clusters become the haplotypes; remaining clusters and noise reads are reported as `OUTLIERS`, and the total number of clusters is reported in `NCLUSTERS` (so loci with `NCLUSTERS > 2`, i.e. complex/multi-population loci, can be flagged downstream). Its internal parameters (neighbourhood radius and length weight) are hardcoded — see [Tuning and hardcoded parameters](#tuning-and-hardcoded-parameters).
   - `both` (QC mode): report the `ward` call as usual, but additionally run `dbscan` and, when the two disagree by more than 2x on the longer allele, raise a `DISCORDANT_LENGTH` flag and report the DBSCAN allele lengths in `DBSCAN_RB`. This deliberately over-flags (it prioritises sensitivity) and is intended as a triage signal: a worklist of loci worth reviewing where the two orthogonal clustering approaches disagree. The reported genotype is unchanged from `ward`.
-- By default, STRdust uses a fast reference check (QUICKREF) to skip full alignment at loci that appear to be homozygous reference. It inspects the CIGAR strings of the first 25 reads spanning a locus, and if at least 5 are found and none show a length difference from the reference of more than 3 bp, the locus is called 0|0 immediately. Loci called this way are marked with a `QUICKREF` flag in the VCF INFO field. This substantially speeds up runs on samples with many reference-like loci. To disable this optimisation and always perform full alignment, use `--alignment-all`.
+- STRdust uses a fast reference check (QUICKREF) to skip genotyping at loci that are clearly homozygous reference. Every read overlapping the locus is checked from its CIGAR, and the locus is called `0|0` immediately only if **all of them** show a net length difference within the tolerance for the chosen `--priority`: exactly zero by default, or up to 3 bases under `--priority expanded`. Such loci are marked with a `QUICKREF` flag in the INFO field. The criterion is deliberately strict: it fires on about 4% of loci but is right ~99% of the time when it does. Loosening it (padding the interval, or tolerating a few bases) was measured against a truth set and rejected — padding without a tolerance discards mostly-correct calls, and a tolerance buys coverage by reporting genuine 1-3 bp alleles as reference. To disable the check entirely and genotype every locus, use `--alignment-all`.
 
 - `--mode` chooses how the repeat sequence of a read is recovered, trading sensitivity against speed.
-  - `sensitive` (default) builds an artificial reference with the repeat excised, re-aligns every read to it with minimap2, and takes the sequence that fails to align as the allele. It can recover an allele from a read whose original alignment clipped or misplaced the repeat, which is what large expansions look like. It is also expensive: re-aligning whole (tens of kb) reads is essentially the entire runtime.
-  - `fast` cuts the allele straight out of the alignment already in the BAM/CRAM, by walking the CIGAR from the repeat start to the repeat end. The slice contains the reference-matching repeat copies as well as any inserted bases, and is shortened by deletions, so it is the full repeat sequence as the read carries it - not only the inserted part. Everything downstream (haplotype splitting, consensus, VCF) is unchanged.
+  - `sensitive` builds an artificial reference with the repeat excised, re-aligns every read to it with minimap2, and takes the sequence that fails to align as the allele. It can recover an allele from a read whose original alignment clipped or misplaced the repeat, which is what large expansions look like. It is also expensive: re-aligning whole (tens of kb) reads is essentially the entire runtime.
+  - `fast` (default) cuts the allele straight out of the alignment already in the BAM/CRAM, by walking the CIGAR from the repeat start to the repeat end. The slice contains the reference-matching repeat copies as well as any inserted bases, and is shortened by deletions, so it is the full repeat sequence as the read carries it - not only the inserted part. Everything downstream (haplotype splitting, consensus, VCF) is unchanged.
   - Aligners place a large insertion inconsistently, often tens of bases off the annotated repeat: at one locus tested the same ~900 bp insertion sits anywhere across a 30 bp stretch depending on the read. Insertions of at least 3 bases lying within `--fast-flank` bases of the interval therefore count towards the allele too. Deletions need no such tolerance - a deletion has a reference span, so one that belongs to the repeat overlaps the interval and is already reflected in the slice, while one lying entirely outside belongs to a neighbouring event and must not shorten the allele.
   - In `fast` mode a read is dropped when it does not span the locus, when its alignment clips within 100 bases of the repeat (the clipped bases may be the expansion the aligner gave up on), or when the repeat is deleted from it entirely. If that leaves a haplotype below what a call needs, the locus falls back to `sensitive`, which can still recover an allele from those reads. Over-dropping only costs time; under-dropping would cost a false reference call at exactly the loci that matter most.
-  - On a 30x ONT genome, `fast` genotyped 2000 catalog loci in 7 s of CPU against 1016 s for `sensitive` (140x, and 284 MB against 643 MB peak memory). Per-haplotype median read lengths (`MRL`) are identical to `sensitive` at 56% of alleles and within 2 bp at 93%. Treat that as agreement, not accuracy: neither mode has been benchmarked against a truth set yet, so where they differ it is not established which is right.
+  - On a 30x ONT genome, `fast` genotyped 2000 catalog loci in 7 s of CPU against 1016 s for `sensitive` (140x, and 284 MB against 643 MB peak memory). Per-haplotype median read lengths (`MRL`) are identical to `sensitive` at 56% of alleles and within 2 bp at 93%. Both modes have since been benchmarked against the GIAB HG002 tandem-repeat truth set over 50,000 adotto loci: `fast` is the more accurate of the two on allele length (85.0% vs 81.4% exact), including at long expansions, which is why it is now the default. `sensitive` remains available for cases where reads clip rather than span the repeat.
 
 ## Output format
 
@@ -177,3 +180,46 @@ quality standards, and CI are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## CITATION
 
 If you use this tool, please consider citing our [publication](https://genome.cshlp.org/content/early/2024/08/15/gr.279265.124).
+
+
+## Choosing a genotype priority
+
+`--priority` decides what to optimise when reporting an allele as reference or as a variant.
+
+For `sensitive`, `balanced` and `precise` it affects **only the emitted genotype (`GT`)** —
+the measured allele lengths in `RB`, `FRB` and `MRL` are byte-identical under all three, so
+if you work from the lengths rather than the genotype these change nothing for you.
+`expanded` is different in kind and is described below.
+
+Measured on 10,000 randomly sampled loci of the adotto v1.2.1 catalog against the GIAB HG002
+tandem-repeat truth set, ~30x ONT. Recall and precision are over loci whose truth genotype is
+non-reference — that is, "did we report this polymorphic locus as polymorphic":
+
+| `--priority` | recall | precision | F1 |
+|---|---|---|---|
+| `sensitive` | 99.0% | 54.2% | 70.1 |
+| `balanced` (default) | 85.5% | 58.7% | 69.6 |
+| `precise` | 39.9% | 91.8% | 55.7 |
+
+`expanded` is the fourth setting and differs in kind from the other three: it **changes
+which loci are genotyped**, not just how the result is labelled. Loci whose reads all look
+near-reference within 3 bases are reported as reference without being genotyped at all. On
+50,000 loci that fires on 18,078 loci instead of 2,059 and cuts CPU by 15%, while slightly
+*improving* overall concordance — a locus answered cheaply is one that full genotyping does
+not get to answer wrongly. The price is resolution below ~3 bases: exact concordance at loci
+whose true allele differs by 1-10 bp falls from 57.4% to 52.0%. Long expansions are
+unaffected. At those loci `RB` and `MRL` are `0` and `SUP`/`SC` are `.`: the zero is a real finding — the
+check established that every read matches the reference length — while the dots record that
+no consensus was built. Unlike the other three settings this one does change the reported
+lengths — often by supplying them where the consensus path would have produced none at all,
+since a locus the check answers is a locus that is never left as a no-call. Use it when the
+question is "is there an expansion here", not "exactly how long is this allele".
+
+Use `sensitive` when a missed locus is worse than a false one — screening, or any workflow
+where candidates are reviewed downstream. Use `precise` when every reported variant will be
+taken at face value. `balanced` is the default because it has essentially the same F1 as
+`sensitive` with materially better precision.
+
+These figures are from one sample and one chemistry; the ordering should carry over, the
+absolute numbers should not be quoted as universal. They also describe *genotype* calls, not
+detection of long expansions, which is far less sensitive to this setting.

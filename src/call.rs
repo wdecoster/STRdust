@@ -91,12 +91,22 @@ fn process_batch(
                 // QUICKREF: CIGAR check (only if not already found variation and alignment_all is not set)
                 // When --alignment-all is set, skip QUICKREF optimization to force full alignment
                 if !args.alignment_all && !info.has_variation {
+                    // The interval only, and an exact match only. Both halves were swept
+                    // against the GIAB HG002 truth set and left where they are:
+                    //  - padding the interval (+/-15) without a matching tolerance removes
+                    //    1,310 firings of which 97.6% were correct, costing 1.2 points,
+                    //    because a repeat nearly always has indel noise near its boundary;
+                    //  - a tolerance of 3 raises firing from 4.6% to 29% of loci at 96.7%
+                    //    precision, but flattens genuine 1-3 bp alleles into reference,
+                    //    which is the wrong trade for a length genotyper.
+                    // QUICKREF is right ~98% of the time when it fires, so firing *less*
+                    // costs more than the coordinate bug it was meant to fix (see #30).
                     let diff = parse_bam::calculate_all_length_diff_from_cigar(
                         &record_rc,
                         target.start,
                         target.end,
                     );
-                    if diff != 0 {
+                    if diff.abs() > args.quickref_tolerance() {
                         info.has_variation = true;
                     }
                 }
@@ -129,8 +139,9 @@ fn process_batch(
                 }
             }
             Some(info) if !args.alignment_all && !info.has_variation => {
-                // QUICKREF: All CIGAR diffs were 0 - output 0|0 immediately
-                // Only use this path if --alignment-all is NOT set
+                // QUICKREF: every inspected read was reference-like within
+                // --quickref-tolerance, and enough of them were inspected - output 0|0
+                // immediately. Only use this path if --alignment-all is NOT set
                 let mut repeat_mut = repeat.clone();
                 if args.debug {
                     repeat_mut.set_time_stamp();
@@ -172,7 +183,7 @@ fn process_batch(
 
                 // Check if we have enough reads
                 if reads.is_empty() {
-                    if args.unphased {
+                    if args.is_unphased() {
                         debug!("Cannot genotype {repeat}: no reads found");
                     } else {
                         debug!(
@@ -259,7 +270,7 @@ fn collect_reads(
 
         // a --haploid chromosome has a single haplotype, so its reads are pooled in phase 0
         // regardless of any HP tags they carry - that is where the genotyper looks for them
-        if args.unphased || crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
+        if args.is_unphased() || crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
             reads.phase0.push(seq);
         } else {
             match parse_bam::get_phase(record) {
@@ -294,7 +305,7 @@ fn enough_support(
 ) -> bool {
     if crate::vcf::chrom_is_haploid(args, &repeat.chrom) {
         reads.phase0.len() >= args.support
-    } else if args.unphased {
+    } else if args.is_unphased() {
         reads.phase0.len() >= 2 * args.support
     } else {
         reads.phase1.len() >= args.support && reads.phase2.len() >= args.support

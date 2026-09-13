@@ -21,9 +21,14 @@ impl Batch {
             .first()
             .map(|r| r.start.saturating_sub(10))
             .unwrap_or(0);
+        // the furthest end in the batch, not the last repeat's: repeats are sorted by
+        // start, so an interval nested inside an earlier, longer one is last while ending
+        // first. Taking its end would truncate the fetch region and quietly starve the
+        // longer repeat of the reads covering its tail.
         let end = repeats
-            .last()
+            .iter()
             .map(|r| r.end.saturating_add(10))
+            .max()
             .unwrap_or(0);
         Self { chromosome, start, end, repeats }
     }

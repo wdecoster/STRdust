@@ -1,5 +1,10 @@
-use bio::alignment::{pairwise::Scoring, poa::Aligner};
+use bio::alignment::{
+    pairwise::Scoring,
+    poa::{Aligner, POAGraph},
+};
 use log::debug;
+use petgraph::Incoming;
+use petgraph::visit::Topo;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
@@ -19,6 +24,125 @@ const DOWNSAMPLE_SEED: u64 = 42;
 /// is not a faithful representation of the underlying reads. Hardcoded for now;
 /// can be promoted to a CLI argument later if cohort experience warrants it.
 const IMPRECISE_LENGTH_CV: f64 = 0.2;
+
+/// Scoring for the POA that builds an allele consensus.
+///
+/// rust-bio's POA never reads `Scoring::gap_extend` and charges `gap_open` for every gap
+/// base, so the gap model is linear (<https://github.com/rust-bio/rust-bio/issues/677>).
+///
+/// These were once tunable, on the theory that a gap penalty cheap relative to a match let
+/// a single read's insertion open its own node and be carried into the consensus. Measured
+/// against the GIAB HG002 truth set that theory was half right: raising the gap penalty
+/// from 12 to 70 did gain 11 points on its own, but *nothing* on top of `trim_fraction`
+/// (-0.1), because both were addressing the same defect and trimming addresses it at the
+/// source. The knobs were therefore retired rather than given new defaults; the values
+/// below are the originals and should not be changed without re-measuring, since no
+/// experiment has ever shown them to matter once the consensus endpoint is correct.
+#[derive(Clone, Copy, Debug)]
+pub struct PoaScoring {
+    pub gap_open: i32,
+    pub match_score: i32,
+    pub mismatch: i32,
+    /// Seed the POA graph with the read whose length is closest to the cluster median,
+    /// rather than whichever read happened to be sampled first.
+    pub medoid_seed: bool,
+    /// Fraction of the cluster's reads an edge must carry for the consensus to run through
+    /// it at either end. 0 disables trimming and uses rust-bio's own `consensus()`.
+    pub trim_fraction: f64,
+}
+
+impl Default for PoaScoring {
+    fn default() -> Self {
+        Self {
+            gap_open: -12,
+            match_score: 3,
+            mismatch: -4,
+            medoid_seed: false,
+            trim_fraction: 0.0,
+        }
+    }
+}
+
+/// Consensus through the POA graph, refusing to run out along poorly supported ends.
+///
+/// rust-bio's `Aligner::consensus()` picks its endpoint with `max_by_key` over a cumulative
+/// score to which every edge contributes a weight of at least 1. The score therefore
+/// increases strictly along every edge, so the argmax is *always a sink*: the consensus runs
+/// to the deepest point in the graph rather than the best supported one. One read in fifteen
+/// that extends a single base past the others creates a deeper sink and wins, with no vote
+/// taken -- which is why the reported allele is one base too long on 8% of alleles at loci
+/// that are truly homozygous reference, why the excess is 29:1 one-sided, and why it gets
+/// *worse* with more reads instead of better.
+///
+/// The interior path choice upstream makes (heaviest edge first) is sound and is kept. Only
+/// the ends are corrected: a terminal base is dropped unless the edge reaching it carries at
+/// least `min_weight` reads. Reported upstream alongside rust-bio#677.
+fn trimmed_consensus(graph: &POAGraph, min_weight: i32) -> Vec<u8> {
+    let node_count = graph.node_count();
+    // (weight of the best incoming edge, cumulative score, that predecessor's index)
+    let mut best: Vec<(i32, i32, usize)> = vec![(0, 0, usize::MAX); node_count];
+    let mut topo = Topo::new(graph);
+    while let Some(node) = topo.next(graph) {
+        let mut choice: (i32, i32, usize) = (0, 0, usize::MAX);
+        for neighbour in graph.neighbors_directed(node, Incoming) {
+            let index = neighbour.index();
+            let weight: i32 = graph
+                .edges_connecting(neighbour, node)
+                .map(|e| *e.weight())
+                .sum();
+            let score = weight + best[index].1;
+            if (weight, score, index) > choice {
+                choice = (weight, score, index);
+            }
+        }
+        best[node.index()] = choice;
+    }
+
+    let Some(end) = (0..node_count).max_by_key(|&i| best[i].1) else {
+        return Vec::new();
+    };
+    let mut path = Vec::new();
+    let mut pos = end;
+    while pos != usize::MAX {
+        path.push(pos);
+        pos = best[pos].2;
+    }
+    path.reverse();
+
+    // drop trailing nodes reached by an edge too few reads support, then leading nodes whose
+    // edge into the rest is equally thin. The first node of the path has no incoming edge,
+    // so it is judged by the edge leaving it.
+    while path.len() > 1 && best[path[path.len() - 1]].0 < min_weight {
+        path.pop();
+    }
+    let mut start = 0;
+    while start + 1 < path.len() && best[path[start + 1]].0 < min_weight {
+        start += 1;
+    }
+
+    path[start..]
+        .iter()
+        .map(|&i| graph.raw_nodes()[i].weight)
+        .collect()
+}
+
+/// Index of the read whose length is closest to the cluster median.
+///
+/// The first read added to a POA graph is its backbone: every other read is aligned onto it,
+/// so its indels are structurally privileged and end up in the consensus. Taking whichever
+/// read was sampled first makes that an arbitrary choice. The read at the median length is
+/// the one least likely to drag the consensus off the cluster's centre. Ties go to the
+/// earlier read, so the choice stays deterministic.
+fn medoid_index(seqs: &[Vec<u8>]) -> usize {
+    let mut lengths: Vec<usize> = seqs.iter().map(|s| s.len()).collect();
+    lengths.sort_unstable();
+    let median = lengths[lengths.len() / 2];
+    seqs.iter()
+        .enumerate()
+        .min_by_key(|(_, s)| s.len().abs_diff(median))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
 
 #[derive(Clone)]
 pub struct Consensus {
@@ -65,6 +189,7 @@ pub fn consensus(
     support: usize,
     consensus_reads: usize,
     repeat: &crate::repeats::RepeatInterval,
+    poa: PoaScoring,
 ) -> Consensus {
     if seqs.is_empty() {
         return Consensus::default();
@@ -118,14 +243,36 @@ pub fn consensus(
         // bother tuning the second argument until/unless upstream POA gains affine gaps.
         // (reported upstream: https://github.com/rust-bio/rust-bio/issues/677)
         log::info!("Creating consensus for {repeat}");
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        for seq in seqs_bytes.iter().skip(1) {
-            aligner.global(seq).add_to_graph();
+        let (match_score, mismatch) = (poa.match_score, poa.mismatch);
+        let scoring = Scoring::new(
+            poa.gap_open,
+            -6,
+            move |a: u8, b: u8| {
+                if a == b { match_score } else { mismatch }
+            },
+        );
+        let seed = if poa.medoid_seed {
+            medoid_index(&seqs_bytes)
+        } else {
+            0
+        };
+        debug!("{repeat}: seeding POA graph with read {seed} of {}", seqs_bytes.len());
+        let mut aligner = Aligner::new(scoring, &seqs_bytes[seed]);
+        for (i, seq) in seqs_bytes.iter().enumerate() {
+            if i != seed {
+                aligner.global(seq).add_to_graph();
+            }
         }
         debug!("Added all sequences to graph");
 
-        let consensus = aligner.consensus();
+        let consensus = if poa.trim_fraction > 0.0 {
+            let min_weight = (poa.trim_fraction * seqs_bytes.len() as f64)
+                .ceil()
+                .max(1.0) as i32;
+            trimmed_consensus(aligner.graph(), min_weight)
+        } else {
+            aligner.consensus()
+        };
         debug!("Created consensus");
         let score = aligner.global(&consensus).alignment().score;
         debug!("Calculated score");
@@ -202,7 +349,7 @@ mod tests {
     fn test_consensus_reports_median_and_not_imprecise_when_tight() {
         // near-uniform lengths (~30 bp): low CV -> not imprecise, median ~30
         let seqs: Vec<String> = (0..10).map(|i| "A".repeat(30 + i % 2)).collect();
-        let cons = consensus(&seqs, 2, 1, &dummy_repeat());
+        let cons = consensus(&seqs, 2, 1, &dummy_repeat(), PoaScoring::default());
         assert!(!cons.imprecise, "tight length distribution should not be imprecise");
         assert!((29..=31).contains(&cons.median_length), "median {}", cons.median_length);
     }
@@ -214,7 +361,7 @@ mod tests {
             .into_iter()
             .map(|l| "A".repeat(l))
             .collect();
-        let cons = consensus(&seqs, 2, 1, &dummy_repeat());
+        let cons = consensus(&seqs, 2, 1, &dummy_repeat(), PoaScoring::default());
         assert!(cons.imprecise, "wide length distribution should be flagged imprecise");
     }
 
@@ -253,6 +400,7 @@ mod tests {
                 end: 100,
                 created: None,
             },
+            PoaScoring::default(),
         );
         println!("Consensus: {}", cons.seq.unwrap());
         println!("Num reads: {}", cons.support);
