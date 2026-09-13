@@ -49,22 +49,37 @@ impl BamReaderPool {
             static THREAD_READER: RefCell<Option<IndexedReader>> = const { RefCell::new(None) };
         }
 
+        // Take the reader out of the cell and drop the borrow before running the closure.
+        //
+        // Holding `borrow_mut()` across `f` panics the moment anything re-enters this on the
+        // same thread, and rayon makes that reachable: the caller here is already inside a
+        // `par_iter`, and `phase_insertions` starts a nested one to build its distance
+        // matrix. Work-stealing can schedule that inner task onto the very thread sitting in
+        // this borrow, so `--unphased --threads N` panicked with "RefCell already borrowed".
+        // It never showed up on phased input because the clustering module is not reached.
+        //
+        // Taking ownership costs nothing in the common case - the reader is moved back on
+        // the way out and reused exactly as before. A re-entrant call now finds the cell
+        // empty and builds its own reader rather than panicking, which is one extra reader
+        // on a nested path, not one per locus.
+        let mut reader = THREAD_READER
+            .with(|cell| cell.borrow_mut().take())
+            .unwrap_or_else(|| self.create_reader());
+
+        let result = f(&mut reader);
+
         THREAD_READER.with(|cell| {
-            let mut reader_opt = cell.borrow_mut();
-
-            // Create reader if this thread doesn't have one yet
-            if reader_opt.is_none() {
-                *reader_opt = Some(self.create_reader());
-            }
-
-            // Use the reader
-            f(reader_opt.as_mut().unwrap())
-        })
+            *cell.borrow_mut() = Some(reader);
+        });
+        result
     }
 }
 
 // BamReaderPool is Sync because:
 // - bam_path and fasta_path are immutable Strings
 // - creation_lock is Mutex<()> which is Sync
-// Thread-local storage handles the actual readers safely
+// - the readers themselves never cross threads: each lives in thread-local storage, is
+//   taken out and put back by the same thread, and is never handed to another
+// Note the last point is what `with_reader` has to preserve; an implementation that held a
+// reference across a nested call would break re-entrancy, not soundness.
 unsafe impl Sync for BamReaderPool {}
