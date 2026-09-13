@@ -95,23 +95,6 @@ pub struct Cli {
     // the measurements settle, the winning value becomes the default and the flag goes.
     // Do not document these in the README and do not rely on them in scripts.
     // ---------------------------------------------------------------------------------
-    /// How far outside the repeat interval a read's indels still count when deciding
-    /// whether a locus can be called homozygous reference without aligning. 0 keeps the
-    /// check inside the interval
-    #[arg(long, default_value_t = 0, hide = true)]
-    quickref_padding: u32,
-
-    /// How much net length difference a read may show and still count as reference-like in
-    /// that check. 0 requires an exact match, which at a tandem repeat rejects almost every
-    /// read once any padding is used
-    #[arg(long, default_value_t = 0, hide = true)]
-    quickref_tolerance: i64,
-
-    /// Minimum number of reads that must have been inspected before a locus may be called
-    /// homozygous reference without aligning. 0 accepts a single read
-    #[arg(long, default_value_t = 0, hide = true)]
-    quickref_min_reads: usize,
-
     /// How far from the repeat/flank junction an insertion may sit and still be folded
     /// into the allele, in the sensitive path. Wider tolerates an aligner that places the
     /// insertion off the annotated boundary; narrower folds in less stray flank sequence
