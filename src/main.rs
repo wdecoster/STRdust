@@ -95,6 +95,19 @@ pub struct Cli {
     // the measurements settle, the winning value becomes the default and the flag goes.
     // Do not document these in the README and do not rely on them in scripts.
     // ---------------------------------------------------------------------------------
+    // Sensitive-path only in practice: parse_cs is reached through find_insertions, so with
+    // --mode fast this touches nothing except the clipped-read fallback - measured at 15
+    // loci in 50,000 (0.03%), with every headline metric identical. In sensitive mode
+    // narrowing it to 10 was worth about +0.5 on top of the other defaults, which is not
+    // enough to justify a user-facing flag on a non-default path. Kept hidden because it
+    // is the only handle on how much stray flank sequence parse_cs folds in, which is one
+    // half of issue #24.
+    //
+    // NOTE an off-by-one that matters if this is ever narrowed further: the left flank of
+    // the repeat-compressed reference is `flanking + 1` bases and the right is
+    // `flanking - 1`, so the junction sits at offset flanking+1 while the window below is
+    // centred on `flanking`. At +/-30 that is harmless; at 0 it excludes the junction
+    // entirely and every locus no-calls.
     /// How far from the repeat/flank junction an insertion may sit and still be folded
     /// into the allele, in the sensitive path. Wider tolerates an aligner that places the
     /// insertion off the annotated boundary; narrower folds in less stray flank sequence
