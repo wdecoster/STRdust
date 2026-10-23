@@ -182,10 +182,9 @@ pub struct Cli {
     #[arg(long, default_value_t = 27, hide = true)]
     poa_gap: u8,
 
-    /// Break ties between equally heavy POA edges by predecessor coverage instead of by
-    /// path score, which favours the longer path in homopolymers
-    #[arg(long, default_value_t = false, hide = true)]
-    poa_coverage_ties: bool,
+    /// How the POA consensus resolves equally heavy edges
+    #[arg(long, value_enum, default_value_t = consensus::PoaTies::Score, hide = true)]
+    poa_ties: consensus::PoaTies,
 
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications

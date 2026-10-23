@@ -46,9 +46,24 @@ pub struct PoaScoring {
     /// Fraction of the cluster's reads that must cover the first and last base of the
     /// consensus. 0 disables trimming.
     pub trim_fraction: f64,
-    /// Break ties on edge weight in the heaviest bundle by predecessor coverage rather than
-    /// by accumulated path score, see [`heaviest_bundle_coverage_ties`].
-    pub coverage_ties: bool,
+    /// How the heaviest bundle resolves two equally heavy in-edges.
+    pub ties: PoaTies,
+}
+
+/// How the heaviest bundle resolves two equally heavy in-edges.
+///
+/// A tie is common in homopolymers, where reads of different lengths split over insertion
+/// nodes. On 10,000 HG002 truth-set loci, `score` made alleles too long more often than too
+/// short (1144 vs 675 in fast mode), `coverage` the reverse (695 vs 1124).
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PoaTies {
+    /// poasta's own order: the predecessor with the higher path score, i.e. the longer path
+    Score,
+    /// The predecessor covered by more reads, see [`heaviest_bundle_coverage_ties`]
+    Coverage,
+    /// Build both and keep the consensus whose length is closest to the cluster's median
+    /// read length, `score` on a tie
+    MedianLength,
 }
 
 impl Default for PoaScoring {
@@ -58,7 +73,7 @@ impl Default for PoaScoring {
             gap: 27,
             medoid_seed: false,
             trim_fraction: 0.0,
-            coverage_ties: false,
+            ties: PoaTies::Score,
         }
     }
 }
@@ -141,7 +156,12 @@ fn heaviest_bundle_coverage_ties(graph: &POAGraph<u32>) -> Vec<POANodeIndex<u32>
 /// sink, so a single read extending one base past the others makes the allele one base too
 /// long (reported and fixed upstream in poasta#37). If trimming leaves nothing, the
 /// untrimmed consensus is used rather than an empty allele.
-fn poa_consensus(seqs: &[Vec<u8>], seed: usize, poa: PoaScoring) -> Result<(Vec<u8>, i32), String> {
+fn poa_consensus(
+    seqs: &[Vec<u8>],
+    seed: usize,
+    median_length: usize,
+    poa: PoaScoring,
+) -> Result<(Vec<u8>, i32), String> {
     let costs = Linear::new(poa.mismatch, poa.gap);
     let mut aligner =
         PoastaAligner::new(AstarEngine::<POAGraph<u32>, _>::new(costs), POAGraph::<u32>::new());
@@ -156,18 +176,28 @@ fn poa_consensus(seqs: &[Vec<u8>], seed: usize, poa: PoaScoring) -> Result<(Vec<
     aligner.align_all(order).map_err(|e| e.to_string())?;
     let graph = aligner.graph();
 
-    let path = if poa.coverage_ties {
-        heaviest_bundle_coverage_ties(graph)
-    } else {
-        heaviest_bundle_consensus(graph)
+    let spell = |path: Vec<POANodeIndex<u32>>| -> Vec<u8> {
+        let trimmed = trim_consensus_ends(graph, &path, poa.trim_fraction);
+        let path = if trimmed.is_empty() {
+            &path[..]
+        } else {
+            trimmed
+        };
+        path.iter().map(|&n| graph.node_symbol(n)).collect()
     };
-    let trimmed = trim_consensus_ends(graph, &path, poa.trim_fraction);
-    let path = if trimmed.is_empty() {
-        &path[..]
-    } else {
-        trimmed
+    let consensus = match poa.ties {
+        PoaTies::Score => spell(heaviest_bundle_consensus(graph)),
+        PoaTies::Coverage => spell(heaviest_bundle_coverage_ties(graph)),
+        PoaTies::MedianLength => {
+            let by_score = spell(heaviest_bundle_consensus(graph));
+            let by_coverage = spell(heaviest_bundle_coverage_ties(graph));
+            if by_coverage.len().abs_diff(median_length) < by_score.len().abs_diff(median_length) {
+                by_coverage
+            } else {
+                by_score
+            }
+        }
     };
-    let consensus: Vec<u8> = path.iter().map(|&n| graph.node_symbol(n)).collect();
 
     let cost = AstarEngine::<POAGraph<u32>, _>::new(costs)
         .align(graph, &consensus)
@@ -274,7 +304,7 @@ pub fn consensus(
             0
         };
         debug!("{repeat}: seeding POA graph with read {seed} of {}", seqs_bytes.len());
-        let (consensus, score) = match poa_consensus(&seqs_bytes, seed, poa) {
+        let (consensus, score) = match poa_consensus(&seqs_bytes, seed, median_length, poa) {
             Ok(result) => result,
             Err(e) => {
                 // never lose the allele over an aligner failure: the seed read is the
@@ -389,9 +419,10 @@ mod tests {
     }
 
     #[test]
-    fn test_consensus_homopolymer_coverage_ties() {
+    fn test_consensus_homopolymer_ties() {
         // HG002 reads at chr1:74729637 (truth: reference, 16 A's): 4 reads with 16 A's,
-        // 2 with 17 and 2 with 18. Score tie-breaking calls 18 A's, coverage gives 16
+        // 2 with 17 and 2 with 18. Score tie-breaking calls 18 A's, coverage gives 16, and
+        // so does the median length (50 bases) choosing between the two
         let (a16, a17, a18) = ("A".repeat(16), "A".repeat(17), "A".repeat(18));
         let read = |a: &str| format!("CCCTGTCTC{a}GCAGCAGACTAGAGAAGTCATTAAA");
         let seqs: Vec<String> = [&a17, &a16, &a18, &a16, &a18, &a17, &a16, &a16]
@@ -402,8 +433,16 @@ mod tests {
         let by_score = consensus(&seqs, 1, 20, &dummy_repeat(), poa);
         assert_eq!(by_score.seq, Some(read(&a18)));
         let by_coverage =
-            consensus(&seqs, 1, 20, &dummy_repeat(), PoaScoring { coverage_ties: true, ..poa });
+            consensus(&seqs, 1, 20, &dummy_repeat(), PoaScoring { ties: PoaTies::Coverage, ..poa });
         assert_eq!(by_coverage.seq, Some(read(&a16)));
+        let by_median = consensus(
+            &seqs,
+            1,
+            20,
+            &dummy_repeat(),
+            PoaScoring { ties: PoaTies::MedianLength, ..poa },
+        );
+        assert_eq!(by_median.seq, Some(read(&a16)));
     }
 
     #[test]
