@@ -276,6 +276,7 @@ fn poa_scoring(args: &Cli) -> crate::consensus::PoaScoring {
         trim_fraction: args.poa_trim_fraction,
         mismatch: args.poa_mismatch,
         gap: args.poa_gap,
+        coverage_ties: args.poa_coverage_ties,
     }
 }
 
@@ -1127,6 +1128,7 @@ mod tests {
             poa_trim_fraction: 0.35,
             poa_mismatch: 14,
             poa_gap: 27,
+            poa_coverage_ties: false,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1174,6 +1176,7 @@ mod tests {
             poa_trim_fraction: 0.35,
             poa_mismatch: 14,
             poa_gap: 27,
+            poa_coverage_ties: false,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1215,6 +1218,7 @@ mod tests {
             poa_trim_fraction: 0.35,
             poa_mismatch: 14,
             poa_gap: 27,
+            poa_coverage_ties: false,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1262,6 +1266,7 @@ mod tests {
             poa_trim_fraction: 0.35,
             poa_mismatch: 14,
             poa_gap: 27,
+            poa_coverage_ties: false,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1316,6 +1321,7 @@ mod tests {
             poa_trim_fraction: 0.35,
             poa_mismatch: 14,
             poa_gap: 27,
+            poa_coverage_ties: false,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };

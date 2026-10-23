@@ -4,7 +4,8 @@ use poasta::align::astar::AstarEngine;
 use poasta::align::cost_models::linear::Linear;
 use poasta::align::traits::{AlignResult, AlignmentEngine};
 use poasta::graph::consensus::{heaviest_bundle_consensus, trim_consensus_ends};
-use poasta::graph::poa::POAGraph;
+use poasta::graph::poa::{POAGraph, POANodeIndex};
+use poasta::graph::traits::{GraphBase, GraphWithNodeOrdering};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
@@ -45,11 +46,20 @@ pub struct PoaScoring {
     /// Fraction of the cluster's reads that must cover the first and last base of the
     /// consensus. 0 disables trimming.
     pub trim_fraction: f64,
+    /// Break ties on edge weight in the heaviest bundle by predecessor coverage rather than
+    /// by accumulated path score, see [`heaviest_bundle_coverage_ties`].
+    pub coverage_ties: bool,
 }
 
 impl Default for PoaScoring {
     fn default() -> Self {
-        Self { mismatch: 14, gap: 27, medoid_seed: false, trim_fraction: 0.0 }
+        Self {
+            mismatch: 14,
+            gap: 27,
+            medoid_seed: false,
+            trim_fraction: 0.0,
+            coverage_ties: false,
+        }
     }
 }
 
@@ -69,6 +79,58 @@ fn medoid_index(seqs: &[Vec<u8>]) -> usize {
         .min_by_key(|(_, s)| s.len().abs_diff(median))
         .map(|(i, _)| i)
         .unwrap_or(0)
+}
+
+/// Heaviest bundle consensus as poasta's `heaviest_bundle_consensus`, except for how ties
+/// on edge weight are broken.
+///
+/// poasta resolves a tie by the higher accumulated path score, which is the longer path, so
+/// in a homopolymer the consensus systematically runs long. E.g. 4 reads with 16 A's and
+/// 2 + 2 reads with 17 and 18 A's that merge into the same last node give the G after the
+/// run two in-edges of weight 8, and the 18 A path wins. Here a tie goes to the predecessor
+/// covered by more reads (the 16th A, covered by all 8), then falls back to poasta's order.
+fn heaviest_bundle_coverage_ties(graph: &POAGraph<u32>) -> Vec<POANodeIndex<u32>> {
+    if graph.is_empty() {
+        return Vec::new();
+    }
+    let (start, end) = (graph.start_node(), graph.end_node());
+    // edges from the start and to the end sentinel weigh 0, so take the larger side
+    let coverage = |v: POANodeIndex<u32>| {
+        let into: usize = graph.in_edges(v).map(|(_, e)| e.weight).sum();
+        let out: usize = graph.out_edges(v).map(|(_, e)| e.weight).sum();
+        into.max(out)
+    };
+    let n = graph.node_count();
+    let mut score = vec![0usize; n];
+    let mut pred: Vec<Option<POANodeIndex<u32>>> = vec![None; n];
+    for rank in 0..n {
+        let v = graph.rank_to_node(rank);
+        if v == start {
+            continue;
+        }
+        // (edge weight, predecessor coverage, predecessor score, lowest predecessor rank)
+        let mut best = None;
+        for (u, edge) in graph.in_edges(v) {
+            let u_rank = graph.node_rank(u);
+            let key = (edge.weight, coverage(u), score[u_rank], std::cmp::Reverse(u_rank));
+            if best.is_none_or(|b| key > b) {
+                best = Some(key);
+            }
+        }
+        if let Some((w, _, s, std::cmp::Reverse(u_rank))) = best {
+            score[rank] = s + w;
+            pred[rank] = Some(graph.rank_to_node(u_rank));
+        }
+    }
+    let mut path = Vec::new();
+    let mut curr = end;
+    while let Some(p) = pred[graph.node_rank(curr)] {
+        path.push(curr);
+        curr = p;
+    }
+    path.reverse();
+    path.retain(|v| *v != start && *v != end);
+    path
 }
 
 /// Build the POA graph from `seqs` (the read at `seed` first) and return its consensus
@@ -94,7 +156,11 @@ fn poa_consensus(seqs: &[Vec<u8>], seed: usize, poa: PoaScoring) -> Result<(Vec<
     aligner.align_all(order).map_err(|e| e.to_string())?;
     let graph = aligner.graph();
 
-    let path = heaviest_bundle_consensus(graph);
+    let path = if poa.coverage_ties {
+        heaviest_bundle_coverage_ties(graph)
+    } else {
+        heaviest_bundle_consensus(graph)
+    };
     let trimmed = trim_consensus_ends(graph, &path, poa.trim_fraction);
     let path = if trimmed.is_empty() {
         &path[..]
@@ -320,6 +386,24 @@ mod tests {
             let untrimmed = consensus(&seqs, 1, 20, &dummy_repeat(), PoaScoring::default());
             assert_eq!(untrimmed.seq.map(|s| s.len()), Some(61));
         }
+    }
+
+    #[test]
+    fn test_consensus_homopolymer_coverage_ties() {
+        // HG002 reads at chr1:74729637 (truth: reference, 16 A's): 4 reads with 16 A's,
+        // 2 with 17 and 2 with 18. Score tie-breaking calls 18 A's, coverage gives 16
+        let (a16, a17, a18) = ("A".repeat(16), "A".repeat(17), "A".repeat(18));
+        let read = |a: &str| format!("CCCTGTCTC{a}GCAGCAGACTAGAGAAGTCATTAAA");
+        let seqs: Vec<String> = [&a17, &a16, &a18, &a16, &a18, &a17, &a16, &a16]
+            .iter()
+            .map(|a| read(a))
+            .collect();
+        let poa = PoaScoring { medoid_seed: true, trim_fraction: 0.35, ..PoaScoring::default() };
+        let by_score = consensus(&seqs, 1, 20, &dummy_repeat(), poa);
+        assert_eq!(by_score.seq, Some(read(&a18)));
+        let by_coverage =
+            consensus(&seqs, 1, 20, &dummy_repeat(), PoaScoring { coverage_ties: true, ..poa });
+        assert_eq!(by_coverage.seq, Some(read(&a16)));
     }
 
     #[test]

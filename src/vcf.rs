@@ -845,6 +845,7 @@ fn test_write_vcf_header_from_bam() {
         poa_trim_fraction: 0.35,
         poa_mismatch: 14,
         poa_gap: 27,
+        poa_coverage_ties: false,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
@@ -884,6 +885,7 @@ fn test_write_vcf_header_from_name() {
         poa_trim_fraction: 0.35,
         poa_mismatch: 14,
         poa_gap: 27,
+        poa_coverage_ties: false,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
