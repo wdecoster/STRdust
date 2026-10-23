@@ -1,10 +1,10 @@
-use bio::alignment::{
-    pairwise::Scoring,
-    poa::{Aligner, POAGraph},
-};
-use log::debug;
-use petgraph::Incoming;
-use petgraph::visit::Topo;
+use log::{debug, warn};
+use poasta::align::PoastaAligner;
+use poasta::align::astar::AstarEngine;
+use poasta::align::cost_models::linear::Linear;
+use poasta::align::traits::{AlignResult, AlignmentEngine};
+use poasta::graph::consensus::{heaviest_bundle_consensus, trim_consensus_ends};
+use poasta::graph::poa::POAGraph;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
@@ -25,105 +25,32 @@ const DOWNSAMPLE_SEED: u64 = 42;
 /// can be promoted to a CLI argument later if cohort experience warrants it.
 const IMPRECISE_LENGTH_CV: f64 = 0.2;
 
-/// Scoring for the POA that builds an allele consensus.
+/// Scoring for the POA (poasta) that builds an allele consensus.
 ///
-/// rust-bio's POA never reads `Scoring::gap_extend` and charges `gap_open` for every gap
-/// base, so the gap model is linear (<https://github.com/rust-bio/rust-bio/issues/677>).
-///
-/// These were once tunable, on the theory that a gap penalty cheap relative to a match let
-/// a single read's insertion open its own node and be carried into the consensus. Measured
-/// against the GIAB HG002 truth set that theory was half right: raising the gap penalty
-/// from 12 to 70 did gain 11 points on its own, but *nothing* on top of `trim_fraction`
-/// (-0.1), because both were addressing the same defect and trimming addresses it at the
-/// source. The knobs were therefore retired rather than given new defaults; the values
-/// below are the originals and should not be changed without re-measuring, since no
-/// experiment has ever shown them to matter once the consensus endpoint is correct.
+/// poasta works with costs rather than scores: a match is free and mismatches and gap
+/// bases are penalised, with a linear gap model. The defaults are the old rust-bio scoring
+/// (match 3, mismatch -4, linear gap -12) converted to costs and doubled to stay integral:
+/// mismatch = 2 * (3 + 4) = 14, gap = 2 * (3 / 2 + 12) = 27. Global alignments then rank
+/// identically to before, so swapping the library does not also change the scoring.
+/// Simulated repeat reads favoured cheaper gaps (8/6, 3/2) at high error rates and for
+/// long alleles; that needs confirming against the truth set before changing the default.
+/// Affine gaps did clearly worse on repeats in the same simulation.
 #[derive(Clone, Copy, Debug)]
 pub struct PoaScoring {
-    pub gap_open: i32,
-    pub match_score: i32,
-    pub mismatch: i32,
+    pub mismatch: u8,
+    pub gap: u8,
     /// Seed the POA graph with the read whose length is closest to the cluster median,
     /// rather than whichever read happened to be sampled first.
     pub medoid_seed: bool,
-    /// Fraction of the cluster's reads an edge must carry for the consensus to run through
-    /// it at either end. 0 disables trimming and uses rust-bio's own `consensus()`.
+    /// Fraction of the cluster's reads that must cover the first and last base of the
+    /// consensus. 0 disables trimming.
     pub trim_fraction: f64,
 }
 
 impl Default for PoaScoring {
     fn default() -> Self {
-        Self {
-            gap_open: -12,
-            match_score: 3,
-            mismatch: -4,
-            medoid_seed: false,
-            trim_fraction: 0.0,
-        }
+        Self { mismatch: 14, gap: 27, medoid_seed: false, trim_fraction: 0.0 }
     }
-}
-
-/// Consensus through the POA graph, refusing to run out along poorly supported ends.
-///
-/// rust-bio's `Aligner::consensus()` picks its endpoint with `max_by_key` over a cumulative
-/// score to which every edge contributes a weight of at least 1. The score therefore
-/// increases strictly along every edge, so the argmax is *always a sink*: the consensus runs
-/// to the deepest point in the graph rather than the best supported one. One read in fifteen
-/// that extends a single base past the others creates a deeper sink and wins, with no vote
-/// taken -- which is why the reported allele is one base too long on 8% of alleles at loci
-/// that are truly homozygous reference, why the excess is 29:1 one-sided, and why it gets
-/// *worse* with more reads instead of better.
-///
-/// The interior path choice upstream makes (heaviest edge first) is sound and is kept. Only
-/// the ends are corrected: a terminal base is dropped unless the edge reaching it carries at
-/// least `min_weight` reads. Reported upstream alongside rust-bio#677.
-fn trimmed_consensus(graph: &POAGraph, min_weight: i32) -> Vec<u8> {
-    let node_count = graph.node_count();
-    // (weight of the best incoming edge, cumulative score, that predecessor's index)
-    let mut best: Vec<(i32, i32, usize)> = vec![(0, 0, usize::MAX); node_count];
-    let mut topo = Topo::new(graph);
-    while let Some(node) = topo.next(graph) {
-        let mut choice: (i32, i32, usize) = (0, 0, usize::MAX);
-        for neighbour in graph.neighbors_directed(node, Incoming) {
-            let index = neighbour.index();
-            let weight: i32 = graph
-                .edges_connecting(neighbour, node)
-                .map(|e| *e.weight())
-                .sum();
-            let score = weight + best[index].1;
-            if (weight, score, index) > choice {
-                choice = (weight, score, index);
-            }
-        }
-        best[node.index()] = choice;
-    }
-
-    let Some(end) = (0..node_count).max_by_key(|&i| best[i].1) else {
-        return Vec::new();
-    };
-    let mut path = Vec::new();
-    let mut pos = end;
-    while pos != usize::MAX {
-        path.push(pos);
-        pos = best[pos].2;
-    }
-    path.reverse();
-
-    // drop trailing nodes reached by an edge too few reads support, then leading nodes whose
-    // edge into the rest is equally thin. The first node of the path has no incoming edge,
-    // so it is judged by the edge leaving it.
-    while path.len() > 1 && best[path[path.len() - 1]].0 < min_weight {
-        path.pop();
-    }
-    let mut start = 0;
-    while start + 1 < path.len() && best[path[start + 1]].0 < min_weight {
-        start += 1;
-    }
-
-    path[start..]
-        .iter()
-        .map(|&i| graph.raw_nodes()[i].weight)
-        .collect()
 }
 
 /// Index of the read whose length is closest to the cluster median.
@@ -144,11 +71,52 @@ fn medoid_index(seqs: &[Vec<u8>]) -> usize {
         .unwrap_or(0)
 }
 
+/// Build the POA graph from `seqs` (the read at `seed` first) and return its consensus
+/// together with the cost of aligning that consensus back to the graph.
+///
+/// The consensus is the heaviest bundle, trimmed at both ends to bases covered by at least
+/// `trim_fraction` of the reads. Without the trimming the path always runs to the deepest
+/// sink, so a single read extending one base past the others makes the allele one base too
+/// long (reported and fixed upstream in poasta#37). If trimming leaves nothing, the
+/// untrimmed consensus is used rather than an empty allele.
+fn poa_consensus(seqs: &[Vec<u8>], seed: usize, poa: PoaScoring) -> Result<(Vec<u8>, i32), String> {
+    let costs = Linear::new(poa.mismatch, poa.gap);
+    let mut aligner =
+        PoastaAligner::new(AstarEngine::<POAGraph<u32>, _>::new(costs), POAGraph::<u32>::new());
+    let order = std::iter::once(&seqs[seed])
+        .chain(
+            seqs.iter()
+                .enumerate()
+                .filter(|(i, _)| *i != seed)
+                .map(|(_, s)| s),
+        )
+        .map(|s| s.as_slice());
+    aligner.align_all(order).map_err(|e| e.to_string())?;
+    let graph = aligner.graph();
+
+    let path = heaviest_bundle_consensus(graph);
+    let trimmed = trim_consensus_ends(graph, &path, poa.trim_fraction);
+    let path = if trimmed.is_empty() {
+        &path[..]
+    } else {
+        trimmed
+    };
+    let consensus: Vec<u8> = path.iter().map(|&n| graph.node_symbol(n)).collect();
+
+    let cost = AstarEngine::<POAGraph<u32>, _>::new(costs)
+        .align(graph, &consensus)
+        .map_err(|e| e.to_string())?
+        .alignment_score();
+    Ok((consensus, cost as i32))
+}
+
 #[derive(Clone)]
 pub struct Consensus {
     pub seq: Option<String>,
     pub support: usize,
     pub std_dev: usize,
+    /// Cost of aligning the consensus back to its POA graph (lower is better); 0 for a
+    /// single-read consensus and -1 when there is no consensus.
     pub score: i32,
     /// Median full length of the cluster reads (before length-outlier removal),
     /// reported as MRL. More robust to a long tail than the POA consensus length.
@@ -233,49 +201,23 @@ pub fn consensus(
                 .map(|seq| seq.bytes().collect::<Vec<u8>>())
                 .collect::<Vec<Vec<u8>>>()
         };
-        // I empirically determined the following parameters to be suitable,
-        // but further testing on other repeats would be good
-        // mainly have to make sure the consensus does not get longer than the individual insertions
-        //
-        // NOTE: rust-bio's POA aligner ignores the gap_extend term entirely (it never reads
-        // `Scoring::gap_extend`) and applies a *linear* penalty of `gap_open` per gap base.
-        // The -6 below is therefore inert; the effective gap model is -12 per base. Do not
-        // bother tuning the second argument until/unless upstream POA gains affine gaps.
-        // (reported upstream: https://github.com/rust-bio/rust-bio/issues/677)
         log::info!("Creating consensus for {repeat}");
-        let (match_score, mismatch) = (poa.match_score, poa.mismatch);
-        let scoring = Scoring::new(
-            poa.gap_open,
-            -6,
-            move |a: u8, b: u8| {
-                if a == b { match_score } else { mismatch }
-            },
-        );
         let seed = if poa.medoid_seed {
             medoid_index(&seqs_bytes)
         } else {
             0
         };
         debug!("{repeat}: seeding POA graph with read {seed} of {}", seqs_bytes.len());
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[seed]);
-        for (i, seq) in seqs_bytes.iter().enumerate() {
-            if i != seed {
-                aligner.global(seq).add_to_graph();
+        let (consensus, score) = match poa_consensus(&seqs_bytes, seed, poa) {
+            Ok(result) => result,
+            Err(e) => {
+                // never lose the allele over an aligner failure: the seed read is the
+                // best single-read stand-in, and -1 marks the score as unavailable
+                warn!("{repeat}: POA failed ({e}), using the seed read as consensus");
+                (seqs_bytes[seed].clone(), -1)
             }
-        }
-        debug!("Added all sequences to graph");
-
-        let consensus = if poa.trim_fraction > 0.0 {
-            let min_weight = (poa.trim_fraction * seqs_bytes.len() as f64)
-                .ceil()
-                .max(1.0) as i32;
-            trimmed_consensus(aligner.graph(), min_weight)
-        } else {
-            aligner.consensus()
         };
         debug!("Created consensus");
-        let score = aligner.global(&consensus).alignment().score;
-        debug!("Calculated score");
         Consensus {
             seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
             support: num_reads,
@@ -334,7 +276,6 @@ fn remove_outliers<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bio::alignment::pairwise::Scoring;
 
     fn dummy_repeat() -> crate::repeats::RepeatInterval {
         crate::repeats::RepeatInterval {
@@ -363,6 +304,22 @@ mod tests {
             .collect();
         let cons = consensus(&seqs, 2, 1, &dummy_repeat(), PoaScoring::default());
         assert!(cons.imprecise, "wide length distribution should be flagged imprecise");
+    }
+
+    #[test]
+    fn test_consensus_ignores_single_read_overhangs() {
+        // 1 of 15 reads extends one base past the others, at either end: the untrimmed
+        // heaviest bundle runs out along it, the trimmed consensus does not
+        let base = "CAG".repeat(20);
+        let trim = PoaScoring { trim_fraction: 0.35, ..PoaScoring::default() };
+        for overhang in [format!("{base}C"), format!("T{base}")] {
+            let mut seqs = vec![base.clone(); 14];
+            seqs.push(overhang);
+            let cons = consensus(&seqs, 1, 20, &dummy_repeat(), trim);
+            assert_eq!(cons.seq.as_deref(), Some(base.as_str()));
+            let untrimmed = consensus(&seqs, 1, 20, &dummy_repeat(), PoaScoring::default());
+            assert_eq!(untrimmed.seq.map(|s| s.len()), Some(61));
+        }
     }
 
     #[test]
@@ -428,25 +385,10 @@ mod tests {
             "GGGGGAGGAGGGGGGAGGAGGGGGGAGGAGGACAGGCAAGGAGGCCTCGAAGAGGGAAGACCAGAGAAGGAGGGGAAGGGGAGAGCGGAGGGAAAGAGGTGGGATAAGGAAGAGAAGGAGGAGGAAGGGGAAGAGGGAGG".to_string(),
             "GGGGGGAGGAGGGGGAGGAGGGGGAGGAGGACAGGGAAGGAGGCCTCGAAGAGGGAAGACCAGAGAAGGAGGGGGAAGGGAGAGCGGAGGGGAAAAGAGGTGGGATAAGGAAGAGAAGGAGGAGGAAGGGGAAGAGGGAGG".to_string(),
         ];
-        let mut seqs_bytes = vec![];
-        for seq in seqs.iter() {
-            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
-        }
-
-        // I empirically determined the following parameters to be suitable,
-        // but further testing on other repeats would be good
-        // mainly have to make sure the consensus does not get longer than the individual insertions
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        for seq in seqs_bytes.iter().skip(1) {
-            aligner.global(seq).add_to_graph();
-        }
-
-        let consensus = aligner.consensus();
-        let score = aligner.global(&consensus).alignment().score;
-
-        println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
-        println!("Consensus score: {}", score);
+        let cons = consensus(&seqs, 1, seqs.len(), &dummy_repeat(), PoaScoring::default());
+        assert!(cons.seq.as_ref().is_some_and(|s| !s.is_empty()));
+        println!("Consensus: {}", cons.seq.unwrap());
+        println!("Consensus score: {}", cons.score);
     }
 
     #[test]
@@ -468,25 +410,10 @@ mod tests {
             "TCTTTCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCCTCTCCTCTCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTTCTCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCCTCTCCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCTCCCTCTCCCTCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTT".to_string(),
             "CTTTCTTTCTTTCTTTCTTTCCTTTCCTTTCCTTTCCTTTCCTTCCTTTCCTTCCTTCCTTCCTTCCTTCCTTCCTCCCTCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCCTCTCCCTCCTCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCTCCTCCCTCCCTCCCTCTCCCTCTCCCTCCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTTTCCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCCTCTCCCTCTCCTCTCCTCTCCCTCTCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCTCCCTCCCTCTCCTCTCCCTCTCCCTCTCCTCTCCCTCTCCTCTCCCTCTCCCTCTCCCCTCTCCCTCTCCCCTCTCCCTCTCCTCTCCTCTCCCTCTCCCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTCTTTCTTTCTTTTCTTTC".to_string(),
                 ];
-        let mut seqs_bytes = vec![];
-        for seq in seqs.iter() {
-            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
-        }
-
-        // I empirically determined the following parameters to be suitable,
-        // but further testing on other repeats would be good
-        // mainly have to make sure the consensus does not get longer than the individual insertions
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        for seq in seqs_bytes.iter().skip(1) {
-            aligner.global(seq).add_to_graph();
-        }
-
-        let consensus = aligner.consensus();
-        let score = aligner.global(&consensus).alignment().score;
-
-        println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
-        println!("Consensus score: {}", score);
+        let cons = consensus(&seqs, 1, seqs.len(), &dummy_repeat(), PoaScoring::default());
+        assert!(cons.seq.as_ref().is_some_and(|s| !s.is_empty()));
+        println!("Consensus: {}", cons.seq.unwrap());
+        println!("Consensus score: {}", cons.score);
     }
 
     #[test]
@@ -513,25 +440,10 @@ mod tests {
             "TTTCTTTCTTTTTTTTCTTTCTTTCTTTCTTTT".to_string(),
             "TTTCTTTCTTTCTTTCTTTCTTTCTTTTT".to_string(),
         ];
-        let mut seqs_bytes = vec![];
-        for seq in seqs.iter() {
-            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
-        }
-
-        // I empirically determined the following parameters to be suitable,
-        // but further testing on other repeats would be good
-        // mainly have to make sure the consensus does not get longer than the individual insertions
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        for seq in seqs_bytes.iter().skip(1) {
-            aligner.global(seq).add_to_graph();
-        }
-
-        let consensus = aligner.consensus();
-        let score = aligner.global(&consensus).alignment().score;
-
-        println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
-        println!("Consensus score: {}", score);
+        let cons = consensus(&seqs, 1, seqs.len(), &dummy_repeat(), PoaScoring::default());
+        assert!(cons.seq.as_ref().is_some_and(|s| !s.is_empty()));
+        println!("Consensus: {}", cons.seq.unwrap());
+        println!("Consensus score: {}", cons.score);
     }
 
     #[test]
@@ -554,24 +466,9 @@ mod tests {
             "ATATATATATATAAACATATATTATATATGTAATATAAACATATATAAACATATATTATATATATATA".to_string(),
             "TATATATATATAAACATATATTATATATGTAATATAACATATATAAACATATATTATATATATA".to_string(),
         ];
-        let mut seqs_bytes = vec![];
-        for seq in seqs.iter() {
-            seqs_bytes.push(seq.to_string().bytes().collect::<Vec<u8>>());
-        }
-
-        // I empirically determined the following parameters to be suitable,
-        // but further testing on other repeats would be good
-        // mainly have to make sure the consensus does not get longer than the individual insertions
-        let scoring = Scoring::new(-12, -6, |a: u8, b: u8| if a == b { 3 } else { -4 });
-        let mut aligner = Aligner::new(scoring, &seqs_bytes[0]);
-        for seq in seqs_bytes.iter().skip(1) {
-            aligner.global(seq).add_to_graph();
-        }
-
-        let consensus = aligner.consensus();
-        let score = aligner.global(&consensus).alignment().score;
-
-        println!("Consensus: {}", std::str::from_utf8(&consensus).unwrap());
-        println!("Consensus score: {}", score);
+        let cons = consensus(&seqs, 1, seqs.len(), &dummy_repeat(), PoaScoring::default());
+        assert!(cons.seq.as_ref().is_some_and(|s| !s.is_empty()));
+        println!("Consensus: {}", cons.seq.unwrap());
+        println!("Consensus score: {}", cons.score);
     }
 }

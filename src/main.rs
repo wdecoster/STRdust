@@ -169,10 +169,18 @@ pub struct Cli {
     // depth - an absolute read count would be a cleaner parameterisation if this is ever
     // revisited.
     /// Fraction of a cluster's reads that must support an edge for the consensus to run
-    /// through it at either end. Guards against rust-bio's consensus walking out along a
-    /// single read's overhang. 0 keeps rust-bio's own endpoint choice
+    /// through it at either end. Guards against the consensus walking out along a
+    /// single read's overhang. 0 disables trimming
     #[arg(long, default_value_t = 0.35, hide = true)]
     poa_trim_fraction: f64,
+
+    /// POA mismatch cost (poasta, linear gap model)
+    #[arg(long, default_value_t = 14, hide = true)]
+    poa_mismatch: u8,
+
+    /// POA cost per gap base (poasta, linear gap model)
+    #[arg(long, default_value_t = 27, hide = true)]
+    poa_gap: u8,
 
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications

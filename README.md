@@ -96,7 +96,7 @@ OPTIONS:
 STRdust produces a VCF file per sample. The consensus sequence is in the ALT field, with sequences from each read in the SEQS INFO field (when running with --somatic).
 The FRB FORMAT field is the total repeat length, of the two alleles, in nucleotides. The RB field is the difference between the indidiual allele lengths and the reference length.
 The MRL FORMAT field is the median read length per allele (relative to the reference). Because it is a median rather than the POA consensus length, it is more robust to a long tail of length-variable reads, and comparing it to RB highlights alleles whose consensus length is being pulled by a skewed read distribution.
-The SC FORMAT field is a measure of accuracy of the consensus sequence compared to the overlap graph from the individual reads, which could be influenced by the presence of sequencing errors or somatic variation.
+The SC FORMAT field is the cost of aligning the consensus sequence back to the partial order graph built from the individual reads (lower is better, 0 is a perfect fit), which could be influenced by the presence of sequencing errors or somatic variation.
 
 Two locus-level quality flags are raised automatically when running with `--unphased` (no extra options needed):
 
@@ -123,7 +123,7 @@ Example output:
 ##FORMAT=<ID=MRL,Number=2,Type=Integer,Description="Median read length of the two alleles' clusters in bases relative to reference, robust to a long length tail">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set identifier">
 ##FORMAT=<ID=SUP,Number=2,Type=Integer,Description="Read support per allele">
-##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Consensus score per allele">
+##FORMAT=<ID=SC,Number=2,Type=Integer,Description="Cost of aligning the consensus back to its read graph per allele, lower is better">
 #CHROM  POS     ID      REF     ALT     QUAL    FILTER  INFO    FORMAT  HG00271.hg38
 chr1    1435798 .       TGGCGCGGAGCGGCGCGGAGCG  GCTGGCGCGGAGCGGCGCGGA,GCGGGCGCGCGCAGGA  .       .       END=1435818;STDEV=1,2     GT:RB:FRB:MRL:SUP:SC        1|2:1,-4:21,16:1,-4:18,6:63,41
 chr1    57367044        .       AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAAT     AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAA,AAAATAAAATAAAATAAAATAAAATAAAATAAAATAAAATAAATAAA        .       .       END=57367125;STDEV=3,0 GT:RB:FRB:SUP:SC 1|2:-9,-34:72,47:17,12:216,141
