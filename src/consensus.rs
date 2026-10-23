@@ -26,6 +26,13 @@ const DOWNSAMPLE_SEED: u64 = 42;
 /// can be promoted to a CLI argument later if cohort experience warrants it.
 const IMPRECISE_LENGTH_CV: f64 = 0.2;
 
+/// `PoaTies::MedianLength` only arbitrates alleles whose `score` consensus lies within this
+/// many bases of the reference length. Reads through long expansions run short of the true
+/// allele, so there the median read length pulled calls too short: on the long-expansion
+/// truth set picking by median cost a point of exact matches against `score`, while
+/// gating at 20 kept its gain on 10,000 random loci (20, 50 and 100 performed alike).
+const MEDIAN_LENGTH_MAX_DEVIATION: usize = 20;
+
 /// Scoring for the POA (poasta) that builds an allele consensus.
 ///
 /// poasta works with costs rather than scores: a match is free and mismatches and gap
@@ -62,7 +69,8 @@ pub enum PoaTies {
     /// The predecessor covered by more reads, see [`heaviest_bundle_coverage_ties`]
     Coverage,
     /// Build both and keep the consensus whose length is closest to the cluster's median
-    /// read length, `score` on a tie
+    /// read length, `score` on a tie. Only near the reference length, see
+    /// [`MEDIAN_LENGTH_MAX_DEVIATION`]
     MedianLength,
 }
 
@@ -160,6 +168,7 @@ fn poa_consensus(
     seqs: &[Vec<u8>],
     seed: usize,
     median_length: usize,
+    ref_length: usize,
     poa: PoaScoring,
 ) -> Result<(Vec<u8>, i32), String> {
     let costs = Linear::new(poa.mismatch, poa.gap);
@@ -190,11 +199,17 @@ fn poa_consensus(
         PoaTies::Coverage => spell(heaviest_bundle_coverage_ties(graph)),
         PoaTies::MedianLength => {
             let by_score = spell(heaviest_bundle_consensus(graph));
-            let by_coverage = spell(heaviest_bundle_coverage_ties(graph));
-            if by_coverage.len().abs_diff(median_length) < by_score.len().abs_diff(median_length) {
-                by_coverage
-            } else {
+            if by_score.len().abs_diff(ref_length) > MEDIAN_LENGTH_MAX_DEVIATION {
                 by_score
+            } else {
+                let by_coverage = spell(heaviest_bundle_coverage_ties(graph));
+                if by_coverage.len().abs_diff(median_length)
+                    < by_score.len().abs_diff(median_length)
+                {
+                    by_coverage
+                } else {
+                    by_score
+                }
             }
         }
     };
@@ -304,15 +319,18 @@ pub fn consensus(
             0
         };
         debug!("{repeat}: seeding POA graph with read {seed} of {}", seqs_bytes.len());
-        let (consensus, score) = match poa_consensus(&seqs_bytes, seed, median_length, poa) {
-            Ok(result) => result,
-            Err(e) => {
-                // never lose the allele over an aligner failure: the seed read is the
-                // best single-read stand-in, and -1 marks the score as unavailable
-                warn!("{repeat}: POA failed ({e}), using the seed read as consensus");
-                (seqs_bytes[seed].clone(), -1)
-            }
-        };
+        // the annotated repeat spans end - start + 1 reference bases
+        let ref_length = (repeat.end - repeat.start + 1) as usize;
+        let (consensus, score) =
+            match poa_consensus(&seqs_bytes, seed, median_length, ref_length, poa) {
+                Ok(result) => result,
+                Err(e) => {
+                    // never lose the allele over an aligner failure: the seed read is the
+                    // best single-read stand-in, and -1 marks the score as unavailable
+                    warn!("{repeat}: POA failed ({e}), using the seed read as consensus");
+                    (seqs_bytes[seed].clone(), -1)
+                }
+            };
         debug!("Created consensus");
         Consensus {
             seq: Some(std::str::from_utf8(&consensus).unwrap().to_string()),
@@ -422,7 +440,8 @@ mod tests {
     fn test_consensus_homopolymer_ties() {
         // HG002 reads at chr1:74729637 (truth: reference, 16 A's): 4 reads with 16 A's,
         // 2 with 17 and 2 with 18. Score tie-breaking calls 18 A's, coverage gives 16, and
-        // so does the median length (50 bases) choosing between the two
+        // so does the median length (50 bases) choosing between the two, as long as the
+        // allele is near the reference length
         let (a16, a17, a18) = ("A".repeat(16), "A".repeat(17), "A".repeat(18));
         let read = |a: &str| format!("CCCTGTCTC{a}GCAGCAGACTAGAGAAGTCATTAAA");
         let seqs: Vec<String> = [&a17, &a16, &a18, &a16, &a18, &a17, &a16, &a16]
@@ -435,14 +454,13 @@ mod tests {
         let by_coverage =
             consensus(&seqs, 1, 20, &dummy_repeat(), PoaScoring { ties: PoaTies::Coverage, ..poa });
         assert_eq!(by_coverage.seq, Some(read(&a16)));
-        let by_median = consensus(
-            &seqs,
-            1,
-            20,
-            &dummy_repeat(),
-            PoaScoring { ties: PoaTies::MedianLength, ..poa },
-        );
+        let median = PoaScoring { ties: PoaTies::MedianLength, ..poa };
+        let reference = crate::repeats::RepeatInterval { end: 50, ..dummy_repeat() };
+        let by_median = consensus(&seqs, 1, 20, &reference, median);
         assert_eq!(by_median.seq, Some(read(&a16)));
+        // 50 bases off the 100 base reference, the score consensus is kept
+        let far_from_reference = consensus(&seqs, 1, 20, &dummy_repeat(), median);
+        assert_eq!(far_from_reference.seq, Some(read(&a18)));
     }
 
     #[test]
