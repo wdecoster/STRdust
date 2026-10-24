@@ -16,8 +16,9 @@ All notable changes to STRdust are documented here.
 - **`SC` is now a cost**: the cost of aligning the consensus back to its read graph, where 0
   is a perfect fit and lower is better. It used to be rust-bio's alignment score, roughly
   three times the allele length.
-- **Allele lengths change** at a few percent of loci, mostly by 1-2 bases in homopolymers.
-  Equally supported paths through a homopolymer are now resolved by the cluster's median
+- **Allele lengths change** at about 10% of called loci in `fast` mode and 13% in
+  `sensitive`, by 1-2 bases at 85% of them. Any threshold on `RB`, `FRB` or `MRL` should be
+  re-checked. Equally supported paths through a homopolymer are now resolved by the cluster's median
   read length (hidden `--poa-ties`); following the longer path, poasta's own choice, made
   alleles too long, and following the better-covered one made them too short. Near long
   expansions, where reads run short of the true allele, the median is not consulted.
