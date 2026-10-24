@@ -2,6 +2,26 @@
 
 All notable changes to STRdust are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **The allele consensus is built with [poasta](https://github.com/broadinstitute/poasta)
+  instead of rust-bio's POA.** On HG002 truth-set loci never used for tuning (two samples of
+  10,000), exact allele-length concordance rose by 1.2-1.4 points in `fast` mode and 2.8-3.3
+  in `sensitive`, within 1 bp by 0.4-0.7, and genotype concordance by 0.6-1.5; all but the
+  last are significant in paired tests. On 4,569 loci with an expansion over 200 bp, exact
+  concordance rose by 1.0 (`fast`) and 1.9 (`sensitive`) points, with within 1 bp unchanged.
+  `fast` mode is about 4x quicker on random loci and 10x on long expansions.
+- **`SC` is now a cost**: the cost of aligning the consensus back to its read graph, where 0
+  is a perfect fit and lower is better. It used to be rust-bio's alignment score, roughly
+  three times the allele length.
+- **Allele lengths change** at a few percent of loci, mostly by 1-2 bases in homopolymers.
+  Equally supported paths through a homopolymer are now resolved by the cluster's median
+  read length (hidden `--poa-ties`); following the longer path, poasta's own choice, made
+  alleles too long, and following the better-covered one made them too short. Near long
+  expansions, where reads run short of the true allele, the median is not consulted.
+
 ## [1.0.0]
 
 Benchmarked for the first time against a truth set (GIAB HG002 tandem repeats over the

@@ -174,16 +174,21 @@ pub struct Cli {
     #[arg(long, default_value_t = 0.35, hide = true)]
     poa_trim_fraction: f64,
 
+    // 3/2 and 8/6 tied on 10,000 truth-set loci (within 0.1 point), both ahead of 14/27, the
+    // old rust-bio scoring converted to costs; 3/2 was marginally better on long expansions.
     /// POA mismatch cost (poasta, linear gap model)
-    #[arg(long, default_value_t = 14, hide = true)]
+    #[arg(long, default_value_t = 3, hide = true)]
     poa_mismatch: u8,
 
     /// POA cost per gap base (poasta, linear gap model)
-    #[arg(long, default_value_t = 27, hide = true)]
+    #[arg(long, default_value_t = 2, hide = true)]
     poa_gap: u8,
 
+    // median-length against poasta's own tie-break, on seeds held out from tuning: +1.2 to
+    // +3.3 points exact and +0.4 to +0.7 within 1 bp over rust-bio's POA, where plain poasta
+    // lost 0.6-0.9 points within 1 bp to alleles running long in homopolymers.
     /// How the POA consensus resolves equally heavy edges
-    #[arg(long, value_enum, default_value_t = consensus::PoaTies::Score, hide = true)]
+    #[arg(long, value_enum, default_value_t = consensus::PoaTies::MedianLength, hide = true)]
     poa_ties: consensus::PoaTies,
 
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep

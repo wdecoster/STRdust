@@ -36,13 +36,13 @@ const MEDIAN_LENGTH_MAX_DEVIATION: usize = 20;
 /// Scoring for the POA (poasta) that builds an allele consensus.
 ///
 /// poasta works with costs rather than scores: a match is free and mismatches and gap
-/// bases are penalised, with a linear gap model. The defaults are the old rust-bio scoring
-/// (match 3, mismatch -4, linear gap -12) converted to costs and doubled to stay integral:
-/// mismatch = 2 * (3 + 4) = 14, gap = 2 * (3 / 2 + 12) = 27. Global alignments then rank
-/// identically to before, so swapping the library does not also change the scoring.
-/// Simulated repeat reads favoured cheaper gaps (8/6, 3/2) at high error rates and for
-/// long alleles; that needs confirming against the truth set before changing the default.
-/// Affine gaps did clearly worse on repeats in the same simulation.
+/// bases are penalised, with a linear gap model. `Default` is the plain algorithm: the old
+/// rust-bio scoring (match 3, mismatch -4, linear gap -12) converted to costs and doubled to
+/// stay integral (mismatch = 2 * (3 + 4) = 14, gap = 2 * (3 / 2 + 12) = 27), no medoid seed,
+/// no trimming and poasta's own tie-break. The command line defaults differ: cheaper costs
+/// (3/2), which simulated repeat reads favoured at high error rates and for long alleles and
+/// the truth set confirmed, and [`PoaTies::MedianLength`]. Affine gaps did clearly worse on
+/// repeats in simulation.
 #[derive(Clone, Copy, Debug)]
 pub struct PoaScoring {
     pub mismatch: u8,
