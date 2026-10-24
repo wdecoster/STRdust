@@ -9,19 +9,20 @@ All notable changes to STRdust are documented here.
 - **The allele consensus is built with [poasta](https://github.com/broadinstitute/poasta)
   instead of rust-bio's POA.** On HG002 truth-set loci never used for tuning (two samples of
   10,000), exact allele-length concordance rose by 1.2-1.4 points in `fast` mode and 2.8-3.3
-  in `sensitive`, within 1 bp by 0.4-0.7, and genotype concordance by 0.6-1.5; all but the
-  last are significant in paired tests. On 4,569 loci with an expansion over 200 bp, exact
+  in `sensitive`, within 1 bp by 0.4-0.7, and genotype concordance by 0.6-1.5; the gains in
+  exact and within 1 bp concordance are significant in paired tests on both samples. On 4,569 loci with an expansion over 200 bp, exact
   concordance rose by 1.0 (`fast`) and 1.9 (`sensitive`) points, with within 1 bp unchanged.
   `fast` mode is about 4x quicker on random loci and 10x on long expansions.
 - **`SC` is now a cost**: the cost of aligning the consensus back to its read graph, where 0
   is a perfect fit and lower is better. It used to be rust-bio's alignment score, roughly
   three times the allele length.
 - **Allele lengths change** at about 10% of called loci in `fast` mode and 13% in
-  `sensitive`, by 1-2 bases at 85% of them. Any threshold on `RB`, `FRB` or `MRL` should be
-  re-checked. Equally supported paths through a homopolymer are now resolved by the cluster's median
-  read length (hidden `--poa-ties`); following the longer path, poasta's own choice, made
-  alleles too long, and following the better-covered one made them too short. Near long
-  expansions, where reads run short of the true allele, the median is not consulted.
+  `sensitive`, by 1-2 bases at 85% of them, so thresholds on `RB` and `FRB` should be
+  re-checked (`MRL` does not depend on the consensus). Equally supported paths through a
+  homopolymer are now resolved by the cluster's median read length (hidden `--poa-ties`):
+  following the longer path, poasta's own choice, made alleles too long, and following the
+  better-covered one made them too short. Near long expansions, where reads run short of the
+  true allele, the median is not consulted.
 
 ## [1.0.0]
 
