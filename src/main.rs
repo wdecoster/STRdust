@@ -169,10 +169,27 @@ pub struct Cli {
     // depth - an absolute read count would be a cleaner parameterisation if this is ever
     // revisited.
     /// Fraction of a cluster's reads that must support an edge for the consensus to run
-    /// through it at either end. Guards against rust-bio's consensus walking out along a
-    /// single read's overhang. 0 keeps rust-bio's own endpoint choice
+    /// through it at either end. Guards against the consensus walking out along a
+    /// single read's overhang. 0 disables trimming
     #[arg(long, default_value_t = 0.35, hide = true)]
     poa_trim_fraction: f64,
+
+    // 3/2 and 8/6 tied on 10,000 truth-set loci (within 0.1 point), both ahead of 14/27, the
+    // old rust-bio scoring converted to costs; 3/2 was marginally better on long expansions.
+    /// POA mismatch cost (poasta, linear gap model)
+    #[arg(long, default_value_t = 3, hide = true)]
+    poa_mismatch: u8,
+
+    /// POA cost per gap base (poasta, linear gap model)
+    #[arg(long, default_value_t = 2, hide = true)]
+    poa_gap: u8,
+
+    // median-length against poasta's own tie-break, on seeds held out from tuning: +1.2 to
+    // +3.3 points exact and +0.4 to +0.7 within 1 bp over rust-bio's POA, where plain poasta
+    // lost 0.6-0.9 points within 1 bp to alleles running long in homopolymers.
+    /// How the POA consensus resolves equally heavy edges
+    #[arg(long, value_enum, default_value_t = consensus::PoaTies::MedianLength, hide = true)]
+    poa_ties: consensus::PoaTies,
 
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications

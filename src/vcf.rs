@@ -794,7 +794,7 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##FORMAT=<ID=SUP,Number=.,Type=Integer,Description="Read support per allele (one value on haploid chromosomes, two otherwise)">"#
     );
     println!(
-        r#"##FORMAT=<ID=SC,Number=.,Type=Integer,Description="Consensus score per allele (one value on haploid chromosomes, two otherwise)">"#
+        r#"##FORMAT=<ID=SC,Number=.,Type=Integer,Description="Cost of aligning the consensus back to its read graph per allele, lower is better (one value on haploid chromosomes, two otherwise)">"#
     );
     let name = match &args.sample {
         Some(name) => name,
@@ -843,6 +843,9 @@ fn test_write_vcf_header_from_bam() {
         ref_edit_inclusive: false,
         poa_medoid_seed: true,
         poa_trim_fraction: 0.35,
+        poa_mismatch: 3,
+        poa_gap: 2,
+        poa_ties: crate::consensus::PoaTies::MedianLength,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
@@ -880,6 +883,9 @@ fn test_write_vcf_header_from_name() {
         ref_edit_inclusive: false,
         poa_medoid_seed: true,
         poa_trim_fraction: 0.35,
+        poa_mismatch: 3,
+        poa_gap: 2,
+        poa_ties: crate::consensus::PoaTies::MedianLength,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };

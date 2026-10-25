@@ -269,13 +269,14 @@ fn check_quick_reference_and_collect_reads(
 
 /// POA scoring as configured on the command line.
 ///
-/// The CLI takes penalties as positive numbers because that is how aligners are usually
-/// discussed; the aligner wants them negative.
+/// Costs are positive numbers, as poasta takes them.
 fn poa_scoring(args: &Cli) -> crate::consensus::PoaScoring {
     crate::consensus::PoaScoring {
         medoid_seed: args.poa_medoid_seed,
         trim_fraction: args.poa_trim_fraction,
-        ..Default::default()
+        mismatch: args.poa_mismatch,
+        gap: args.poa_gap,
+        ties: args.poa_ties,
     }
 }
 
@@ -1125,6 +1126,9 @@ mod tests {
             ref_edit_inclusive: false,
             poa_medoid_seed: true,
             poa_trim_fraction: 0.35,
+            poa_mismatch: 3,
+            poa_gap: 2,
+            poa_ties: crate::consensus::PoaTies::MedianLength,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1170,6 +1174,9 @@ mod tests {
             ref_edit_inclusive: false,
             poa_medoid_seed: true,
             poa_trim_fraction: 0.35,
+            poa_mismatch: 3,
+            poa_gap: 2,
+            poa_ties: crate::consensus::PoaTies::MedianLength,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1209,6 +1216,9 @@ mod tests {
             ref_edit_inclusive: false,
             poa_medoid_seed: true,
             poa_trim_fraction: 0.35,
+            poa_mismatch: 3,
+            poa_gap: 2,
+            poa_ties: crate::consensus::PoaTies::MedianLength,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1254,6 +1264,9 @@ mod tests {
             ref_edit_inclusive: false,
             poa_medoid_seed: true,
             poa_trim_fraction: 0.35,
+            poa_mismatch: 3,
+            poa_gap: 2,
+            poa_ties: crate::consensus::PoaTies::MedianLength,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1306,6 +1319,9 @@ mod tests {
             ref_edit_inclusive: false,
             poa_medoid_seed: true,
             poa_trim_fraction: 0.35,
+            poa_mismatch: 3,
+            poa_gap: 2,
+            poa_ties: crate::consensus::PoaTies::MedianLength,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
