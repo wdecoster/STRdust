@@ -10,9 +10,12 @@ All notable changes to STRdust are documented here.
   instead of rust-bio's POA.** On HG002 truth-set loci never used for tuning (two samples of
   10,000), exact allele-length concordance rose by 1.2-1.4 points in `fast` mode and 2.8-3.3
   in `sensitive`, within 1 bp by 0.4-0.7, and genotype concordance by 0.6-1.5; the gains in
-  exact and within 1 bp concordance are significant in paired tests on both samples. On 4,569 loci with an expansion over 200 bp, exact
-  concordance rose by 1.0 (`fast`) and 1.9 (`sensitive`) points, with within 1 bp unchanged.
-  `fast` mode is about 4x quicker on random loci and 10x on long expansions.
+  exact and within 1 bp concordance are significant in paired tests on both samples. A
+  further 50,000 loci in `fast` mode confirm it: exact +1.3, within 1 bp +0.3 and genotype
+  +0.9 points, improving or level in every size stratum. On 4,569 loci with an expansion
+  over 200 bp, exact concordance rose by 1.0 (`fast`) and 1.9 (`sensitive`) points, with
+  within 1 bp unchanged. `fast` mode is 3-4x quicker on random loci and 10x on long
+  expansions.
 - **`SC` is now a cost**: the cost of aligning the consensus back to its read graph, where 0
   is a perfect fit and lower is better. It used to be rust-bio's alignment score, roughly
   three times the allele length.
