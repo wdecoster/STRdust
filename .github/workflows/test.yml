@@ -9,9 +9,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Pinned rather than ubuntu-latest: on 26.04 the bindgen 0.69 in hts-sys generates opaque
+# htslib structs (no field `n_targets` on `sam_hdr_t` ...) and the build fails.
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
@@ -45,7 +47,7 @@ jobs:
       run: cargo test --verbose
 
   test-musl:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - uses: actions/checkout@v4
