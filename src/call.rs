@@ -340,6 +340,14 @@ pub fn genotype_repeats(args: Cli) {
 
     info!("Processing {} targets in {} batches", num_intervals, batches.len());
 
+    // Built for every thread count, 1 included: the per-locus code has rayon parallelism of its
+    // own (the distance matrix in phase_insertions), which otherwise runs on rayon's default
+    // global pool of one thread per core, so `--unphased -t 1` used every core.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build_global()
+        .expect("Failed to create threadpool");
+
     if args.threads == 1 {
         // When running single threaded things become easier and the tool will require less memory
         // Output is returned in the same order as the bed, and therefore not sorted before writing immediately to stdout
@@ -365,10 +373,6 @@ pub fn genotype_repeats(args: Cli) {
         }
     } else if args.sorted {
         // output is sorted by chrom, start and end
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(args.threads)
-            .build_global()
-            .expect("Failed to create threadpool");
 
         // Create BAM reader pool for parallel processing
         let reader_pool = BamReaderPool::new(args.bam.clone(), args.fasta.clone());
@@ -409,10 +413,6 @@ pub fn genotype_repeats(args: Cli) {
         // par_bridge does not guarantee that results are returned in order
         // but writing it out immediately makes for low memory usage
         // this does not use the BufWriter (as that doesn't work across threads), but writes directly to stdout
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(args.threads)
-            .build_global()
-            .expect("Failed to create threadpool");
 
         // Create BAM reader pool for parallel processing
         let reader_pool = BamReaderPool::new(args.bam.clone(), args.fasta.clone());

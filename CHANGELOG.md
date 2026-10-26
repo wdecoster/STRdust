@@ -2,6 +2,16 @@
 
 All notable changes to STRdust are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- **`--threads 1` was not respected with `--unphased`.** The single-threaded path never
+  configured rayon, so the parallel distance matrix used to split reads into haplotypes ran
+  on rayon's default pool of one thread per core: on a test set `--unphased -t 1` used 4.3
+  cores, and on a large server it could use them all. The thread pool is now built for every
+  thread count. Phased input was not affected, in either mode.
+
 ## [1.1.2]
 
 ### Fixed
