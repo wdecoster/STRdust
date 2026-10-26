@@ -5,8 +5,6 @@ on:
     tags:
       - '*'
 
-# Pinned rather than ubuntu-latest: on 26.04 the bindgen 0.69 in hts-sys generates opaque
-# htslib structs (no field `n_targets` on `sam_hdr_t` ...) and the build fails.
 jobs:
   publish:
     name: Publish for ${{ matrix.os }}
@@ -21,11 +19,11 @@ jobs:
 
         include:
           - name: linux
-            os: ubuntu-24.04
+            os: ubuntu-latest
             artifact_name: target/release/STRdust
             asset_name: STRdust-linux
           - name: linux-musl
-            os: ubuntu-24.04
+            os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             artifact_name: target/x86_64-unknown-linux-musl/release/STRdust
             asset_name: STRdust-linux-musl
@@ -83,7 +81,7 @@ jobs:
     # from a user still produces a backtrace with function names in it. macOS keeps debug
     # info in a separate .dSYM, so its binary is already small and is left alone.
     - name: Strip debug info from Linux binaries
-      if: matrix.os == 'ubuntu-24.04'
+      if: matrix.os == 'ubuntu-latest'
       run: |
         ls -l ${{ matrix.artifact_name }}
         strip --strip-debug ${{ matrix.artifact_name }}
