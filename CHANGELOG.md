@@ -2,6 +2,14 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.1.2]
+
+### Fixed
+
+- **Builds with newer clang.** `hts-sys` 2.2.1 moves to bindgen 0.72, which generates the
+  htslib bindings correctly against the libclang on ubuntu 26.04 and in current conda
+  environments, so the CI pin to ubuntu-24.04 is dropped. The code is unchanged from 1.1.1.
+
 ## [1.1.1]
 
 ### Fixed
