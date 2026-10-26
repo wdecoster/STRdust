@@ -2,6 +2,17 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.1.1]
+
+### Fixed
+
+- **Release binaries.** v1.1.0 was published without them: GitHub moved `ubuntu-latest` to
+  26.04, where the bindgen in `hts-sys` cannot generate the htslib bindings. The Linux
+  workflows are pinned to ubuntu-24.04. The code is unchanged from 1.1.0.
+- **Dependency advisories** RUSTSEC-2026-0338 to -0342, -0346 to -0349 and -0383, in
+  `rustls`, `quinn-proto` and `webpki-root-certs`. All are reached only through `reqwest`,
+  which STRdust uses to download the `--pathogenic` catalog.
+
 ## [1.1.0]
 
 ### Changed
