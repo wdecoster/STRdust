@@ -23,10 +23,13 @@ changes between releases, so the paths are deliberately not hardcoded here.
 If the truth VCF is a general call set that also contains SNVs and other non-repeat
 variants, pass ``--repeat-bed`` with a BED of repeat loci. Each BED locus then becomes one
 STRdust target, and its truth alleles are the summed per-haplotype length change of the
-variants inside it - so an SNV in the repeat contributes 0, and a locus with no variant at
-all (inside the confident regions) is truth-homozygous-reference, which is how the large
-invariant class enters the benchmark. Loci whose phase cannot be resolved - two or more
-unphased heterozygous length-changing records - are skipped rather than guessed.
+variants inside it - so an SNV in the repeat contributes 0 to the length. The truth genotype
+class is sequence-aware, though, like STRdust's GT: that SNV makes its haplotype non-reference.
+A locus with no variant at all (inside the confident regions) is truth-homozygous-reference,
+which is how the large invariant class enters the benchmark. Loci whose phase cannot be
+resolved - two or more unphased heterozygous length-changing records - are skipped rather
+than guessed; where only the genotype class depends on unknown phase, the class is left
+unscored.
 
 Without ``--repeat-bed``, the truth VCF's own coordinates become the target BED handed to
 STRdust. That makes
@@ -269,7 +272,11 @@ def overlapping_loci(spans, starts, var_start, var_end):
 
 
 def haplotype_deltas(ref, alts, genotype):
-    """Per-haplotype (length delta, is_reference) for one record, or None if unusable."""
+    """Per-haplotype (length delta, allele index) for one record, or None if unusable.
+
+    The allele index (0 = REF) is what the sequence-aware genotype class is built from: a
+    haplotype carrying an ALT differs from the reference even when its length does not.
+    """
     if genotype in (".", "./.", ".|."):
         return None
     phased = "|" in genotype
@@ -285,7 +292,7 @@ def haplotype_deltas(ref, alts, genotype):
         allele = sequences[index]
         if allele.startswith("<") or allele == "*":
             return None
-        out.append((len(allele) - len(ref), index == 0))
+        out.append((len(allele) - len(ref), index))
     return out, phased
 
 
@@ -305,13 +312,16 @@ def clamp_to_locus(parsed, var_start, locus_start, locus_end):
     """
     deltas, phased = parsed
     clamped = []
-    for delta, is_ref in deltas:
+    for delta, allele in deltas:
         if delta < 0:
             deleted_start = var_start + 1
             deleted_end = deleted_start - delta
             overlap = min(locus_end, deleted_end) - max(locus_start, deleted_start)
             delta = -max(0, overlap)
-        clamped.append((delta, is_ref))
+            if delta == 0:
+                # only the anchor base touches the locus: its sequence is unchanged
+                allele = 0
+        clamped.append((delta, allele))
     return clamped, phased
 
 
@@ -404,17 +414,26 @@ def read_truth_over_repeats(
 
 
 def resolve_locus(records):
-    """Total per-haplotype length change for one locus, or None if phase is ambiguous."""
+    """Per-haplotype length change and genotype class for one locus, or None if unresolvable.
+
+    Lengths sum the length change of every record on each haplotype. The genotype class is
+    sequence-aware, like STRdust's own GT: a haplotype carrying any ALT counts as non-reference
+    even when its length is unchanged (an SNV inside the repeat), and two altered haplotypes
+    are 1/1 only if they carry the same ALT alleles. Scoring the class on length alone
+    counted STRdust wrong at every locus where it reported an SNV HG002 really carries.
+
+    The class is None (GT not scored, lengths still are) when phase decides it but is unknown.
+    """
     if not records:
         return [0, 0], "0/0"
     ploidy = max(len(deltas) for deltas, _phased in records)
-    # only *length-changing* heterozygous records need phase: a het SNV inside the repeat
-    # contributes 0 to both haplotypes whichever way it is assigned
-    varying = [
-        (deltas, phased)
-        for deltas, phased in records
-        if len({delta for delta, _is_ref in deltas}) > 1
-    ]
+
+    def differs(deltas, key):
+        return len({key(delta, allele) for delta, allele in deltas}) > 1
+
+    # only *length-changing* heterozygous records need phase for the lengths: a het SNV inside
+    # the repeat contributes 0 to both haplotypes whichever way it is assigned
+    varying = [(deltas, phased) for deltas, phased in records if differs(deltas, lambda d, a: d)]
     # A single unphased heterozygous record is only safe when it is the *only* record that
     # differs between haplotypes. With anything else varying - phased or not - its
     # orientation relative to that record is unknown: phased 0|10 plus unphased 5/0 is
@@ -424,21 +443,28 @@ def resolve_locus(records):
     if sum(1 for _deltas, phased in varying if not phased) > 1:
         return None
     totals = [0] * ploidy
-    for deltas, _phased in records:
+    haplotypes = [[] for _ in range(ploidy)]
+    for number, (deltas, _phased) in enumerate(records):
         for hap in range(ploidy):
-            delta, _allele_is_ref = deltas[hap % len(deltas)]
+            delta, allele = deltas[hap % len(deltas)]
             totals[hap] += delta
-    # the genotype class is derived from length, to match the axis this script scores:
-    # a haplotype whose total length change is 0 counts as reference, so a tool is not
-    # penalised for an SNV inside the repeat that it cannot express as a length
+            if allele != 0:
+                haplotypes[hap].append((number, allele))
+    # the same phase rule again for the class, now over every record whose allele differs
+    # between haplotypes (SNVs included); unlike the lengths, an unknown class only drops
+    # the locus from the genotype axis, so the locus set - and --sample-loci - is unchanged
+    seq_varying = [phased for deltas, phased in records if differs(deltas, lambda d, a: a)]
+    if sum(1 for phased in seq_varying if not phased) and len(seq_varying) > 1:
+        return sorted(totals), None
+    altered = [bool(alleles) for alleles in haplotypes]
     if ploidy == 1:
-        return totals, "0" if totals[0] == 0 else "1"
-    if totals[0] == 0 and totals[1] == 0:
+        return totals, "1" if altered[0] else "0"
+    if not altered[0] and not altered[1]:
         gt_class = "0/0"
-    elif totals[0] == 0 or totals[1] == 0:
+    elif not altered[0] or not altered[1]:
         gt_class = "0/1"
     else:
-        gt_class = "1/1" if totals[0] == totals[1] else "1/2"
+        gt_class = "1/1" if haplotypes[0] == haplotypes[1] else "1/2"
     return sorted(totals), gt_class
 
 
@@ -775,7 +801,9 @@ def plot(rows, path):
 # 3: resolve_locus now skips a locus whenever an unphased heterozygous length-changing
 #    record sits alongside any other haplotype-varying record, since its orientation
 #    relative to that record is unknown.
-TRUTH_CACHE_VERSION = 3
+# 4: the genotype class is sequence-aware (an SNV in the repeat makes the haplotype ALT)
+#    instead of length-based; lengths and the locus set are unchanged.
+TRUTH_CACHE_VERSION = 4
 
 
 def truth_cache_key(args, regions_filter):
