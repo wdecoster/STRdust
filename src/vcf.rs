@@ -846,6 +846,8 @@ fn test_write_vcf_header_from_bam() {
         poa_mismatch: 3,
         poa_gap: 2,
         poa_ties: crate::consensus::PoaTies::MedianLength,
+        outlier_std_factor: 2.0,
+        outlier_min_std: 2,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };
@@ -886,6 +888,8 @@ fn test_write_vcf_header_from_name() {
         poa_mismatch: 3,
         poa_gap: 2,
         poa_ties: crate::consensus::PoaTies::MedianLength,
+        outlier_std_factor: 2.0,
+        outlier_min_std: 2,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
     };

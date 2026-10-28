@@ -2,6 +2,18 @@
 
 All notable changes to STRdust are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **Length outliers are removed from tighter read clusters.** Before the consensus, reads
+  more than two standard deviations from the cluster's mean length are dropped; this used to
+  happen only when the standard deviation was at least 5 bp and now applies from 2 bp. On
+  10,000 held-out HG002 loci: exact allele length +0.3 points, within 1 bp +0.5, with no
+  change in no-calls and no change on 5,072 long expansions. Testing it also settled #36: the
+  filter does not bias expansions short. Errors at long loci lean long, and switching the
+  filter off makes them worse.
+
 ## [1.1.3]
 
 ### Fixed

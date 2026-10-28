@@ -191,6 +191,21 @@ pub struct Cli {
     #[arg(long, value_enum, default_value_t = consensus::PoaTies::MedianLength, hide = true)]
     poa_ties: consensus::PoaTies,
 
+    /// Drop reads whose length is outside mean +/- this many standard deviations before the
+    /// consensus (#36)
+    #[arg(long, default_value_t = 2.0, hide = true)]
+    outlier_std_factor: f64,
+
+    // 2 against the old 5, on 10,000 held-out random loci (seed 11): exact +0.3 (paired z 2.5),
+    // within 1 bp +0.5 (z 4.1), no change in no-calls, neutral on 5,072 long expansions.
+    // Switching removal off, or trimming at 1 or 3 std devs instead of 2, was worse. Errors at
+    // long loci lean long (924 vs 785 alleles), so the filter helps by dropping stray long
+    // reads rather than biasing expansions short as #36 suspected.
+    /// Only drop length outliers when the cluster's (floored) standard deviation is at least
+    /// this; a value above any real spread disables outlier removal (#36)
+    #[arg(long, default_value_t = 2, hide = true)]
+    outlier_min_std: usize,
+
     /// Minimum mapping quality of a read to be used. Lower it (down to 0) to keep
     /// ambiguously mapped reads, which matters in segmental duplications
     #[arg(long, default_value_t = 10)]

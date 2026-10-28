@@ -277,6 +277,8 @@ fn poa_scoring(args: &Cli) -> crate::consensus::PoaScoring {
         mismatch: args.poa_mismatch,
         gap: args.poa_gap,
         ties: args.poa_ties,
+        outlier_std_factor: args.outlier_std_factor,
+        outlier_min_std: args.outlier_min_std,
     }
 }
 
@@ -1129,6 +1131,8 @@ mod tests {
             poa_mismatch: 3,
             poa_gap: 2,
             poa_ties: crate::consensus::PoaTies::MedianLength,
+            outlier_std_factor: 2.0,
+            outlier_min_std: 2,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1177,6 +1181,8 @@ mod tests {
             poa_mismatch: 3,
             poa_gap: 2,
             poa_ties: crate::consensus::PoaTies::MedianLength,
+            outlier_std_factor: 2.0,
+            outlier_min_std: 2,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1219,6 +1225,8 @@ mod tests {
             poa_mismatch: 3,
             poa_gap: 2,
             poa_ties: crate::consensus::PoaTies::MedianLength,
+            outlier_std_factor: 2.0,
+            outlier_min_std: 2,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1267,6 +1275,8 @@ mod tests {
             poa_mismatch: 3,
             poa_gap: 2,
             poa_ties: crate::consensus::PoaTies::MedianLength,
+            outlier_std_factor: 2.0,
+            outlier_min_std: 2,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };
@@ -1322,6 +1332,8 @@ mod tests {
             poa_mismatch: 3,
             poa_gap: 2,
             poa_ties: crate::consensus::PoaTies::MedianLength,
+            outlier_std_factor: 2.0,
+            outlier_min_std: 2,
             mode: crate::GenotypingMode::Sensitive,
             fast_flank: 10,
         };

@@ -55,6 +55,10 @@ pub struct PoaScoring {
     pub trim_fraction: f64,
     /// How the heaviest bundle resolves two equally heavy in-edges.
     pub ties: PoaTies,
+    /// Reads outside mean +/- this many standard deviations are dropped before the POA.
+    pub outlier_std_factor: f64,
+    /// Length outliers are only dropped when the standard deviation is at least this.
+    pub outlier_min_std: usize,
 }
 
 /// How the heaviest bundle resolves two equally heavy in-edges.
@@ -82,6 +86,8 @@ impl Default for PoaScoring {
             medoid_seed: false,
             trim_fraction: 0.0,
             ties: PoaTies::Score,
+            outlier_std_factor: 2.0,
+            outlier_min_std: 5,
         }
     }
 }
@@ -278,7 +284,7 @@ pub fn consensus(
     // reported median and the imprecision verdict reflect the true read distribution.
     let (mean, std_dev, median_length) = length_stats(seqs);
     let imprecise = mean > 0 && (std_dev as f64 / mean as f64) > IMPRECISE_LENGTH_CV;
-    let seqs = remove_outliers(seqs, mean, std_dev, repeat);
+    let seqs = remove_outliers(seqs, mean, std_dev, &poa, repeat);
     let num_reads = seqs.len();
     debug!("{repeat}: Kept {}/{} reads after dropping outliers", num_reads, num_reads_);
     if num_reads < support {
@@ -368,18 +374,20 @@ fn remove_outliers<'a>(
     seqs: &'a [String],
     mean: usize,
     std_dev: usize,
+    poa: &PoaScoring,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Vec<&'a String> {
-    // remove sequences that are shorter or longer than two standard deviations from the mean
-    // except if the stdev is small
+    // remove sequences that are shorter or longer than <factor> standard deviations from the
+    // mean, except if the stdev is small
     debug!("{repeat}: mean: {}, std_dev: {}", mean, std_dev);
-    if std_dev < 5 {
-        debug!("std_dev < 5, not removing any outliers");
+    if std_dev < poa.outlier_min_std {
+        debug!("std_dev < {}, not removing any outliers", poa.outlier_min_std);
         seqs.iter().collect::<Vec<&String>>()
     } else {
+        let window = (poa.outlier_std_factor * std_dev as f64) as usize;
         // avoid underflowing usize
-        let min_val = mean.saturating_sub(2 * std_dev);
-        let max_val = mean + 2 * std_dev;
+        let min_val = mean.saturating_sub(window);
+        let max_val = mean + window;
         debug!("Removing outliers outside of [{},{}]", min_val, max_val);
         seqs.iter()
             .filter(|seq| seq.len() > min_val && seq.len() < max_val)
