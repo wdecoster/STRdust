@@ -44,6 +44,20 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
 
+  test-harness:
+    # misc/benchmark_truth.py produces every accuracy number quoted for STRdust (#38)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Test the benchmark harness
+      run: python3 -m unittest discover -s misc -v
+
   test-musl:
     runs-on: ubuntu-latest
     

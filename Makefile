@@ -1,6 +1,6 @@
 # Makefile for STRdust development
 
-.PHONY: all build test clean fmt clippy build-musl musl help install-hooks pre-push pre-commit ci setup audit outdated fmt-check docs install bench
+.PHONY: all build test clean fmt clippy build-musl musl help install-hooks pre-push pre-commit ci setup audit outdated fmt-check docs install bench test-harness
 
 # Default target
 all: fmt clippy test build
@@ -32,6 +32,10 @@ musl: build-musl
 # Run tests
 test:
 	cargo test
+
+# Test the benchmark harness in misc/ (standard library only)
+test-harness:
+	python3 -m unittest discover -s misc
 
 # Clean build artifacts
 clean:
@@ -66,7 +70,7 @@ install:
 	cargo install --path .
 
 # Run all checks (CI simulation)
-ci: fmt-check clippy test
+ci: fmt-check clippy test test-harness
 	@echo "All CI checks passed!"
 
 # Development setup
@@ -106,6 +110,7 @@ help:
 	&& echo "  build        - Build in release mode" \
 	&& echo "  build-musl   - Build static MUSL binary" \
 	&& echo "  test         - Run tests" \
+	&& echo "  test-harness - Test the benchmark harness in misc/" \
 	&& echo "  fmt          - Format code" \
 	&& echo "  fmt-check    - Check formatting without fixing" \
 	&& echo "  clippy       - Run clippy linter" \
