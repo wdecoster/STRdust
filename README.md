@@ -105,7 +105,12 @@ Two locus-level quality flags are raised automatically when running with `--unph
 
 One locus-level flag concerns expansions longer than the reads, in every mode:
 
-- `UNSPANNED_EXPANSION=<n>`: `n` reads end in a clip of at least 100 bp at the repeat, the signature of an allele too long for them to span. When the haplotype carrying it has too few spanning reads to be called, it is reported unresolved and the other haplotype is still called: `0|.` with phased input, `0/.` with `--unphased`. Treat such a locus as a possible large expansion and inspect it, for instance with longer reads. Raised once at least `--support` reads are clipped.
+- `UNSPANNED_EXPANSION=<n>`: `n` reads end in a clip of at least 100 bp within 100 bp of the repeat, the signature of an allele too long for them to span (or one the aligner split). Raised once at least `--support` reads are clipped. STRdust only measures allele lengths from reads that span the repeat, so the flag changes the call only where those are missing:
+  - *Phased input*: a haplotype with fewer than `--support` spanning reads but with clipped reads is reported unresolved, and the other haplotype is still called: `0|.` or `1|.`, rather than a no-call for both. The unresolved allele's `RB`, `FRB` and `MRL` are `.`; its `SUP` is the number of spanning reads it had.
+  - *`--unphased`*: when all spanning reads form a single cluster, a second allele is reported unresolved (`0/.`, `1/.`) only if at least `--support` clips are more than 200 bp longer than the called allele. Shorter clips come from reads that did not span the called allele itself, as at a homozygous expansion, and leave a homozygous call in place. The unresolved allele's `SUP` is the number of such long clips.
+  - *A complete call with the flag* (e.g. `0|1`): enough reads spanned the repeat to size every allele, and those sizes stand, but some reads did not; at a locus of interest, check whether they hint at a still longer allele.
+
+  A flagged locus is a candidate large expansion: an unresolved allele is longer than the reads that cover it, and longer reads (or targeted sequencing) are needed to size it. In testing on HG002, unphased calls changed this way had mostly missed a second allele of several kb.
 
 Example output:
 
@@ -169,6 +174,7 @@ STRdust was developed while investigating the [pathogenic GOLGA8A repeat expansi
 | `EXPANSION_OUTLIER` min reads / ratio | ≥ 2 reads, > 2x longer allele | `src/genotype.rs` | lower either for more sensitivity to few-read / single-read expansions, at the cost of more artifact flags |
 | `IMPRECISE_LENGTH` length CV | > 0.2 | `src/consensus.rs` | lower flags more loci as length-imprecise; raise to flag only the most spread-out |
 | `UNSPANNED_EXPANSION` minimum clip | ≥ 100 bp, within 100 bp of the repeat | `src/parse_bam.rs` | lower to catch expansions only slightly longer than the reads, at the cost of flagging aligner clipping noise |
+| `UNSPANNED_EXPANSION` margin (`--unphased`) | clip > called allele + 200 bp | `src/genotype.rs` | lower to leave the second allele unresolved more readily, at the cost of turning correct homozygous expansion calls into half-calls |
 | `DISCORDANT_LENGTH` ratio (`--phasing both`) | > 2x longer allele | `src/genotype.rs` | lower to surface smaller Ward/DBSCAN disagreements for QC review |
 | DBSCAN neighbourhood radius (`eps`) | 0.4 | `src/phase_insertions.rs` | smaller = tighter/more clusters (more splitting, more reads dropped to noise → can undercall length-variable expansions); larger = looser clusters that can merge distinct alleles. Adjust in ±0.1 steps and watch `NCLUSTERS` |
 | DBSCAN length weight | 0.3 | `src/phase_insertions.rs` | lower = composition dominates (keeps length-variable expansions together); higher = length matters more (separates same-motif alleles that differ only in length, behaving more like `ward`) |
