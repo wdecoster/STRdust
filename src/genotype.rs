@@ -267,6 +267,13 @@ fn check_quick_reference_and_collect_reads(
 // when running multithreaded, the indexedreader has to be created every time again
 // this is probably expensive
 
+/// How much longer than the called allele a clip must be to count as evidence of a second,
+/// longer allele with `--unphased` (#34). A read that does not span an allele of length A
+/// clips at most about A bases of it, so counting every clip turned 97 correct 1/1 calls at
+/// HG002 long expansions into 1/. half-calls. With this margin 16 calls change, 13 of which had
+/// missed a second allele (e.g. 1934/1934 where the truth is 1934/22234).
+const UNSPANNED_MARGIN: u32 = 200;
+
 /// POA scoring as configured on the command line.
 ///
 /// Costs are positive numbers, as poasta takes them.
@@ -321,6 +328,13 @@ pub fn genotype_with_extracted_reads(
 
     let flanking = 5000;
     let mut flags: Vec<String> = vec![];
+    // #34: reads ending in a large clip at the repeat belong to an allele they do not span.
+    // Reported on every record, no-calls included, since it is most informative exactly when
+    // too few reads span the locus to call it.
+    let clipped_total: usize = reads.clipped.iter().map(Vec::len).sum();
+    if clipped_total >= args.support {
+        flags.push(format!("UNSPANNED_EXPANSION={clipped_total}"));
+    }
 
     // Open FASTA reader to get reference sequence
     let fasta_reader = rust_htslib::faidx::Reader::from_path(&args.fasta)
@@ -331,6 +345,16 @@ pub fn genotype_with_extracted_reads(
         None => {
             return Ok(crate::vcf::VCFRecord::missing_genotype(repeat, "N", ".".to_string(), args));
         }
+    };
+
+    // a no-call keeps the clip evidence, which is all there is to report at such a locus
+    let missing = |support: String, flags: &[String]| {
+        let mut record =
+            crate::vcf::VCFRecord::missing_genotype(repeat, &repeat_ref_seq, support, args);
+        if !flags.is_empty() {
+            record.flags = format!("{};", flags.join(";"));
+        }
+        record
     };
 
     // In --fast mode the reads were already cut down to the repeat allele straight from
@@ -374,12 +398,7 @@ pub fn genotype_with_extracted_reads(
         let insertions = get_insertions(seq, aligner.as_ref(), args, flanking, repeat);
         debug!("{repeat}: Haploid: Creating consensus from {} insertions", insertions.len());
         if insertions.len() < args.support {
-            return Ok(crate::vcf::VCFRecord::missing_genotype(
-                repeat,
-                &repeat_ref_seq,
-                insertions.len().to_string(),
-                args,
-            ));
+            return Ok(missing(insertions.len().to_string(), &flags));
         }
         // A haploid chromosome yields a single consensus / haplotype, pushed once;
         // vcf.rs reports it as a single allele value per the VCF specification.
@@ -401,12 +420,7 @@ pub fn genotype_with_extracted_reads(
         let insertions = get_insertions(seq, aligner.as_ref(), args, flanking, repeat);
         if insertions.len() < args.support {
             debug!("{repeat}: Not enough insertions found: {}", insertions.len());
-            return Ok(crate::vcf::VCFRecord::missing_genotype(
-                repeat,
-                &repeat_ref_seq,
-                insertions.len().to_string(),
-                args,
-            ));
+            return Ok(missing(insertions.len().to_string(), &flags));
         }
         if insertions.len() == 1 {
             return Ok(crate::vcf::VCFRecord::single_read(
@@ -469,12 +483,7 @@ pub fn genotype_with_extracted_reads(
             }
             None => {
                 if phased.hap1.len() < args.support {
-                    return Ok(crate::vcf::VCFRecord::missing_genotype(
-                        repeat,
-                        &repeat_ref_seq,
-                        insertions.len().to_string(),
-                        args,
-                    ));
+                    return Ok(missing(insertions.len().to_string(), &flags));
                 }
                 let consensus = crate::consensus::consensus(
                     &phased.hap1,
@@ -483,8 +492,27 @@ pub fn genotype_with_extracted_reads(
                     repeat,
                     poa_scoring(args),
                 );
-                consenses.push(consensus.clone());
-                consenses.push(consensus);
+                // #34: every spanning read fell in one cluster, but reads whose clips are longer
+                // than that cluster's allele point to a second, longer allele they could not
+                // span. Clips shorter than it are just reads not spanning the same allele, as at
+                // a homozygous expansion, and leave the call alone.
+                let called = consensus.seq.as_ref().map_or(0, String::len) as u32;
+                let longer = reads.clipped[0]
+                    .iter()
+                    .filter(|&&clip| clip > called + UNSPANNED_MARGIN)
+                    .count();
+                if longer >= args.support {
+                    // reporting the cluster twice would be a confident homozygous call that
+                    // misses the longer allele, so it is left unresolved (e.g. 0/.) instead
+                    consenses.push(consensus);
+                    consenses.push(crate::consensus::Consensus {
+                        support: longer,
+                        ..Default::default()
+                    });
+                } else {
+                    consenses.push(consensus.clone());
+                    consenses.push(consensus);
+                }
                 flags.push("CLUSTERFAILURE".to_string());
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.push(phased.hap1.join(":"));
@@ -520,28 +548,31 @@ pub fn genotype_with_extracted_reads(
             insertions1.len(),
             insertions2.len()
         );
-        if insertions1.len() < args.support || insertions2.len() < args.support {
-            return Ok(crate::vcf::VCFRecord::missing_genotype(
-                repeat,
-                &repeat_ref_seq,
-                format!("{},{}", insertions1.len(), insertions2.len()),
-                args,
-            ));
+        let short = [
+            insertions1.len() < args.support,
+            insertions2.len() < args.support,
+        ];
+        // #34: one haplotype lacks spanning reads but its reads end clipped at the repeat,
+        // i.e. it carries an allele too long for them. The other haplotype is still called,
+        // as a half-call (e.g. 0|.), rather than discarding it along with the unresolved one.
+        let half_call = short[0] != short[1]
+            && reads.clipped[if short[0] { 1 } else { 2 }].len() >= args.support;
+        if (short[0] || short[1]) && !half_call {
+            return Ok(missing(format!("{},{}", insertions1.len(), insertions2.len()), &flags));
         }
-        consenses.push(crate::consensus::consensus(
-            &insertions1,
-            args.support,
-            args.consensus_reads,
-            repeat,
-            poa_scoring(args),
-        ));
-        consenses.push(crate::consensus::consensus(
-            &insertions2,
-            args.support,
-            args.consensus_reads,
-            repeat,
-            poa_scoring(args),
-        ));
+        for (insertions, unresolved) in [(&insertions1, short[0]), (&insertions2, short[1])] {
+            consenses.push(if unresolved {
+                crate::consensus::Consensus { support: insertions.len(), ..Default::default() }
+            } else {
+                crate::consensus::consensus(
+                    insertions,
+                    args.support,
+                    args.consensus_reads,
+                    repeat,
+                    poa_scoring(args),
+                )
+            });
+        }
         if let Some(ref mut all_ins) = all_insertions {
             all_ins.push(insertions1.join(":"));
             all_ins.push(insertions2.join(":"));

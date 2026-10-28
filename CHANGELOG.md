@@ -4,7 +4,30 @@ All notable changes to STRdust are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Expansions too long for the reads are flagged, not called reference (#34).** When no
+  read spans an expansion, its reads end in a large clip at the repeat and used to be
+  discarded: phased input then no-called the whole locus, and `--unphased` reported a
+  confident homozygous reference (0/0) from the other haplotype alone. Reads clipped by at
+  least 100 bp at the repeat are now counted and reported as `UNSPANNED_EXPANSION=<n>` once
+  there are at least `--support` of them. The haplotype they belong to is reported
+  unresolved and the other one is still called: `0|.` for phased input, `0/.` unphased. On
+  a synthetic ladder at the HTT CAG repeat (+100 bp to +8 kb, 10 and 20 kb reads), every
+  expansion with spanning reads is sized within 0.1%, and the one without (+8 kb, 10 kb
+  reads) is now `0|.` / `0/.` with the flag instead of a no-call or a false 0/0. With
+  `--unphased`, only clips more than 200 bp longer than the called allele count, since
+  reads not spanning the called allele itself clip too. On 5,072 HG002 long expansions:
+  31 phased no-calls become half-calls, each called allele matching the truth; 16 unphased
+  calls become half-calls, 13 of which had missed a second allele (up to 31 kb, e.g. 0/0
+  where the truth is 0/22062). Loci without the flag are byte-identical to before.
+
 ### Changed
+
+- **`--unphased ward` is about 10x faster, with identical output.** Ward's pairwise read
+  distances now use Myers' bit-parallel edit distance instead of the cell-by-cell dynamic
+  programme: the same exact distance, computed 64 cells at a time. Unphased runs of 10,000
+  loci went from 214 to 17 CPU seconds, and from 3,177 to 379 on 5,072 long expansions.
 
 - **Length outliers are removed from tighter read clusters.** Before the consensus, reads
   more than two standard deviations from the cluster's mean length are dropped; this used to

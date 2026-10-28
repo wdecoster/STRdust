@@ -772,6 +772,9 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##INFO=<ID=DBSCAN_RB,Number=2,Type=Integer,Description="With --phasing both: DBSCAN allele lengths relative to reference, reported when DISCORDANT_LENGTH is set">"#
     );
     println!(
+        r#"##INFO=<ID=UNSPANNED_EXPANSION,Number=1,Type=Integer,Description="Number of reads ending in a large clip at the repeat: evidence of an allele too long for them to span. A haplotype without spanning reads is then reported unresolved (e.g. 0|.) rather than called">"#
+    );
+    println!(
         r#"##INFO=<ID=QUICKREF,Number=0,Type=Flag,Description="Locus identified as homozygous reference via fast CIGAR check, alignment skipped">"#
     );
     if args.debug {

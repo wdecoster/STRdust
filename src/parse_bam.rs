@@ -78,6 +78,45 @@ const CLIP_MIN_LEN: i64 = 10;
 /// left - over-rejecting only costs time, under-rejecting costs a false reference call.
 const CLIP_SEARCH: i64 = 100;
 
+/// A clip at least this long at the repeat is evidence of an allele the read does not span
+/// (#34): reads from an expansion longer than themselves, or that the aligner split, end in a
+/// large clip right at the repeat edge, while reads from the other haplotype pass through.
+/// Far above the clips sequencing noise leaves, and well below any expansion worth flagging.
+const CLIP_EVIDENCE_MIN: i64 = 100;
+
+/// The length of the clip with which a primary alignment ends at the repeat, if it is large
+/// enough to be evidence of an allele too long for the read to span (the longer clip if both
+/// ends qualify). Supplementary pieces of the same read are not counted again.
+pub fn repeat_clip(record: &bam::Record, start: u32, end: u32) -> Option<u32> {
+    use rust_htslib::bam::record::Cigar;
+    if record.is_secondary() || record.is_supplementary() || record.is_unmapped() {
+        return None;
+    }
+    let (repeat_lo, repeat_hi) = (i64::from(start) - 1, i64::from(end));
+    // a hard clip may sit outside a soft clip, so both count towards an end's clip
+    let clip_len = |ops: &mut dyn Iterator<Item = &Cigar>| -> u32 {
+        ops.take(2)
+            .map(|op| match op {
+                Cigar::SoftClip(l) | Cigar::HardClip(l) => *l,
+                _ => 0,
+            })
+            .sum()
+    };
+    let cigar = record.cigar();
+    let leading = clip_len(&mut cigar.iter());
+    let trailing = clip_len(&mut cigar.iter().rev());
+    [
+        (leading, record.reference_start()),
+        (trailing, record.reference_end()),
+    ]
+    .into_iter()
+    .filter(|&(len, pos)| {
+        i64::from(len) >= CLIP_EVIDENCE_MIN && clips_into_locus(pos, repeat_lo, repeat_hi)
+    })
+    .map(|(len, _)| len)
+    .max()
+}
+
 /// Slice the repeat allele straight out of the existing alignment.
 ///
 /// Walks the CIGAR of `record` and returns the read bases the aligner placed over the
@@ -245,6 +284,9 @@ pub struct Reads {
     /// True when the stored sequences are already the repeat alleles sliced out of the
     /// alignment (`--fast`), rather than whole reads still to be re-aligned.
     pub sliced: bool,
+    /// Clip lengths of the reads clipped at the repeat (see [`repeat_clip`]) per phase
+    /// 0/1/2: evidence of an allele too long for the reads to span.
+    pub clipped: [Vec<u32>; 3],
 }
 
 impl Reads {
@@ -361,6 +403,7 @@ pub fn process_collected_reads(
         phase2: Vec::new(),
         ps: None,
         sliced: false,
+        clipped: Default::default(),
     };
 
     // Extract sequences from collected records
@@ -432,6 +475,7 @@ pub fn get_overlapping_reads(
         phase2: Vec::new(),
         ps: None,
         sliced: false,
+        clipped: Default::default(),
     };
 
     // extract sequences spanning the repeat locus
@@ -661,6 +705,44 @@ mod slice_tests {
     /// A repeat at 1-based start=1001, end=1010 occupies 0-based [1000, 1010).
     const START: u32 = 1001;
     const END: u32 = 1010;
+
+    #[test]
+    fn repeat_clip_detects_large_clips_at_the_repeat_only() {
+        let seq = |n: usize| vec![b'A'; n];
+        // Record::new() starts out unmapped, which the check rightly ignores
+        let record = |pos, cigar, seq: &[u8]| {
+            let mut rec = record(pos, cigar, seq);
+            rec.unset_unmapped();
+            rec
+        };
+        // 500 bp aligned up to the repeat end, then 300 bp clipped: an unspanned expansion
+        let right = record(510, vec![Cigar::Match(500), Cigar::SoftClip(300)], &seq(800));
+        assert_eq!(repeat_clip(&right, START, END), Some(300));
+        // clipped on the left, the alignment starting inside the repeat
+        let left = record(1005, vec![Cigar::SoftClip(300), Cigar::Match(500)], &seq(800));
+        assert_eq!(repeat_clip(&left, START, END), Some(300));
+        // hard clip outside a soft clip still counts
+        let hard = record(
+            510,
+            vec![Cigar::Match(500), Cigar::SoftClip(5), Cigar::HardClip(400)],
+            &seq(505),
+        );
+        assert_eq!(repeat_clip(&hard, START, END), Some(405));
+        // a small clip is noise
+        let small = record(510, vec![Cigar::Match(500), Cigar::SoftClip(50)], &seq(550));
+        assert_eq!(repeat_clip(&small, START, END), None);
+        // a large clip far from the repeat is not about this locus
+        let far = record(0, vec![Cigar::Match(500), Cigar::SoftClip(300)], &seq(800));
+        assert_eq!(repeat_clip(&far, START, END), None);
+        // a spanning read is not clipped at all
+        let spanning = record(500, vec![Cigar::Match(1000)], &seq(1000));
+        assert_eq!(repeat_clip(&spanning, START, END), None);
+        // a supplementary piece is not counted again
+        let mut supplementary =
+            record(510, vec![Cigar::Match(500), Cigar::SoftClip(300)], &seq(800));
+        supplementary.set_supplementary();
+        assert_eq!(repeat_clip(&supplementary, START, END), None);
+    }
 
     #[test]
     fn slices_reference_matching_repeat() {

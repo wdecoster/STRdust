@@ -103,6 +103,10 @@ Two locus-level quality flags are raised automatically when running with `--unph
 - `EXPANSION_OUTLIER`: at least 2 reads are more than 2x longer than the longer called allele. This catches a larger expansion that was missed by both alleles because its few reads fell to noise/outliers during clustering, or were dropped as length outliers when building the consensus. The thresholds (2 reads, 2x) are currently fixed; they were chosen to suppress single-read artifacts while still surfacing genuine multi-read expansions.
 - `IMPRECISE_LENGTH`: a called allele's reads have a wide length spread (coefficient of variation, std_dev/mean, above 0.2). At such loci the underlying length distribution is continuous or long-tailed, so a single consensus length is not a faithful summary — compare RB and MRL, and treat the call with caution. The 0.2 threshold is currently fixed.
 
+One locus-level flag concerns expansions longer than the reads, in every mode:
+
+- `UNSPANNED_EXPANSION=<n>`: `n` reads end in a clip of at least 100 bp at the repeat, the signature of an allele too long for them to span. When the haplotype carrying it has too few spanning reads to be called, it is reported unresolved and the other haplotype is still called: `0|.` with phased input, `0/.` with `--unphased`. Treat such a locus as a possible large expansion and inspect it, for instance with longer reads. Raised once at least `--support` reads are clipped.
+
 Example output:
 
 ```text
@@ -115,6 +119,7 @@ Example output:
 ##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">
 ##INFO=<ID=EXPANSION_OUTLIER,Number=0,Type=Flag,Description="At least 2 reads are more than 2x longer than the longer called allele, suggesting a larger expansion missed by both alleles (only with --unphased)">
 ##INFO=<ID=IMPRECISE_LENGTH,Number=0,Type=Flag,Description="A called allele has a wide read-length spread (coefficient of variation > 0.2); the reported consensus length may not be representative">
+##INFO=<ID=UNSPANNED_EXPANSION,Number=1,Type=Integer,Description="Number of reads ending in a large clip at the repeat: evidence of an allele too long for them to span. A haplotype without spanning reads is then reported unresolved (e.g. 0|.) rather than called">
 ##INFO=<ID=DISCORDANT_LENGTH,Number=0,Type=Flag,Description="With --phasing both: the reported Ward call and the DBSCAN call differ by more than 2x on the longer allele; see DBSCAN_RB (QC only, fires liberally)">
 ##INFO=<ID=DBSCAN_RB,Number=2,Type=Integer,Description="With --phasing both: DBSCAN allele lengths relative to reference, reported when DISCORDANT_LENGTH is set">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
@@ -163,6 +168,7 @@ STRdust was developed while investigating the [pathogenic GOLGA8A repeat expansi
 |---|---|---|---|
 | `EXPANSION_OUTLIER` min reads / ratio | ≥ 2 reads, > 2x longer allele | `src/genotype.rs` | lower either for more sensitivity to few-read / single-read expansions, at the cost of more artifact flags |
 | `IMPRECISE_LENGTH` length CV | > 0.2 | `src/consensus.rs` | lower flags more loci as length-imprecise; raise to flag only the most spread-out |
+| `UNSPANNED_EXPANSION` minimum clip | ≥ 100 bp, within 100 bp of the repeat | `src/parse_bam.rs` | lower to catch expansions only slightly longer than the reads, at the cost of flagging aligner clipping noise |
 | `DISCORDANT_LENGTH` ratio (`--phasing both`) | > 2x longer allele | `src/genotype.rs` | lower to surface smaller Ward/DBSCAN disagreements for QC review |
 | DBSCAN neighbourhood radius (`eps`) | 0.4 | `src/phase_insertions.rs` | smaller = tighter/more clusters (more splitting, more reads dropped to noise → can undercall length-variable expansions); larger = looser clusters that can merge distinct alleles. Adjust in ±0.1 steps and watch `NCLUSTERS` |
 | DBSCAN length weight | 0.3 | `src/phase_insertions.rs` | lower = composition dominates (keeps length-variable expansions together); higher = length matters more (separates same-motif alleles that differ only in length, behaving more like `ward`) |

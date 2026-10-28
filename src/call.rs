@@ -15,6 +15,8 @@ use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
 struct TargetInfo {
     has_variation: bool,
     record_indices: Vec<usize>,
+    /// reads ending in a large clip at the repeat (#34)
+    clipped: usize,
 }
 
 /// Process a batch of nearby STR targets with optimized single-fetch approach
@@ -84,9 +86,13 @@ fn process_batch(
                 let info = target_info.entry(target_idx).or_insert_with(|| TargetInfo {
                     has_variation: false,
                     record_indices: Vec::new(),
+                    clipped: 0,
                 });
 
                 info.record_indices.push(future_idx);
+                if parse_bam::repeat_clip(&record_rc, target.start, target.end).is_some() {
+                    info.clipped += 1;
+                }
 
                 // QUICKREF: CIGAR check (only if not already found variation and alignment_all is not set)
                 // When --alignment-all is set, skip QUICKREF optimization to force full alignment
@@ -138,7 +144,12 @@ fn process_batch(
                     }
                 }
             }
-            Some(info) if !args.alignment_all && !info.has_variation => {
+            // as many reads clipped at the repeat as it takes to flag UNSPANNED_EXPANSION mean
+            // an allele the reads do not span, so the locus is genotyped rather than assumed
+            // reference (#34)
+            Some(info)
+                if !args.alignment_all && !info.has_variation && info.clipped < args.support =>
+            {
                 // QUICKREF: every inspected read was reference-like within
                 // --quickref-tolerance, and enough of them were inspected - output 0|0
                 // immediately. Only use this path if --alignment-all is NOT set
@@ -248,10 +259,22 @@ fn collect_reads(
         phase2: Vec::new(),
         ps: None,
         sliced,
+        clipped: Default::default(),
     };
+    let pooled = args.is_unphased() || crate::vcf::chrom_is_haploid(args, &repeat.chrom);
 
     for &idx in &info.record_indices {
         let record = &filtered_records[idx];
+        // counted before slicing drops the read: a read clipped at the repeat is exactly the
+        // kind that cannot report an allele, and its haplotype is what the count is for
+        if let Some(clip) = parse_bam::repeat_clip(record, repeat.start, repeat.end) {
+            let phase = if pooled {
+                0
+            } else {
+                parse_bam::get_phase(record) as usize
+            };
+            reads.clipped[phase.min(2)].push(clip);
+        }
         let seq = if sliced {
             match parse_bam::repeat_sequence_from_alignment(
                 record,
