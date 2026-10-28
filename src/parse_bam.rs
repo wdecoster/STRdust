@@ -576,6 +576,7 @@ fn test_get_overlapping_reads() {
         start: 154654404,
         end: 154654432,
         created: None,
+        id: None,
     };
     let unphased = false;
     let mut bam = create_bam_reader(&bam, &fasta);
@@ -597,6 +598,7 @@ fn test_get_overlapping_reads_url() {
         start: 154654404,
         end: 154654432,
         created: None,
+        id: None,
     };
     // this sample is aligned without HP tags, so only the unphased path returns reads
     let unphased = true;

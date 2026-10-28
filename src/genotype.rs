@@ -1093,6 +1093,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
             created: None,
+            id: None,
         };
         let flanking = 2000;
         let minlen = 1;
@@ -1129,6 +1130,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
             created: None,
+            id: None,
         };
         let args = Cli {
             bam: String::from("test_data/small-test-phased.bam"),
@@ -1181,6 +1183,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
             created: None,
+            id: None,
         };
         let args = Cli {
             bam: String::from("test_data/small-test-phased.bam"),
@@ -1272,6 +1275,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
             created: None,
+            id: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -1324,6 +1328,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
             created: None,
+            id: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let genotype = genotype_repeat(&repeat, &args, &mut bam);
@@ -1384,6 +1389,7 @@ mod tests {
             start: 154654404,
             end: 154654432,
             created: None,
+            id: None,
         };
         let mut bam = parse_bam::create_bam_reader(&args.bam, &args.fasta);
         let record = genotype_repeat(&repeat, &args, &mut bam).expect("Unable to genotype repeat");

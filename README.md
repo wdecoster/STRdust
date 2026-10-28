@@ -94,6 +94,7 @@ OPTIONS:
 ## Output format
 
 STRdust produces a VCF file per sample. The consensus sequence is in the ALT field, with sequences from each read in the SEQS INFO field (when running with --somatic).
+The ID column holds the locus name when the catalog provides one: `--pathogenic` and STRchive BED files (name in column 5, e.g. `HD_HTT`, `CANVAS_RFC1`) and TRGT catalogs (`ID=` in column 4). Other BED files, such as adotto, give `.`.
 The FRB FORMAT field is the total repeat length, of the two alleles, in nucleotides. The RB field is the difference between the indidiual allele lengths and the reference length.
 The MRL FORMAT field is the median read length per allele (relative to the reference). Because it is a median rather than the POA consensus length, it is more robust to a long tail of length-variable reads, and comparing it to RB highlights alleles whose consensus length is being pulled by a skewed read distribution.
 The SC FORMAT field is the cost of aligning the consensus sequence back to the partial order graph built from the individual reads (lower is better, 0 is a perfect fit), which could be influenced by the presence of sequencing errors or somatic variation.

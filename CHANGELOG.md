@@ -2,6 +2,15 @@
 
 All notable changes to STRdust are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **The VCF ID column carries the catalog's locus name.** STRchive BED files, including the
+  catalog `--pathogenic` downloads (name in column 5), and TRGT catalogs (`ID=` in column 4)
+  now give e.g. `HD_HTT` or `CANVAS_RFC1` instead of `.`, so calls no longer have to be mapped
+  back to genes by coordinate. Other BED files are unchanged. Taken from #2 by fellen31.
+
 ## [1.2.0]
 
 ### Added

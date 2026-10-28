@@ -54,6 +54,7 @@ impl Allele {
 pub struct VCFRecord {
     pub chrom: String,
     pub start: u32,
+    pub id: String, // catalog locus name, or "."
     pub end: u32,
     pub ref_seq: String,
     pub alt_seq: Option<String>,
@@ -211,6 +212,7 @@ impl VCFRecord {
         let dot = || ".".to_string();
         VCFRecord {
             chrom: repeat.chrom.clone(),
+            id: repeat.id.clone().unwrap_or_else(|| ".".to_string()),
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_sequence,
@@ -283,6 +285,7 @@ impl VCFRecord {
         };
         VCFRecord {
             chrom: repeat.chrom.clone(),
+            id: repeat.id.clone().unwrap_or_else(|| ".".to_string()),
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
@@ -319,6 +322,7 @@ impl VCFRecord {
         let time_taken = repeat.time_field(args.debug);
         VCFRecord {
             chrom: repeat.chrom.clone(),
+            id: repeat.id.clone().unwrap_or_else(|| ".".to_string()),
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
@@ -359,6 +363,7 @@ impl VCFRecord {
         let time_taken = repeat.time_field(args.debug);
         VCFRecord {
             chrom: repeat.chrom.clone(),
+            id: repeat.id.clone().unwrap_or_else(|| ".".to_string()),
             start: repeat.start,
             end: repeat.end,
             ref_seq: repeat_ref_seq.to_string(),
@@ -664,9 +669,10 @@ impl fmt::Display for VCFRecord {
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t.\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}{ps}",
+                    "{chrom}\t{start}\t{id}\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}{ps}",
                     chrom = self.chrom,
                     start = self.start,
+                    id = self.id,
                     flags = self.flags,
                     end = self.end,
                     ref = self.ref_seq,
@@ -1047,6 +1053,7 @@ fn test_record(haploid: bool, allele: (&str, &str), alt: Option<&str>) -> VCFRec
     VCFRecord {
         chrom: "chrX".to_string(),
         start: 100,
+        id: ".".to_string(),
         end: 130,
         ref_seq: "ATCATCATCATCATCATCATCATCATCATC".to_string(),
         alt_seq: alt.map(|a| a.to_string()),

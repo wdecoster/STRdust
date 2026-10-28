@@ -220,6 +220,7 @@ impl Clone for RepeatInterval {
             start: self.start,
             end: self.end,
             created: self.created,
+            id: self.id.clone(),
         }
     }
 }
@@ -249,6 +250,8 @@ pub struct RepeatInterval {
     /// (see [`thread_cpu_time`]). Subtracting it from a later reading on the same
     /// thread yields the locus's CPU cost, reported via the `TIME=` INFO field.
     pub created: Option<std::time::Duration>,
+    /// Locus name from the catalog (TRGT `ID=` or STRchive's name column), written to the VCF ID column.
+    pub id: Option<String>,
 }
 
 /// Read the calling thread's consumed CPU time.
@@ -265,6 +268,27 @@ pub fn thread_cpu_time() -> std::time::Duration {
     let rc = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
     debug_assert_eq!(rc, 0, "clock_gettime(CLOCK_THREAD_CPUTIME_ID) failed");
     std::time::Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+}
+
+/// The locus name in the two catalog layouts that carry one, or None (plain BED, adotto).
+/// TRGT: `ID=HTT;MOTIFS=CAG;STRUC=(CAG)n` in column 4. STRchive (longTR): motifs in
+/// column 4 (`TGAAA,AAAAT`), the name in column 5. Names that are not valid VCF IDs
+/// (whitespace or `;`) are dropped rather than written.
+fn catalog_id(rec: &bed::Record) -> Option<String> {
+    let col4 = rec.name()?;
+    let id = if col4.contains("ID=") {
+        col4.split(';').find_map(|pair| pair.strip_prefix("ID="))?
+    } else if !col4.is_empty()
+        && col4.bytes().all(|b| b",ACGTNacgtn".contains(&b))
+        && col4.bytes().any(|b| b != b',')
+    {
+        rec.score()?
+    } else {
+        return None;
+    };
+    let valid =
+        !id.is_empty() && id != "." && !id.contains(|c: char| c.is_whitespace() || c == ';');
+    valid.then(|| id.to_string())
 }
 
 impl fmt::Display for RepeatInterval {
@@ -284,7 +308,10 @@ impl RepeatInterval {
         // Convert to 1-based coordinates for VCF output: start + 1
         let start: u32 = rec.start().try_into().unwrap();
         let end: u32 = rec.end().try_into().unwrap();
-        RepeatInterval::new_interval(chrom, start + 1, end, fasta)
+        RepeatInterval::new_interval(chrom, start + 1, end, fasta).map(|mut repeat| {
+            repeat.id = catalog_id(rec);
+            repeat
+        })
     }
 
     fn new_interval(chrom: String, start: u32, end: u32, fasta: &str) -> Option<Self> {
@@ -307,7 +334,7 @@ impl RepeatInterval {
                 // BED format uses 0-based half-open coordinates, so end is exclusive
                 // Therefore, end can equal the chromosome length
                 if chrom_length >= end {
-                    return Some(Self { chrom, start, end, created: None });
+                    return Some(Self { chrom, start, end, created: None, id: None });
                 } else {
                     panic!(
                         "End coordinate {end} is out of bounds for chromosome {chrom} (length: {chrom_length})"
@@ -319,7 +346,7 @@ impl RepeatInterval {
         panic!("Chromosome {chrom} is not in the fasta file");
     }
     pub fn new(chrom: &str, start: u32, end: u32) -> Self {
-        Self { chrom: chrom.to_string(), start, end, created: None }
+        Self { chrom: chrom.to_string(), start, end, created: None, id: None }
     }
 
     pub fn make_repeat_compressed_sequence(&self, fasta: &String, flanking: u32) -> Vec<u8> {
@@ -395,6 +422,31 @@ impl RepeatInterval {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_catalog_id_from_trgt_and_strchive_layouts() {
+        let id = |line: &str| {
+            let mut reader = bed::Reader::new(line.as_bytes());
+            catalog_id(&reader.records().next().unwrap().unwrap())
+        };
+        // TRGT: key-value pairs in column 4
+        assert_eq!(
+            id("chr4\t3074876\t3074933\tID=HTT;MOTIFS=CAG;STRUC=(CAG)n").as_deref(),
+            Some("HTT")
+        );
+        // STRchive (longTR): motifs in column 4, name in column 5
+        assert_eq!(
+            id("chr1\t57367044\t57367121\tTGAAA,AAAAT\tSCA37_DAB1").as_deref(),
+            Some("SCA37_DAB1")
+        );
+        // plain BED and adotto (numeric column 4) carry no name we can recognise
+        assert_eq!(id("chr1\t100\t150"), None);
+        assert_eq!(id("chr1\t9975\t10498\t1\t25\t1"), None);
+        // motifs without a name column, and names that are not valid VCF IDs
+        assert_eq!(id("chr1\t100\t150\tCAG"), None);
+        assert_eq!(id("chr1\t100\t150\tCAG\t."), None);
+        assert_eq!(id("chr1\t100\t150\tID=A;B"), Some("A".to_string()));
+    }
+
     #[test]
     fn test_make_repeat_compressed_sequence() {
         let fasta = String::from("test_data/chr7.fa.gz");

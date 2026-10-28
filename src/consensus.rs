@@ -405,6 +405,7 @@ mod tests {
             start: 1,
             end: 100,
             created: None,
+            id: None,
         }
     }
 
@@ -505,6 +506,7 @@ mod tests {
                 start: 1,
                 end: 100,
                 created: None,
+                id: None,
             },
             PoaScoring::default(),
         );
