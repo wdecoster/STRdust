@@ -2,7 +2,7 @@
 
 All notable changes to STRdust are documented here.
 
-## [Unreleased]
+## [1.2.0]
 
 ### Added
 
