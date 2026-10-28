@@ -201,6 +201,14 @@ pub struct Cli {
     // Switching removal off, or trimming at 1 or 3 std devs instead of 2, was worse. Errors at
     // long loci lean long (924 vs 785 alleles), so the filter helps by dropping stray long
     // reads rather than biasing expansions short as #36 suspected.
+    /// DBSCAN neighbourhood radius for --unphased dbscan (#32)
+    #[arg(long, default_value_t = phase_insertions::DBSCAN_EPS, hide = true)]
+    dbscan_eps: f64,
+
+    /// Weight of the normalised length axis against k-mer composition for --unphased dbscan (#32)
+    #[arg(long, default_value_t = phase_insertions::DBSCAN_LENGTH_WEIGHT, hide = true)]
+    dbscan_length_weight: f64,
+
     /// Only drop length outliers when the cluster's (floored) standard deviation is at least
     /// this; a value above any real spread disables outlier removal (#36)
     #[arg(long, default_value_t = 2, hide = true)]
