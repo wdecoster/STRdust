@@ -64,7 +64,7 @@ pub struct VCFRecord {
     pub support: (String, String),
     pub std_dev: (String, String),
     pub score: (String, String),
-    pub motif: (String, String), // dominant repeat unit per allele, see motif::dominant_motif
+    pub motif: (String, String), // repeat units per allele, dominant first, see motif::allele_motifs
     pub somatic_info_field: String,
     pub outliers: String,
     pub n_clusters: String,
@@ -212,11 +212,11 @@ impl VCFRecord {
         // records; for haploid records it stays "." and is not emitted by Display.
         let dot = || ".".to_string();
         let motif = (
-            crate::motif::dominant_motif(&allele1.seq, &repeat_ref_sequence)
+            crate::motif::allele_motifs(&allele1.seq, &repeat_ref_sequence)
                 .unwrap_or_else(|| ".".to_string()),
             allele2
                 .as_ref()
-                .and_then(|a| crate::motif::dominant_motif(&a.seq, &repeat_ref_sequence))
+                .and_then(|a| crate::motif::allele_motifs(&a.seq, &repeat_ref_sequence))
                 .unwrap_or_else(&dot),
         );
         VCFRecord {
@@ -288,7 +288,7 @@ impl VCFRecord {
         args: &crate::Cli,
     ) -> VCFRecord {
         let time_taken = repeat.time_field(args.debug);
-        let ref_motif = crate::motif::dominant_motif(repeat_ref_seq, repeat_ref_seq)
+        let ref_motif = crate::motif::allele_motifs(repeat_ref_seq, repeat_ref_seq)
             .unwrap_or_else(|| ".".to_string());
         let flags_str = if flags.is_empty() {
             "".to_string()
@@ -400,8 +400,7 @@ impl VCFRecord {
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
             motif: (
-                crate::motif::dominant_motif(seq, repeat_ref_seq)
-                    .unwrap_or_else(|| ".".to_string()),
+                crate::motif::allele_motifs(seq, repeat_ref_seq).unwrap_or_else(|| ".".to_string()),
                 ".".to_string(),
             ),
             somatic_info_field,
@@ -827,7 +826,7 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##FORMAT=<ID=SC,Number=.,Type=Integer,Description="Cost of aligning the consensus back to its read graph per allele, lower is better (one value on haploid chromosomes, two otherwise)">"#
     );
     println!(
-        r#"##FORMAT=<ID=MOT,Number=.,Type=String,Description="Dominant repeat unit of each allele, detected from its sequence rather than taken from the catalog: the unit of period 1-100 with the best-scoring tandem stretch, in the rotation the reference repeat reads in; '.' if no tandem repeat is found (one value on haploid chromosomes, two otherwise)">"#
+        r#"##FORMAT=<ID=MOT,Number=.,Type=String,Description="Repeat units of each allele, detected from its sequence rather than taken from the catalog: up to three units of period 1-100 joined by '/', strongest first (e.g. AAAAG/AAGGG for a motif switch, CAG/CAA for interruptions), each in the rotation the reference repeat reads in; '.' if no tandem repeat is found (one value on haploid chromosomes, two otherwise)">"#
     );
     let name = match &args.sample {
         Some(name) => name,
