@@ -10,6 +10,15 @@ All notable changes to STRdust are documented here.
   catalog `--pathogenic` downloads (name in column 5), and TRGT catalogs (`ID=` in column 4)
   now give e.g. `HD_HTT` or `CANVAS_RFC1` instead of `.`, so calls no longer have to be mapped
   back to genes by coordinate. Other BED files are unchanged. Taken from #2 by fellen31.
+- **`MOT`: the dominant repeat unit of each allele, detected from its sequence.** A new
+  per-allele FORMAT field, e.g. `AAAGA,AAAGA` at RFC1 (the benign AAAAG unit) or
+  `AAATA,AAACT` where an allele carries a different unit than the reference. Found as the
+  period (1-100) with the best tandem stretch, so it works inside padded catalog intervals,
+  and written in the reference's rotation so alleles at a locus compare directly. `.` where
+  no tandem repeat is found (24% of called loci on 10,000 adotto intervals on chr2). It costs
+  no measurable time, and every other field is unchanged. The FORMAT column gains `MOT`
+  before `PS`, so parsers that index the sample column by position rather than by the
+  FORMAT keys need updating.
 
 ## [1.2.0]
 
