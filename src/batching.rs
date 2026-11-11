@@ -1,6 +1,13 @@
 use crate::repeats::RepeatInterval;
 use std::collections::HashMap;
 
+/// Longest region (bp) one batch may span. Without a cap, chaining repeats that lie within the
+/// distance threshold of each other links a dense catalog into batches of up to ~100 Mb, and a
+/// batch holds every read of its region in memory (tens of GB per thread at 30x). Per-locus
+/// results do not depend on batch composition, so a split costs only a re-fetch of the reads
+/// that straddle it.
+pub const MAX_BATCH_SPAN: u32 = 500_000;
+
 /// Represents a batch of nearby repeats to be processed together
 /// Batches are created within chromosome boundaries and within distance threshold
 #[derive(Clone)]
@@ -47,7 +54,7 @@ impl Batch {
 /// Vector of batches, each containing nearby repeats from the same chromosome
 pub fn create_batches(repeats: Vec<RepeatInterval>, batch_distance_threshold: u32) -> Vec<Batch> {
     // Group repeats by chromosome first
-    let mut by_chromosome: HashMap<String, Vec<RepeatInterval>> = HashMap::new();
+    let mut by_chromosome: HashMap<std::sync::Arc<str>, Vec<RepeatInterval>> = HashMap::new();
     for repeat in repeats {
         by_chromosome
             .entry(repeat.chrom.clone())
@@ -66,11 +73,15 @@ pub fn create_batches(repeats: Vec<RepeatInterval>, batch_distance_threshold: u3
     for (chromosome, chrom_repeats) in by_chromosome {
         let mut current_batch = Vec::new();
         let mut current_end = 0u32;
+        let mut current_start = 0u32;
 
         for repeat in chrom_repeats {
             // Check if this repeat should be added to current batch or start a new batch
-            let should_batch =
-                !current_batch.is_empty() && repeat.start <= current_end + batch_distance_threshold;
+            // a repeat that would stretch the batch beyond MAX_BATCH_SPAN starts a new one
+            // (a single repeat longer than that still gets a batch of its own)
+            let should_batch = !current_batch.is_empty()
+                && repeat.start <= current_end + batch_distance_threshold
+                && repeat.end.saturating_add(10).max(current_end) - current_start <= MAX_BATCH_SPAN;
 
             if should_batch {
                 // Add to current batch and extend the region
@@ -79,11 +90,14 @@ pub fn create_batches(repeats: Vec<RepeatInterval>, batch_distance_threshold: u3
             } else {
                 // Finish the current batch if it exists
                 if !current_batch.is_empty() {
-                    all_batches
-                        .push(Batch::new(chromosome.clone(), std::mem::take(&mut current_batch)));
+                    all_batches.push(Batch::new(
+                        chromosome.to_string(),
+                        std::mem::take(&mut current_batch),
+                    ));
                 }
 
                 // Start new batch
+                current_start = repeat.start;
                 current_end = repeat.end.saturating_add(10);
                 current_batch = vec![repeat];
             }
@@ -91,7 +105,7 @@ pub fn create_batches(repeats: Vec<RepeatInterval>, batch_distance_threshold: u3
 
         // Add the final batch for this chromosome
         if !current_batch.is_empty() {
-            all_batches.push(Batch::new(chromosome, current_batch));
+            all_batches.push(Batch::new(chromosome.to_string(), current_batch));
         }
     }
 
@@ -99,4 +113,40 @@ pub fn create_batches(repeats: Vec<RepeatInterval>, batch_distance_threshold: u3
     all_batches.sort_by(|a, b| a.chromosome.cmp(&b.chromosome).then(a.start.cmp(&b.start)));
 
     all_batches
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repeats(n: u32, step: u32) -> Vec<RepeatInterval> {
+        (0..n)
+            .map(|i| RepeatInterval::new("chr1", 1000 + i * step, 1030 + i * step))
+            .collect()
+    }
+
+    #[test]
+    fn dense_chain_is_split_by_span() {
+        // 5,000 loci every 500 bp chain into one 2.5 Mb run under the distance threshold alone
+        let batches = create_batches(repeats(5000, 500), 10000);
+        assert!(batches.len() > 1);
+        for b in &batches {
+            assert!(b.end - b.start <= MAX_BATCH_SPAN + 20, "{}-{}", b.start, b.end);
+        }
+        assert_eq!(batches.iter().map(|b| b.repeats.len()).sum::<usize>(), 5000);
+    }
+
+    #[test]
+    fn sparse_repeats_still_batch_together() {
+        let batches = create_batches(repeats(10, 500), 10000);
+        assert_eq!(batches.len(), 1);
+    }
+
+    #[test]
+    fn oversized_repeat_gets_own_batch() {
+        let mut r = repeats(2, 500);
+        r.push(RepeatInterval::new("chr1", 3000, 3000 + 2 * MAX_BATCH_SPAN));
+        let batches = create_batches(r, 10000);
+        assert_eq!(batches.iter().map(|b| b.repeats.len()).sum::<usize>(), 3);
+    }
 }

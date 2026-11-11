@@ -2,11 +2,12 @@ use bio::io::bed;
 use flate2::read::GzDecoder;
 use log::error;
 use rust_htslib::faidx;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::fs::File;
 use std::io;
-use std::io::Read;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct RepeatIntervalIterator {
@@ -25,7 +26,7 @@ impl RepeatIntervalIterator {
             std::process::exit(1);
         }
 
-        let chrom = parts[0].to_string();
+        let chrom: Arc<str> = parts[0].into();
         let interval = parts[1];
 
         // Split interval by hyphen to get start and end
@@ -72,28 +73,49 @@ impl RepeatIntervalIterator {
             std::process::exit(1);
         }
 
-        // Read file contents (handles both plain and gzipped files)
-        let contents = if region_file.ends_with(".gz") {
-            let file = File::open(region_file).unwrap_or_else(|e| {
-                error!("Failed to open gzipped BED file {}: {}", region_file, e);
-                std::process::exit(1);
-            });
-            let mut decoder = GzDecoder::new(file);
-            let mut contents = String::new();
-            decoder.read_to_string(&mut contents).unwrap_or_else(|e| {
-                error!("Failed to decompress gzipped BED file {}: {}", region_file, e);
-                std::process::exit(1);
-            });
-            contents
+        // Streamed record by record (plain or gzipped): a catalog of millions of loci is
+        // hundreds of MB decompressed, which is not worth holding next to the parsed loci.
+        let file = File::open(region_file).unwrap_or_else(|e| {
+            error!("Failed to open BED file {}: {}", region_file, e);
+            std::process::exit(1);
+        });
+        if region_file.ends_with(".gz") {
+            Self::from_reader(GzDecoder::new(file), fasta)
         } else {
-            fs::read_to_string(region_file).unwrap_or_else(|e| {
-                error!("Failed to read BED file {}: {}", region_file, e);
-                std::process::exit(1);
-            })
-        };
+            Self::from_reader(file, fasta)
+        }
+    }
 
-        // Parse BED data from string
-        Self::from_string_data(&contents, fasta)
+    /// Parse BED records from any reader. Chromosome names are shared between loci, and the
+    /// fai is read once rather than once per locus.
+    fn from_reader<R: io::Read>(reader: R, fasta: &str) -> Self {
+        let lengths = fai_lengths(fasta);
+        let mut chroms: HashMap<String, Arc<str>> = HashMap::new();
+        let mut data = Vec::new();
+        let mut reader = bed::Reader::new(reader);
+        for record in reader.records() {
+            let rec = record.unwrap_or_else(|e| {
+                error!("Failed to read the BED file (corrupt or truncated?): {e}");
+                std::process::exit(1);
+            });
+            let chrom = chroms
+                .entry(rec.chrom().to_string())
+                .or_insert_with_key(|name| Arc::from(name.as_str()))
+                .clone();
+            if let Some(repeat) = RepeatInterval::from_bed(&rec, chrom, &lengths) {
+                data.push(repeat);
+            }
+        }
+        data.shrink_to_fit();
+        let num_intervals = data.len();
+        RepeatIntervalIterator { current_index: 0, data, num_intervals }
+    }
+
+    /// The remaining intervals as a vector, moved out rather than cloned one by one
+    pub fn into_vec(self) -> Vec<RepeatInterval> {
+        let mut data = self.data;
+        data.drain(..self.current_index.min(data.len()));
+        data
     }
 
     pub fn pathogenic(fasta: &str) -> Self {
@@ -168,21 +190,7 @@ impl RepeatIntervalIterator {
 
     // Helper function to process data from string (for fallback)
     fn from_string_data(data: &str, fasta: &str) -> Self {
-        let mut reader = io::BufReader::new(data.as_bytes());
-        let mut data_vec = Vec::new();
-        let mut reader = bed::Reader::new(&mut reader);
-        for record in reader.records() {
-            let rec = record.expect("Error reading bed record.");
-            let repeat = RepeatInterval::from_bed(&rec, fasta);
-            if let Some(repeat) = repeat {
-                data_vec.push(repeat);
-            }
-        }
-        RepeatIntervalIterator {
-            current_index: 0,
-            data: data_vec.clone(),
-            num_intervals: data_vec.len(),
-        }
+        Self::from_reader(data.as_bytes(), fasta)
     }
 
     /// Filter intervals by maximum size
@@ -243,7 +251,8 @@ impl Iterator for RepeatIntervalIterator {
 
 #[derive(Debug)]
 pub struct RepeatInterval {
-    pub chrom: String,
+    /// Shared between all loci of a chromosome (millions of loci, a few dozen names)
+    pub chrom: Arc<str>,
     pub start: u32,
     pub end: u32,
     /// Thread CPU time consumed at the moment genotyping of this locus started
@@ -291,6 +300,22 @@ fn catalog_id(rec: &bed::Record) -> Option<String> {
     valid.then(|| id.to_string())
 }
 
+/// Chromosome name -> length from the fasta's fai
+fn fai_lengths(fasta: &str) -> HashMap<String, u32> {
+    let fai = format!("{}.fai", fasta);
+    std::fs::read_to_string(fai)
+        .expect("Failed to read fai file")
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let name = parts.next().filter(|n| !n.is_empty())?;
+            // a contig too long for u32 is left out, and so reported as missing if it is used
+            let length = parts.next()?.parse::<u32>().ok()?;
+            Some((name.to_string(), length))
+        })
+        .collect()
+}
+
 impl fmt::Display for RepeatInterval {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}:{}-{}", self.chrom, self.start, self.end)
@@ -302,51 +327,51 @@ impl RepeatInterval {
     /// The repeat sequence is removed, and <flanking> bases of flanking sequence is added on either side
     /// If the extended interval (+/- flanking) is out of bounds, the extended interval is shortened automatically by faidx
     // parse a bed record
-    pub fn from_bed(rec: &bed::Record, fasta: &str) -> Option<Self> {
-        let chrom = rec.chrom().to_string();
+    pub fn from_bed(
+        rec: &bed::Record,
+        chrom: Arc<str>,
+        lengths: &HashMap<String, u32>,
+    ) -> Option<Self> {
         // BED format is 0-based, half-open [start, end)
         // Convert to 1-based coordinates for VCF output: start + 1
         let start: u32 = rec.start().try_into().unwrap();
         let end: u32 = rec.end().try_into().unwrap();
-        RepeatInterval::new_interval(chrom, start + 1, end, fasta).map(|mut repeat| {
+        RepeatInterval::new_interval_with(lengths, chrom, start + 1, end).map(|mut repeat| {
             repeat.id = catalog_id(rec);
             repeat
         })
     }
 
-    fn new_interval(chrom: String, start: u32, end: u32, fasta: &str) -> Option<Self> {
+    fn new_interval(chrom: Arc<str>, start: u32, end: u32, fasta: &str) -> Option<Self> {
+        Self::new_interval_with(&fai_lengths(fasta), chrom, start, end)
+    }
+
+    /// Validate against the chromosome lengths (from the fai) and build the interval
+    fn new_interval_with(
+        lengths: &HashMap<String, u32>,
+        chrom: Arc<str>,
+        start: u32,
+        end: u32,
+    ) -> Option<Self> {
         if end < start {
             panic!("End coordinate is smaller than start coordinate for {chrom}:{start}-{end}")
         }
 
-        let fai = format!("{}.fai", fasta);
-        // check if the chromosome exists in the fai file
-        // and if the end coordinate is within the chromosome length
-        for line in std::fs::read_to_string(fai)
-            .expect("Failed to read fai file")
-            .lines()
-        {
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts[0] == chrom {
-                let chrom_length = parts[1]
-                    .parse::<u32>()
-                    .expect("Failed parsing chromosome length from fai file");
-                // BED format uses 0-based half-open coordinates, so end is exclusive
-                // Therefore, end can equal the chromosome length
-                if chrom_length >= end {
-                    return Some(Self { chrom, start, end, created: None, id: None });
-                } else {
-                    panic!(
-                        "End coordinate {end} is out of bounds for chromosome {chrom} (length: {chrom_length})"
-                    );
-                }
+        match lengths.get(&*chrom) {
+            // BED format uses 0-based half-open coordinates, so end is exclusive
+            // Therefore, end can equal the chromosome length
+            Some(&chrom_length) if chrom_length >= end => {
+                Some(Self { chrom, start, end, created: None, id: None })
             }
+            Some(&chrom_length) => panic!(
+                "End coordinate {end} is out of bounds for chromosome {chrom} (length: {chrom_length})"
+            ),
+            // if the chromosome is not in the fai file, panic with clear message
+            None => panic!("Chromosome {chrom} is not in the fasta file"),
         }
-        // if the chromosome is not in the fai file, panic with clear message
-        panic!("Chromosome {chrom} is not in the fasta file");
     }
     pub fn new(chrom: &str, start: u32, end: u32) -> Self {
-        Self { chrom: chrom.to_string(), start, end, created: None, id: None }
+        Self { chrom: chrom.into(), start, end, created: None, id: None }
     }
 
     pub fn make_repeat_compressed_sequence(&self, fasta: &String, flanking: u32) -> Vec<u8> {
@@ -538,12 +563,12 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         assert_eq!(intervals.len(), 5);
 
         // Verify first interval
-        assert_eq!(intervals[0].chrom, "chr1");
+        assert_eq!(intervals[0].chrom.as_ref(), "chr1");
         assert_eq!(intervals[0].start, 1234568); // BED 0-based 1234567 becomes 1-based 1234568
         assert_eq!(intervals[0].end, 1234590);
 
         // Verify last interval
-        assert_eq!(intervals[4].chrom, "chr19");
+        assert_eq!(intervals[4].chrom.as_ref(), "chr19");
         assert_eq!(intervals[4].start, 45770206); // BED 0-based 45770205 becomes 1-based 45770206
         assert_eq!(intervals[4].end, 45770266);
 
@@ -617,7 +642,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         );
         assert_eq!(result1.num_intervals, 1);
         let intervals1: Vec<RepeatInterval> = result1.collect();
-        assert_eq!(intervals1[0].chrom, "chr1");
+        assert_eq!(intervals1[0].chrom.as_ref(), "chr1");
         assert_eq!(intervals1[0].start, 101); // BED 0-based 100 becomes 1-based 101
         assert_eq!(intervals1[0].end, 150);
 
@@ -628,7 +653,7 @@ chr19	45770205	45770266	CAG	ATXN1_CAG_61"#;
         );
         assert_eq!(result2.num_intervals, 1);
         let intervals2: Vec<RepeatInterval> = result2.collect();
-        assert_eq!(intervals2[0].chrom, "chr22");
+        assert_eq!(intervals2[0].chrom.as_ref(), "chr22");
         assert_eq!(intervals2[0].start, 201); // BED 0-based 200 becomes 1-based 201
         assert_eq!(intervals2[0].end, 250);
 

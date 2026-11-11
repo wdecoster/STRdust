@@ -569,7 +569,7 @@ mod tests {
         // the outlier bin, as happens with the length-dominated Ward distance).
         let insertions = golga8a_insertions();
         let repeat = crate::repeats::RepeatInterval {
-            chrom: "chr15".to_string(),
+            chrom: "chr15".into(),
             start: 34419425,
             end: 34419451,
             created: None,
@@ -604,7 +604,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr15".to_string(),
+                chrom: "chr15".into(),
                 start: 34419425,
                 end: 34419451,
                 created: None,
@@ -649,7 +649,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr7".to_string(),
+                chrom: "chr7".into(),
                 start: 154654404,
                 end: 154654432,
                 created: None,
@@ -695,7 +695,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr7".to_string(),
+                chrom: "chr7".into(),
                 start: 154654404,
                 end: 154654432,
                 created: None,
@@ -738,7 +738,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr7".to_string(),
+                chrom: "chr7".into(),
                 start: 154654404,
                 end: 154654432,
                 created: None,
@@ -784,7 +784,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr7".to_string(),
+                chrom: "chr7".into(),
                 start: 154654404,
                 end: 154654432,
                 created: None,
@@ -828,7 +828,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr7".to_string(),
+                chrom: "chr7".into(),
                 start: 154654404,
                 end: 154654432,
                 created: None,
@@ -903,7 +903,7 @@ mod tests {
         let splitseqs = split(
             &insertions,
             &crate::repeats::RepeatInterval {
-                chrom: "chr7".to_string(),
+                chrom: "chr7".into(),
                 start: 154654404,
                 end: 154654432,
                 created: None,

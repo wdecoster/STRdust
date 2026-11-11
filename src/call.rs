@@ -5,10 +5,16 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, info};
 use rayon::prelude::*;
 use rust_htslib::bam::{self, Read, ext::BamRecordExtensions};
+use std::collections::BTreeMap;
+use std::io;
 use std::io::Write;
-use std::{io, sync::Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
-use crate::{Cli, genotype, parse_bam, utils::check_files_exist};
+use crate::{
+    Cli, genotype, parse_bam,
+    utils::{check_files_exist, human_compare},
+};
 
 /// Per-target bookkeeping while scanning a batch: which of the batch's stored records
 /// overlap this target, and whether any of them showed a length difference (QUICKREF).
@@ -355,7 +361,7 @@ pub fn genotype_repeats(args: Cli) {
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     // Convert iterator to vector for batching
-    let repeats_vec = repeats.collect();
+    let repeats_vec = repeats.into_vec();
 
     // Create batches of nearby targets (10KB default threshold)
     let batch_distance_threshold = 10000; // 10KB - targets within this distance are grouped
@@ -397,40 +403,74 @@ pub fn genotype_repeats(args: Cli) {
     } else if args.sorted {
         // output is sorted by chrom, start and end
 
-        // Create BAM reader pool for parallel processing
+        // Batches are handed out strictly in output order (chromosomes in human order, then
+        // position) through a shared counter, and a writer thread emits each batch as soon as
+        // all earlier ones are written. At most about one batch per thread is held back, so
+        // memory does not grow with the catalog, unlike collecting every record and sorting.
+        // (rayon's par_iter hands each thread a contiguous slice instead, which would leave
+        // most of the output waiting on the first slice.)
         let reader_pool = BamReaderPool::new(args.bam.clone(), args.fasta.clone());
 
-        // Process all batches in parallel, collect results, then sort
-        let genotypes = Mutex::new(Vec::with_capacity(num_intervals));
+        let mut ordered: Vec<&Batch> = batches.iter().collect();
+        ordered.sort_by(|a, b| {
+            human_compare(&a.chromosome, &b.chromosome).then(a.start.cmp(&b.start))
+        });
 
-        batches.par_iter().for_each(|batch| {
-            // Get thread-local BAM reader from pool
-            reader_pool.with_reader(|reader| {
-                match process_batch(batch, reader, &args) {
-                    Ok(vcf_records) => {
-                        let count = vcf_records.len() as u64;
-                        let mut geno = genotypes.lock().expect("Unable to lock genotypes mutex");
-                        geno.extend(vcf_records);
-                        drop(geno); // Release lock before updating progress
-                        pb.inc(count); // Increment progress for each locus
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed processing batch {}:{}-{}: {}",
-                            batch.chromosome, batch.start, batch.end, e
-                        );
-                        pb.inc(batch.repeats.len() as u64);
+        let next_batch = AtomicUsize::new(0);
+        let handle = &mut handle;
+
+        std::thread::scope(|scope| {
+            // created inside the scope so that `tx` is dropped when a worker panics: the writer
+            // then ends, the scope joins it and the panic propagates, rather than a hang
+            let (tx, rx) = mpsc::channel::<(usize, Vec<crate::vcf::VCFRecord>)>();
+            let writer = scope.spawn(move || {
+                let mut waiting: BTreeMap<usize, Vec<crate::vcf::VCFRecord>> = BTreeMap::new();
+                let mut next_to_write = 0;
+                for (index, records) in rx {
+                    waiting.insert(index, records);
+                    while let Some(mut records) = waiting.remove(&next_to_write) {
+                        // already in order; the sort is a guard and ties stay put
+                        records.sort();
+                        for record in records {
+                            writeln!(handle, "{record}").expect("Failed writing the result.");
+                        }
+                        next_to_write += 1;
                     }
                 }
             });
-        });
 
-        let mut genotypes_vec = genotypes.lock().unwrap();
-        // The final output is sorted by chrom, start and end
-        genotypes_vec.sort_unstable();
-        for g in &*genotypes_vec {
-            writeln!(handle, "{g}").expect("Failed writing the result.");
-        }
+            // one worker loop per pool thread
+            rayon::broadcast(|_| {
+                loop {
+                    let index = next_batch.fetch_add(1, Ordering::Relaxed);
+                    let Some(batch) = ordered.get(index) else {
+                        break;
+                    };
+                    let records = reader_pool.with_reader(|reader| {
+                        match process_batch(batch, reader, &args) {
+                            Ok(vcf_records) => {
+                                pb.inc(vcf_records.len() as u64);
+                                vcf_records
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed processing batch {}:{}-{}: {}",
+                                    batch.chromosome, batch.start, batch.end, e
+                                );
+                                pb.inc(batch.repeats.len() as u64);
+                                Vec::new()
+                            }
+                        }
+                    });
+                    // an empty batch is still sent: the writer waits for every index
+                    tx.send((index, records))
+                        .expect("Output writer stopped early");
+                }
+            });
+
+            drop(tx); // closes the channel, so the writer finishes
+            writer.join().expect("Output writer panicked");
+        });
     } else {
         // run in parallel, but output is most probably unsorted
         // par_bridge does not guarantee that results are returned in order

@@ -2,6 +2,24 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.3.1]
+
+### Fixed
+
+- **Memory no longer grows with the catalog.** A run over a 4.8M-locus catalog (TRExplorer v2,
+  `-t 8`) used about 100 GB. Loci within 10 kb of each other were chained into one batch, and
+  in a dense catalog that chain ran on for up to ~110 Mb, with every read of the region held in
+  memory until the whole batch was genotyped (and eight such batches at once). A batch now spans
+  at most 500 kb, so a thread holds tens of MB of reads instead of GB, and the largest chains
+  are split into many parallel tasks. Per-locus results do not depend on how loci are batched,
+  and the records are unchanged; reads that straddle a split are fetched twice.
+- **`--sorted` streams its output.** Records used to be collected for the whole catalog and
+  sorted at the end. Batches are now processed in output order and written as they complete, so
+  only about one batch per thread waits in memory. The output order is the same as before.
+- **Loading a large catalog costs less.** The BED file is streamed rather than decompressed into
+  one string, chromosome names are shared between loci, the catalog is no longer cloned into
+  batches, and the `.fai` is read once instead of once per locus.
+
 ## [1.3.0]
 
 ### Added

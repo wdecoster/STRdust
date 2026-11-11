@@ -1089,7 +1089,7 @@ mod tests {
         let bam = String::from("test_data/small-test-phased.bam");
         let fasta = String::from("test_data/chr7.fa.gz");
         let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
+            chrom: "chr7".into(),
             start: 154654404,
             end: 154654432,
             created: None,
@@ -1126,7 +1126,7 @@ mod tests {
     #[test]
     fn test_genotype_repeat() {
         let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
+            chrom: "chr7".into(),
             start: 154654404,
             end: 154654432,
             created: None,
@@ -1179,7 +1179,7 @@ mod tests {
     #[test]
     fn test_genotype_repeat_haploid() {
         let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
+            chrom: "chr7".into(),
             start: 154654404,
             end: 154654432,
             created: None,
@@ -1271,7 +1271,7 @@ mod tests {
             fast_flank: 10,
         };
         let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
+            chrom: "chr7".into(),
             start: 154654404,
             end: 154654432,
             created: None,
@@ -1324,7 +1324,7 @@ mod tests {
             fast_flank: 10,
         };
         let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
+            chrom: "chr7".into(),
             start: 154654404,
             end: 154654432,
             created: None,
@@ -1385,7 +1385,7 @@ mod tests {
         };
 
         let repeat = crate::repeats::RepeatInterval {
-            chrom: String::from("chr7"),
+            chrom: "chr7".into(),
             start: 154654404,
             end: 154654432,
             created: None,

@@ -52,7 +52,7 @@ impl Allele {
 }
 
 pub struct VCFRecord {
-    pub chrom: String,
+    pub chrom: std::sync::Arc<str>,
     pub start: u32,
     pub id: String, // catalog locus name, or "."
     pub end: u32,
@@ -1074,7 +1074,7 @@ fn test_determine_haploid_genotype() {
 fn test_record(haploid: bool, allele: (&str, &str), alt: Option<&str>) -> VCFRecord {
     let pair = || ("10".to_string(), "20".to_string());
     VCFRecord {
-        chrom: "chrX".to_string(),
+        chrom: "chrX".into(),
         start: 100,
         id: ".".to_string(),
         end: 130,

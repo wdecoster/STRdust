@@ -401,7 +401,7 @@ mod tests {
 
     fn dummy_repeat() -> crate::repeats::RepeatInterval {
         crate::repeats::RepeatInterval {
-            chrom: "chr1".to_string(),
+            chrom: "chr1".into(),
             start: 1,
             end: 100,
             created: None,
@@ -502,7 +502,7 @@ mod tests {
             10,
             20,
             &crate::repeats::RepeatInterval {
-                chrom: "chr1".to_string(),
+                chrom: "chr1".into(),
                 start: 1,
                 end: 100,
                 created: None,
