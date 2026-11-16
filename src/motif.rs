@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 // write a function that takes a long string like CAGCAGCAGCAGCGGCGGCGGCAGCAGCAG and converts it to a condensed representation like (CAG)4(CGG)3(CAG)3
@@ -78,6 +78,29 @@ const MOTIF_MIN_STRETCH_SHARE: f64 = 0.2;
 /// every allele and sample at a locus report the same rotation: HTT gives the same unit for
 /// both alleles, rather than CAG for one and AGC for the other.
 pub fn allele_motifs(seq: &str, reference: &str) -> Option<String> {
+    summarize(seq, reference).map(|s| s.motifs)
+}
+
+/// What is known about the repeat in one allele: its units (see `allele_motifs`) and its
+/// longest pure segment (LPS), the longest run of consecutive copies of one unit with no
+/// interruption, as in Danzi et al. (bioRxiv 2025.01.06.631535). The units are found with
+/// an impurity-tolerant score, the LPS is strict: an interruption such as CAA in CAG ends
+/// it, since interruptions are what the LPS is meant to expose.
+pub struct RepeatSummary {
+    /// Units joined by `/`, as `allele_motifs`.
+    pub motifs: String,
+    /// Length in bases of the longest pure segment of any unit, flanks excluded.
+    pub lps: usize,
+    /// The unit of that segment, written like `motifs`; the strongest unit on a tie.
+    pub lps_motif: String,
+    /// Length in bases of the unit's whole repeat stretch, interruptions and impure copies
+    /// included (never shorter than `lps`). A large gap to `lps` means an interrupted repeat,
+    /// or errors in the sequence.
+    pub lps_including_interruptions: usize,
+}
+
+/// See `RepeatSummary` and `allele_motifs`.
+pub fn summarize(seq: &str, reference: &str) -> Option<RepeatSummary> {
     let seq = seq.as_bytes().to_ascii_uppercase();
     let reference = reference.as_bytes().to_ascii_uppercase();
     // (windows covered, unit as its least rotation, period, the stretch it was found in), in
@@ -135,7 +158,7 @@ pub fn allele_motifs(seq: &str, reference: &str) -> Option<String> {
         return None;
     }
     units.truncate(MOTIF_MAX_UNITS);
-    let written: Vec<String> = units
+    let written: Vec<(String, Vec<u8>, Range<usize>)> = units
         .into_iter()
         .map(|(_, unit, period, stretch)| {
             let reference_stretch = match reference.len() > period {
@@ -143,12 +166,60 @@ pub fn allele_motifs(seq: &str, reference: &str) -> Option<String> {
                 false => 0..0,
             };
             let rotation = rotation_in_frame(&reference[reference_stretch], period, &unit)
-                .or_else(|| rotation_in_frame(&seq[stretch], period, &unit))
-                .unwrap_or(unit);
-            String::from_utf8_lossy(&rotation).into_owned()
+                .or_else(|| rotation_in_frame(&seq[stretch.clone()], period, &unit))
+                .unwrap_or_else(|| unit.clone());
+            (String::from_utf8_lossy(&rotation).into_owned(), unit, stretch)
         })
         .collect();
-    Some(written.join("/"))
+    // the longest pure run over all units; the strongest unit wins a tie
+    let (mut lps, mut best) = (0, 0);
+    for (i, (_, unit, _)) in written.iter().enumerate() {
+        let run = longest_pure_run(&seq, unit);
+        if run > lps {
+            (lps, best) = (run, i);
+        }
+    }
+    let motifs = written
+        .iter()
+        .map(|(w, ..)| w.as_str())
+        .collect::<Vec<_>>()
+        .join("/");
+    Some(RepeatSummary {
+        motifs,
+        lps,
+        lps_motif: written[best].0.clone(),
+        lps_including_interruptions: written[best].2.len().max(lps),
+    })
+}
+
+/// Length in bases of the longest run in `seq` made of consecutive copies of `unit` (given
+/// as its least rotation), in any one phase and with no base differing, counted in whole
+/// copies. A run of one copy counts, as the unit exists in the sequence.
+fn longest_pure_run(seq: &[u8], unit: &[u8]) -> usize {
+    let period = unit.len();
+    if period == 0 || seq.len() < period {
+        return 0;
+    }
+    let rotations: HashSet<Vec<u8>> = (0..period)
+        .map(|r| [&unit[r..], &unit[..r]].concat())
+        .collect();
+    let (mut longest, mut i) = (0, 0);
+    while i + period <= seq.len() {
+        if !rotations.contains(&seq[i..i + period]) {
+            i += 1;
+            continue;
+        }
+        // the run goes on while each base equals the one a period before it; the windows
+        // inside it are all rotations of the unit, so none needs starting a run again
+        let mut j = i;
+        while j + period < seq.len() && seq[j] == seq[j + period] {
+            j += 1;
+        }
+        // whole copies only: the run may end partway through a unit (the CA of CAA in CAG)
+        longest = longest.max((j + period - i) / period * period);
+        i = j + 1;
+    }
+    longest
 }
 
 /// (score, period, stretch) of the strongest tandem repeat in `seq`, see `allele_motifs`.
@@ -332,6 +403,43 @@ mod tests {
         );
         // a unit absent from the reference keeps the allele's own frame
         assert_eq!(allele_motifs(&"AAGGG".repeat(100), &rfc1).as_deref(), Some("AAGGG"));
+    }
+
+    #[test]
+    fn test_lps() {
+        let lps = |seq: &str| {
+            summarize(seq, "").map(|s| (s.lps, s.lps_motif, s.lps_including_interruptions))
+        };
+        // pure: the repeat itself, flanks excluded
+        assert_eq!(lps(&"CAG".repeat(20)), Some((60, "CAG".into(), 60)));
+        assert_eq!(lps(&format!("TTT{}GGA", "CAG".repeat(20))).map(|l| l.0), Some(60));
+        // an interruption ends the segment: the longer tract counts, the stretch spans both
+        let interrupted = format!("{}CAA{}", "CAG".repeat(12), "CAG".repeat(8));
+        let (len, unit, with) = lps(&interrupted).unwrap();
+        assert_eq!((len, unit.as_str()), (36, "CAG"));
+        assert!(with >= 60, "{with}");
+        // a single interruption halves a tract of equal parts
+        assert_eq!(
+            lps(&format!("{}CAA{}", "CAG".repeat(10), "CAG".repeat(10))).map(|l| l.0),
+            Some(30)
+        );
+        // a substitution inside a pure repeat is an interruption, not noise to be ignored
+        let mut noisy = "CAG".repeat(60).into_bytes();
+        noisy[90] = b'T';
+        assert_eq!(lps(std::str::from_utf8(&noisy).unwrap()).map(|l| l.0), Some(90));
+        // the longest of two units in a motif switch
+        let mixed = format!("{}{}", "AAAAG".repeat(10), "AAGGG".repeat(40));
+        assert_eq!(lps(&mixed).map(|l| (l.0, l.1)), Some((200, "AAGGG".into())));
+        // lower case, and a trailing partial copy is not counted
+        assert_eq!(lps("agcagcagcagcagcagcag").map(|l| l.0), Some(18)); // six whole copies
+        assert_eq!(lps("ACGTTGCAAGCTTAGCCATGAGTCAGTACGATCGAATCGGCTA"), None);
+        // the pure run of the unit in the reference's rotation
+        assert_eq!(
+            summarize(&"CAG".repeat(15), &"CAG".repeat(19))
+                .map(|s| s.lps_motif)
+                .as_deref(),
+            Some("CAG")
+        );
     }
 
     #[test]

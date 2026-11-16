@@ -2,6 +2,24 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.4.0]
+
+### Added
+
+- **Longest pure segment (LPS) per allele**, as defined in Danzi et al. (bioRxiv
+  2025.01.06.631535), in three new per-allele FORMAT fields after MOT: `LPS` (length in bases of
+  the longest uninterrupted run of one unit, whole copies only), `LPSM` (its unit, in the
+  reference's rotation) and `LPSI` (the length of the repeat stretch around it with
+  interruptions included). The units are those of MOT, but the segment is strict, so interruptions
+  such as CAA in CAG end it. On a sample sequenced with ONT and HiFi, LPS was identical for
+  96-98% of alleles with a unit of 2 bp or more; ONT homopolymer lengths are less reliable (43%
+  identical), see the README.
+
+### Changed
+
+- The FORMAT string gains three fields (`GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI[:PS]`); readers
+  that index the sample column by position need updating.
+
 ## [1.3.1]
 
 ### Fixed

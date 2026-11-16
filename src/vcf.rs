@@ -51,6 +51,19 @@ impl Allele {
     }
 }
 
+/// The repeat fields (MOT, LPS, LPSM, LPSI) of one allele sequence; "." when it holds no repeat.
+fn repeat_fields(seq: &str, reference: &str) -> [String; 4] {
+    match crate::motif::summarize(seq, reference) {
+        Some(s) => [
+            s.motifs,
+            s.lps.to_string(),
+            s.lps_motif,
+            s.lps_including_interruptions.to_string(),
+        ],
+        None => std::array::from_fn(|_| ".".to_string()),
+    }
+}
+
 pub struct VCFRecord {
     pub chrom: std::sync::Arc<str>,
     pub start: u32,
@@ -65,6 +78,9 @@ pub struct VCFRecord {
     pub std_dev: (String, String),
     pub score: (String, String),
     pub motif: (String, String), // repeat units per allele, dominant first, see motif::allele_motifs
+    pub lps: (String, String),   // longest pure segment per allele in bases, see motif::summarize
+    pub lps_motif: (String, String), // the unit of that segment
+    pub lps_interrupted: (String, String), // its repeat stretch including interruptions, in bases
     pub somatic_info_field: String,
     pub outliers: String,
     pub n_clusters: String,
@@ -211,14 +227,13 @@ impl VCFRecord {
         // The second slot of each FORMAT field holds the value of the second allele for diploid
         // records; for haploid records it stays "." and is not emitted by Display.
         let dot = || ".".to_string();
-        let motif = (
-            crate::motif::allele_motifs(&allele1.seq, &repeat_ref_sequence)
-                .unwrap_or_else(|| ".".to_string()),
-            allele2
-                .as_ref()
-                .and_then(|a| crate::motif::allele_motifs(&a.seq, &repeat_ref_sequence))
-                .unwrap_or_else(&dot),
-        );
+        let fields1 = repeat_fields(&allele1.seq, &repeat_ref_sequence);
+        let fields2 = match &allele2 {
+            Some(a) => repeat_fields(&a.seq, &repeat_ref_sequence),
+            None => std::array::from_fn(|_| ".".to_string()),
+        };
+        let [motif, lps, lps_motif, lps_interrupted] =
+            std::array::from_fn(|i| (fields1[i].clone(), fields2[i].clone()));
         VCFRecord {
             chrom: repeat.chrom.clone(),
             id: repeat.id.clone().unwrap_or_else(|| ".".to_string()),
@@ -262,6 +277,9 @@ impl VCFRecord {
                     .unwrap_or_else(&dot),
             ),
             motif,
+            lps,
+            lps_motif,
+            lps_interrupted,
             score: (
                 allele1.score,
                 allele2
@@ -288,8 +306,9 @@ impl VCFRecord {
         args: &crate::Cli,
     ) -> VCFRecord {
         let time_taken = repeat.time_field(args.debug);
-        let ref_motif = crate::motif::allele_motifs(repeat_ref_seq, repeat_ref_seq)
-            .unwrap_or_else(|| ".".to_string());
+        // every read matched the reference length, so REF is the allele
+        let [motif, lps, lps_motif, lps_interrupted] =
+            repeat_fields(repeat_ref_seq, repeat_ref_seq).map(|v| (v.clone(), v));
         let flags_str = if flags.is_empty() {
             "".to_string()
         } else {
@@ -313,8 +332,10 @@ impl VCFRecord {
             support: (".".to_string(), ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
-            // every read matched the reference length, so REF is the allele
-            motif: (ref_motif.clone(), ref_motif),
+            motif,
+            lps,
+            lps_motif,
+            lps_interrupted,
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
             n_clusters: "".to_string(),
@@ -348,6 +369,9 @@ impl VCFRecord {
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
             motif: (".".to_string(), ".".to_string()),
+            lps: (".".to_string(), ".".to_string()),
+            lps_motif: (".".to_string(), ".".to_string()),
+            lps_interrupted: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
             n_clusters: "".to_string(),
@@ -369,6 +393,7 @@ impl VCFRecord {
         flag: Vec<String>,
         args: &crate::Cli,
     ) -> VCFRecord {
+        let single = repeat_fields(seq, repeat_ref_seq);
         let somatic_info_field = match all_insertions {
             Some(somatic_insertions) => {
                 format!(";SEQS={}", somatic_insertions.join(","))
@@ -399,10 +424,10 @@ impl VCFRecord {
             support: ("1".to_string(), ".".to_string()),
             std_dev: (".".to_string(), ".".to_string()),
             score: (".".to_string(), ".".to_string()),
-            motif: (
-                crate::motif::allele_motifs(seq, repeat_ref_seq).unwrap_or_else(|| ".".to_string()),
-                ".".to_string(),
-            ),
+            motif: (single[0].clone(), ".".to_string()),
+            lps: (single[1].clone(), ".".to_string()),
+            lps_motif: (single[2].clone(), ".".to_string()),
+            lps_interrupted: (single[3].clone(), ".".to_string()),
             somatic_info_field,
             outliers: "".to_string(),
             n_clusters: "".to_string(),
@@ -683,12 +708,12 @@ impl fmt::Display for VCFRecord {
         match &self.alt_seq {
             Some(alts) => {
                 let (FORMAT, ps) = match self.ps {
-                    Some(ps) => ("GT:RB:FRB:MRL:SUP:SC:MOT:PS", format!(":{}", ps)),
-                    None => ("GT:RB:FRB:MRL:SUP:SC:MOT", "".to_string()),
+                    Some(ps) => ("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI:PS", format!(":{}", ps)),
+                    None => ("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI", "".to_string()),
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t{id}\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}:{mot}{ps}",
+                    "{chrom}\t{start}\t{id}\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}:{mot}:{lps}:{lpsm}:{lpsi}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     id = self.id,
@@ -709,6 +734,9 @@ impl fmt::Display for VCFRecord {
                     sup = self.per_allele(&self.support),
                     sc = self.per_allele(&self.score),
                     mot = self.per_allele(&self.motif),
+                    lps = self.per_allele(&self.lps),
+                    lpsm = self.per_allele(&self.lps_motif),
+                    lpsi = self.per_allele(&self.lps_interrupted),
                 )
             }
             // every constructor now supplies an ALT, even if it is "."
@@ -827,6 +855,15 @@ pub fn write_vcf_header(args: &Cli) {
     );
     println!(
         r#"##FORMAT=<ID=MOT,Number=.,Type=String,Description="Repeat units of each allele, detected from its sequence rather than taken from the catalog: up to three units of period 1-100 joined by '/', strongest first (e.g. AAAAG/AAGGG for a motif switch, CAG/CAA for interruptions), each in the rotation the reference repeat reads in; '.' if no tandem repeat is found (one value on haploid chromosomes, two otherwise)">"#
+    );
+    println!(
+        r#"##FORMAT=<ID=LPS,Number=.,Type=Integer,Description="Longest pure segment per allele in bases: the longest run of consecutive copies of one repeat unit without interruption, flanks excluded (as in Danzi et al.). Interruptions such as CAA in CAG end it; '.' if no tandem repeat is found (one value on haploid chromosomes, two otherwise)">"#
+    );
+    println!(
+        r#"##FORMAT=<ID=LPSM,Number=.,Type=String,Description="Repeat unit of the longest pure segment of each allele, in the rotation the reference repeat reads in (one value on haploid chromosomes, two otherwise)">"#
+    );
+    println!(
+        r#"##FORMAT=<ID=LPSI,Number=.,Type=Integer,Description="Length in bases of the repeat stretch around the longest pure segment per allele, interruptions and impure copies included; a large excess over LPS means an interrupted repeat or sequence errors (one value on haploid chromosomes, two otherwise)">"#
     );
     let name = match &args.sample {
         Some(name) => name,
@@ -1087,6 +1124,9 @@ fn test_record(haploid: bool, allele: (&str, &str), alt: Option<&str>) -> VCFRec
         std_dev: pair(),
         score: pair(),
         motif: ("ATC".to_string(), "ATC".to_string()),
+        lps: ("30".to_string(), "27".to_string()),
+        lps_motif: ("ATC".to_string(), "ATC".to_string()),
+        lps_interrupted: ("33".to_string(), "27".to_string()),
         somatic_info_field: "".to_string(),
         outliers: "".to_string(),
         n_clusters: "".to_string(),
@@ -1105,7 +1145,7 @@ fn test_display_haploid_single_values() {
     let record = test_record(true, ("1", "."), Some("ATCATCATC"));
     let line = format!("{record}");
     let sample = line.split('\t').next_back().unwrap();
-    assert_eq!(sample, "1:10:10:10:10:10:ATC");
+    assert_eq!(sample, "1:10:10:10:10:10:ATC:30:ATC:33");
     assert!(line.contains("STDEV=10\t") || line.contains("STDEV=10;"));
 }
 
@@ -1115,7 +1155,7 @@ fn test_display_diploid_pair_values() {
     let record = test_record(false, ("1", "0"), Some("ATCATCATC"));
     let line = format!("{record}");
     let sample = line.split('\t').next_back().unwrap();
-    assert_eq!(sample, "1/0:10,20:10,20:10,20:10,20:10,20:ATC,ATC");
+    assert_eq!(sample, "1/0:10,20:10,20:10,20:10,20:10,20:ATC,ATC:30,27:ATC,ATC:33,27");
     assert!(line.contains("STDEV=10,20"));
 }
 
@@ -1129,7 +1169,7 @@ fn test_display_phased_record_uses_phased_separator() {
     let sample = line.split('\t').next_back().unwrap();
     assert!(sample.starts_with("1|2:"), "expected phased GT, got {sample}");
     assert!(sample.ends_with(":12345"), "phased records carry PS, got {sample}");
-    assert!(line.contains("GT:RB:FRB:MRL:SUP:SC:MOT:PS"));
+    assert!(line.contains("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI:PS"));
 }
 
 #[test]
