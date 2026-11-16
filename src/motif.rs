@@ -93,10 +93,6 @@ pub struct RepeatSummary {
     pub lps: usize,
     /// The unit of that segment, written like `motifs`; the strongest unit on a tie.
     pub lps_motif: String,
-    /// Length in bases of the unit's whole repeat stretch, interruptions and impure copies
-    /// included (never shorter than `lps`). A large gap to `lps` means an interrupted repeat,
-    /// or errors in the sequence.
-    pub lps_including_interruptions: usize,
 }
 
 /// See `RepeatSummary` and `allele_motifs`.
@@ -158,7 +154,7 @@ pub fn summarize(seq: &str, reference: &str) -> Option<RepeatSummary> {
         return None;
     }
     units.truncate(MOTIF_MAX_UNITS);
-    let written: Vec<(String, Vec<u8>, Range<usize>)> = units
+    let written: Vec<(String, Vec<u8>)> = units
         .into_iter()
         .map(|(_, unit, period, stretch)| {
             let reference_stretch = match reference.len() > period {
@@ -168,12 +164,12 @@ pub fn summarize(seq: &str, reference: &str) -> Option<RepeatSummary> {
             let rotation = rotation_in_frame(&reference[reference_stretch], period, &unit)
                 .or_else(|| rotation_in_frame(&seq[stretch.clone()], period, &unit))
                 .unwrap_or_else(|| unit.clone());
-            (String::from_utf8_lossy(&rotation).into_owned(), unit, stretch)
+            (String::from_utf8_lossy(&rotation).into_owned(), unit)
         })
         .collect();
     // the longest pure run over all units; the strongest unit wins a tie
     let (mut lps, mut best) = (0, 0);
-    for (i, (_, unit, _)) in written.iter().enumerate() {
+    for (i, (_, unit)) in written.iter().enumerate() {
         let run = longest_pure_run(&seq, unit);
         if run > lps {
             (lps, best) = (run, i);
@@ -181,15 +177,10 @@ pub fn summarize(seq: &str, reference: &str) -> Option<RepeatSummary> {
     }
     let motifs = written
         .iter()
-        .map(|(w, ..)| w.as_str())
+        .map(|(w, _)| w.as_str())
         .collect::<Vec<_>>()
         .join("/");
-    Some(RepeatSummary {
-        motifs,
-        lps,
-        lps_motif: written[best].0.clone(),
-        lps_including_interruptions: written[best].2.len().max(lps),
-    })
+    Some(RepeatSummary { motifs, lps, lps_motif: written[best].0.clone() })
 }
 
 /// Length in bases of the longest run in `seq` made of consecutive copies of `unit` (given
@@ -407,17 +398,13 @@ mod tests {
 
     #[test]
     fn test_lps() {
-        let lps = |seq: &str| {
-            summarize(seq, "").map(|s| (s.lps, s.lps_motif, s.lps_including_interruptions))
-        };
+        let lps = |seq: &str| summarize(seq, "").map(|s| (s.lps, s.lps_motif));
         // pure: the repeat itself, flanks excluded
-        assert_eq!(lps(&"CAG".repeat(20)), Some((60, "CAG".into(), 60)));
+        assert_eq!(lps(&"CAG".repeat(20)), Some((60, "CAG".into())));
         assert_eq!(lps(&format!("TTT{}GGA", "CAG".repeat(20))).map(|l| l.0), Some(60));
-        // an interruption ends the segment: the longer tract counts, the stretch spans both
+        // an interruption ends the segment: the longer tract counts
         let interrupted = format!("{}CAA{}", "CAG".repeat(12), "CAG".repeat(8));
-        let (len, unit, with) = lps(&interrupted).unwrap();
-        assert_eq!((len, unit.as_str()), (36, "CAG"));
-        assert!(with >= 60, "{with}");
+        assert_eq!(lps(&interrupted), Some((36, "CAG".into())));
         // a single interruption halves a tract of equal parts
         assert_eq!(
             lps(&format!("{}CAA{}", "CAG".repeat(10), "CAG".repeat(10))).map(|l| l.0),
@@ -440,6 +427,50 @@ mod tests {
                 .as_deref(),
             Some("CAG")
         );
+    }
+
+    #[test]
+    fn test_lps_of_a_unit_that_is_not_the_strongest() {
+        // an interrupted CAG/CAA/CAT dodecamer repeat beside a pure TG run: TG holds the
+        // longest pure segment although it is not the first unit listed
+        let seq =
+            format!("{}ACGTTGCAAGCTTAGCCATGAGTC{}", "CAGCAACAGCAT".repeat(8), "TG".repeat(12));
+        let s = summarize(&seq, "").unwrap();
+        assert!(!s.motifs.starts_with("TG"), "{}", s.motifs);
+        assert_eq!((s.lps, s.lps_motif.as_str()), (24, "TG"));
+        // a unit in two places: the longer pure run wins wherever it is
+        let seq = format!(
+            "{}CAA{}ACGTTGCAAGCTTAGCCATGAGTCAGTACGATCGAATCGGCTA{}",
+            "CAG".repeat(6),
+            "CAG".repeat(6),
+            "CAG".repeat(8)
+        );
+        assert_eq!(summarize(&seq, "").map(|s| s.lps), Some(24));
+    }
+
+    #[test]
+    fn test_longest_pure_run() {
+        let run = |seq: &str, unit: &str| longest_pure_run(seq.as_bytes(), unit.as_bytes());
+        // any phase: the run starts at the first base of a rotation
+        assert_eq!(run("GCAGCAGCAG", "AGC"), 9);
+        assert_eq!(run("TTAGCAGCAGCATT", "AGC"), 9);
+        // whole copies only, at both ends
+        assert_eq!(run("AGCAGCAGCA", "AGC"), 9);
+        assert_eq!(run("CAGCAGCAGCA", "AGC"), 9);
+        // restarts after a break and keeps the longest
+        assert_eq!(run("CAGCAGCAACAGCAGCAGCAG", "AGC"), 12);
+        assert_eq!(run("CAGCAGCAGCAACAGCAG", "AGC"), 9);
+        // a single copy counts; no copy, empty input or input shorter than the unit is 0
+        assert_eq!(run("TTCAGTT", "AGC"), 3);
+        assert_eq!(run("TTTTTTT", "AGC"), 0);
+        assert_eq!(run("", "AGC"), 0);
+        assert_eq!(run("CA", "AGC"), 0);
+        // homopolymer
+        assert_eq!(run("GAAAAAAAG", "A"), 7);
+        // a long unit
+        let unit = "AACGTTGCAAGCTTAGCCATGAGTC";
+        let seq = format!("GG{}{}", unit.repeat(3), &unit[..10]);
+        assert_eq!(run(&seq, &String::from_utf8(least_rotation(unit.as_bytes())).unwrap()), 75);
     }
 
     #[test]

@@ -51,15 +51,10 @@ impl Allele {
     }
 }
 
-/// The repeat fields (MOT, LPS, LPSM, LPSI) of one allele sequence; "." when it holds no repeat.
-fn repeat_fields(seq: &str, reference: &str) -> [String; 4] {
+/// The repeat fields (MOT, LPS, LPSM) of one allele sequence; "." when it holds no repeat.
+fn repeat_fields(seq: &str, reference: &str) -> [String; 3] {
     match crate::motif::summarize(seq, reference) {
-        Some(s) => [
-            s.motifs,
-            s.lps.to_string(),
-            s.lps_motif,
-            s.lps_including_interruptions.to_string(),
-        ],
+        Some(s) => [s.motifs, s.lps.to_string(), s.lps_motif],
         None => std::array::from_fn(|_| ".".to_string()),
     }
 }
@@ -80,7 +75,6 @@ pub struct VCFRecord {
     pub motif: (String, String), // repeat units per allele, dominant first, see motif::allele_motifs
     pub lps: (String, String),   // longest pure segment per allele in bases, see motif::summarize
     pub lps_motif: (String, String), // the unit of that segment
-    pub lps_interrupted: (String, String), // its repeat stretch including interruptions, in bases
     pub somatic_info_field: String,
     pub outliers: String,
     pub n_clusters: String,
@@ -232,7 +226,7 @@ impl VCFRecord {
             Some(a) => repeat_fields(&a.seq, &repeat_ref_sequence),
             None => std::array::from_fn(|_| ".".to_string()),
         };
-        let [motif, lps, lps_motif, lps_interrupted] =
+        let [motif, lps, lps_motif] =
             std::array::from_fn(|i| (fields1[i].clone(), fields2[i].clone()));
         VCFRecord {
             chrom: repeat.chrom.clone(),
@@ -279,7 +273,6 @@ impl VCFRecord {
             motif,
             lps,
             lps_motif,
-            lps_interrupted,
             score: (
                 allele1.score,
                 allele2
@@ -307,7 +300,7 @@ impl VCFRecord {
     ) -> VCFRecord {
         let time_taken = repeat.time_field(args.debug);
         // every read matched the reference length, so REF is the allele
-        let [motif, lps, lps_motif, lps_interrupted] =
+        let [motif, lps, lps_motif] =
             repeat_fields(repeat_ref_seq, repeat_ref_seq).map(|v| (v.clone(), v));
         let flags_str = if flags.is_empty() {
             "".to_string()
@@ -335,7 +328,6 @@ impl VCFRecord {
             motif,
             lps,
             lps_motif,
-            lps_interrupted,
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
             n_clusters: "".to_string(),
@@ -371,7 +363,6 @@ impl VCFRecord {
             motif: (".".to_string(), ".".to_string()),
             lps: (".".to_string(), ".".to_string()),
             lps_motif: (".".to_string(), ".".to_string()),
-            lps_interrupted: (".".to_string(), ".".to_string()),
             somatic_info_field: "".to_string(),
             outliers: "".to_string(),
             n_clusters: "".to_string(),
@@ -427,7 +418,6 @@ impl VCFRecord {
             motif: (single[0].clone(), ".".to_string()),
             lps: (single[1].clone(), ".".to_string()),
             lps_motif: (single[2].clone(), ".".to_string()),
-            lps_interrupted: (single[3].clone(), ".".to_string()),
             somatic_info_field,
             outliers: "".to_string(),
             n_clusters: "".to_string(),
@@ -708,12 +698,12 @@ impl fmt::Display for VCFRecord {
         match &self.alt_seq {
             Some(alts) => {
                 let (FORMAT, ps) = match self.ps {
-                    Some(ps) => ("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI:PS", format!(":{}", ps)),
-                    None => ("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI", "".to_string()),
+                    Some(ps) => ("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:PS", format!(":{}", ps)),
+                    None => ("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM", "".to_string()),
                 };
                 write!(
                     f,
-                    "{chrom}\t{start}\t{id}\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}:{mot}:{lps}:{lpsm}:{lpsi}{ps}",
+                    "{chrom}\t{start}\t{id}\t{ref}\t{alt}\t.\t.\t{flags}END={end};STDEV={stdev}{somatic}{outliers}{n_clusters}{dbscan_rb}{time_taken}\t{FORMAT}\t{gt}:{rb}:{frb}:{mrl}:{sup}:{sc}:{mot}:{lps}:{lpsm}{ps}",
                     chrom = self.chrom,
                     start = self.start,
                     id = self.id,
@@ -736,7 +726,6 @@ impl fmt::Display for VCFRecord {
                     mot = self.per_allele(&self.motif),
                     lps = self.per_allele(&self.lps),
                     lpsm = self.per_allele(&self.lps_motif),
-                    lpsi = self.per_allele(&self.lps_interrupted),
                 )
             }
             // every constructor now supplies an ALT, even if it is "."
@@ -862,9 +851,6 @@ pub fn write_vcf_header(args: &Cli) {
     println!(
         r#"##FORMAT=<ID=LPSM,Number=.,Type=String,Description="Repeat unit of the longest pure segment of each allele, in the rotation the reference repeat reads in (one value on haploid chromosomes, two otherwise)">"#
     );
-    println!(
-        r#"##FORMAT=<ID=LPSI,Number=.,Type=Integer,Description="Length in bases of the repeat stretch around the longest pure segment per allele, interruptions and impure copies included; a large excess over LPS means an interrupted repeat or sequence errors (one value on haploid chromosomes, two otherwise)">"#
-    );
     let name = match &args.sample {
         Some(name) => name,
         None => {
@@ -881,9 +867,8 @@ pub fn write_vcf_header(args: &Cli) {
 }
 
 #[cfg(test)]
-#[test]
-fn test_write_vcf_header_from_bam() {
-    let args = Cli {
+fn test_cli() -> Cli {
+    Cli {
         bam: String::from("test_data/small-test-phased.bam"),
         fasta: String::from("test_data/chr7.fa.gz"),
         region: None,
@@ -921,8 +906,13 @@ fn test_write_vcf_header_from_bam() {
         dbscan_length_weight: crate::phase_insertions::DBSCAN_LENGTH_WEIGHT,
         mode: crate::GenotypingMode::Sensitive,
         fast_flank: 10,
-    };
-    write_vcf_header(&args);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_write_vcf_header_from_bam() {
+    write_vcf_header(&test_cli());
 }
 
 #[test]
@@ -1126,7 +1116,6 @@ fn test_record(haploid: bool, allele: (&str, &str), alt: Option<&str>) -> VCFRec
         motif: ("ATC".to_string(), "ATC".to_string()),
         lps: ("30".to_string(), "27".to_string()),
         lps_motif: ("ATC".to_string(), "ATC".to_string()),
-        lps_interrupted: ("33".to_string(), "27".to_string()),
         somatic_info_field: "".to_string(),
         outliers: "".to_string(),
         n_clusters: "".to_string(),
@@ -1145,7 +1134,7 @@ fn test_display_haploid_single_values() {
     let record = test_record(true, ("1", "."), Some("ATCATCATC"));
     let line = format!("{record}");
     let sample = line.split('\t').next_back().unwrap();
-    assert_eq!(sample, "1:10:10:10:10:10:ATC:30:ATC:33");
+    assert_eq!(sample, "1:10:10:10:10:10:ATC:30:ATC");
     assert!(line.contains("STDEV=10\t") || line.contains("STDEV=10;"));
 }
 
@@ -1155,7 +1144,7 @@ fn test_display_diploid_pair_values() {
     let record = test_record(false, ("1", "0"), Some("ATCATCATC"));
     let line = format!("{record}");
     let sample = line.split('\t').next_back().unwrap();
-    assert_eq!(sample, "1/0:10,20:10,20:10,20:10,20:10,20:ATC,ATC:30,27:ATC,ATC:33,27");
+    assert_eq!(sample, "1/0:10,20:10,20:10,20:10,20:10,20:ATC,ATC:30,27:ATC,ATC");
     assert!(line.contains("STDEV=10,20"));
 }
 
@@ -1169,7 +1158,7 @@ fn test_display_phased_record_uses_phased_separator() {
     let sample = line.split('\t').next_back().unwrap();
     assert!(sample.starts_with("1|2:"), "expected phased GT, got {sample}");
     assert!(sample.ends_with(":12345"), "phased records carry PS, got {sample}");
-    assert!(line.contains("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:LPSI:PS"));
+    assert!(line.contains("GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:PS"));
 }
 
 #[test]
@@ -1192,4 +1181,60 @@ fn test_display_haploid_missing() {
     let sample = line.split('\t').next_back().unwrap();
     assert!(sample.starts_with("."), "expected single-dot GT, got {sample}");
     assert!(!sample.starts_with(".|."), "haploid missing must not be diploid ./.");
+}
+
+#[cfg(test)]
+fn test_interval() -> crate::repeats::RepeatInterval {
+    crate::repeats::RepeatInterval {
+        chrom: std::sync::Arc::from("chr7"),
+        start: 100,
+        end: 130,
+        created: None,
+        id: None,
+    }
+}
+
+#[cfg(test)]
+fn sample_column(record: &VCFRecord) -> (String, String) {
+    let line = format!("{record}");
+    let fields: Vec<&str> = line.split('\t').collect();
+    (fields[8].to_string(), fields[9].to_string())
+}
+
+#[test]
+fn test_display_quick_reference_has_repeat_fields_of_the_reference() {
+    let mut args = test_cli();
+    args.haploid = None;
+    let reference = "CAG".repeat(10);
+    let record = VCFRecord::quick_reference(&test_interval(), &reference, vec![], &args);
+    let (format, sample) = sample_column(&record);
+    assert_eq!(format, "GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM");
+    assert_eq!(sample, "0/0:0,0:30,30:0,0:.,.:.,.:CAG,CAG:30,30:CAG,CAG");
+}
+
+#[test]
+fn test_display_missing_genotype_has_empty_repeat_fields() {
+    let mut args = test_cli();
+    args.haploid = None;
+    let record =
+        VCFRecord::missing_genotype(&test_interval(), &"CAG".repeat(10), "1".to_string(), &args);
+    let (format, sample) = sample_column(&record);
+    let n = format.split(':').count();
+    assert_eq!(sample.split(':').count(), n, "{format} vs {sample}");
+    assert!(sample.ends_with(":.,.:.,.:.,."), "{sample}");
+}
+
+#[test]
+fn test_display_single_read_fills_the_first_allele_only() {
+    let mut args = test_cli();
+    args.haploid = None;
+    let reference = "CAG".repeat(10);
+    let read = format!("{}CAA{}", "CAG".repeat(12), "CAG".repeat(3));
+    let record =
+        VCFRecord::single_read(&read, &test_interval(), &reference, None, Some(7), vec![], &args);
+    let (format, sample) = sample_column(&record);
+    assert_eq!(format, "GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM:PS");
+    let fields: Vec<&str> = sample.split(':').collect();
+    assert_eq!(fields.len(), 10, "{sample}");
+    assert_eq!(&fields[7..], ["36,.", "CAG,.", "7"]);
 }

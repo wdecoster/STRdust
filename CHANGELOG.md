@@ -2,6 +2,22 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.4.1]
+
+### Removed
+
+- **The `LPSI` FORMAT field added in 1.4.0.** It was meant to give the length of the repeat around
+  the longest pure segment with interruptions included, but it was the impurity-tolerant stretch
+  used to detect the units. That stretch can sit elsewhere in the allele than the LPS it is
+  reported with, and it absorbs neighbouring repeats of the same period. At RFC1 a pure AAGGG
+  allele next to an AAAAG tract showed a gap that looked like interruptions. It did not capture
+  sequencing noise either: it agreed less often between ONT and HiFi than LPS itself. The FORMAT
+  string is now `GT:RB:FRB:MRL:SUP:SC:MOT:LPS:LPSM[:PS]`. LPS and LPSM are unchanged.
+
+### Fixed
+
+- The README's example record showed LPS 11 for a 12-base poly-T allele.
+
 ## [1.4.0]
 
 ### Added
