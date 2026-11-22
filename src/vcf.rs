@@ -800,7 +800,7 @@ pub fn write_vcf_header(args: &Cli) {
         r#"##INFO=<ID=NCLUSTERS,Number=1,Type=Integer,Description="Number of read clusters found by the DBSCAN phasing strategy (>2 indicates a complex multi-population locus)">"#
     );
     println!(
-        r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">"#
+        r#"##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to form any haplotype cluster (reported as homozygous)">"#
     );
     println!(
         r#"##INFO=<ID=EXPANSION_OUTLIER,Number=0,Type=Flag,Description="At least 2 reads are more than 2x longer than the longer called allele, suggesting a larger expansion missed by both alleles (only with --unphased)">"#

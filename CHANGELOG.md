@@ -2,6 +2,15 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.4.2]
+
+### Fixed
+
+- **`CLUSTERFAILURE` was raised on every unphased locus that ended up with a single allele cluster**,
+  including legitimate homozygous calls, so it was far more frequent than real clustering failures.
+  It is now only raised when no haplotype cluster could be formed at all (the call is then still
+  reported as homozygous, as before). Downstream filters on `CLUSTERFAILURE` will see fewer loci.
+
 ## [1.4.1]
 
 ### Removed

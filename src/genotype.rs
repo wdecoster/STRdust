@@ -513,7 +513,11 @@ pub fn genotype_with_extracted_reads(
                     consenses.push(consensus.clone());
                     consenses.push(consensus);
                 }
-                flags.push("CLUSTERFAILURE".to_string());
+                // only a genuine clustering failure is flagged; a single cluster is a
+                // legitimate homozygous call and carries no flag
+                if let Some(splitflag) = phased.flag {
+                    flags.push(splitflag);
+                }
                 if let Some(ref mut all_ins) = all_insertions {
                     all_ins.push(phased.hap1.join(":"));
                 }

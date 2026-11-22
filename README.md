@@ -125,7 +125,7 @@ Example output:
 ##INFO=<ID=SEQS,Number=1,Type=String,Description="Sequences supporting the two alleles">
 ##INFO=<ID=OUTLIERS,Number=1,Type=String,Description="Outlier sequences much longer than the alleles">
 ##INFO=<ID=NCLUSTERS,Number=1,Type=Integer,Description="Number of read clusters found by the DBSCAN phasing strategy (>2 indicates a complex multi-population locus)">
-##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to cluster in two haplotype">
+##INFO=<ID=CLUSTERFAILURE,Number=0,Type=Flag,Description="If unphased input failed to form any haplotype cluster (reported as homozygous)">
 ##INFO=<ID=EXPANSION_OUTLIER,Number=0,Type=Flag,Description="At least 2 reads are more than 2x longer than the longer called allele, suggesting a larger expansion missed by both alleles (only with --unphased)">
 ##INFO=<ID=IMPRECISE_LENGTH,Number=0,Type=Flag,Description="A called allele has a wide read-length spread (coefficient of variation > 0.2); the reported consensus length may not be representative">
 ##INFO=<ID=UNSPANNED_EXPANSION,Number=1,Type=Integer,Description="Number of reads ending in a large clip at the repeat: evidence of an allele too long for them to span. A haplotype without spanning reads is then reported unresolved (e.g. 0|.) rather than called">
