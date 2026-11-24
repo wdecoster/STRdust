@@ -2,6 +2,19 @@
 
 All notable changes to STRdust are documented here.
 
+## [1.4.3]
+
+### Fixed
+
+- **`--minlen` is now inclusive, and its default is 4** (was 3). The comparison was strictly
+  greater-than, so `--minlen N` required insertions of at least N+1 bp. The default moves to 4
+  so that `--mode sensitive` calls are unchanged: the benchmarked default of 3 already meant
+  "at least 4 bp". If you passed `--minlen` explicitly, add 1 to keep the same behaviour.
+  `--mode fast` (the default mode) does not use `--minlen` and is unaffected.
+- **The "`--minlen` has no effect with `--mode fast`" warning was printed on every fast-mode
+  run**, because it compared against the pre-1.0 default of 1. It now appears only when
+  `--minlen` is given on the command line.
+
 ## [1.4.2]
 
 ### Fixed

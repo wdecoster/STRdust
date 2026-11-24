@@ -601,7 +601,7 @@ pub fn genotype_with_extracted_reads(
 }
 
 /// This function genotypes a particular repeat defined by chrom, start and end in the specified bam file
-/// All indel cigar operations longer than minlen are considered
+/// With --mode sensitive, insertions of at least minlen at the junction are considered
 /// The bam file is expected to be phased using the HP tag, unless --unphased is specified
 /// haploid (sex) chromosomes should be listed under --haploid
 fn genotype_repeat(
@@ -972,7 +972,7 @@ fn parse_cs(
     junction_window: i32,
     repeat: &crate::repeats::RepeatInterval,
 ) -> Option<String> {
-    // parses the CS tag of a <read> and returns the inserted sequence if it is longer than <minlen>
+    // parses the CS tag of a <read> and returns the inserted sequence if it is at least <minlen> long
     // the reads are aligned to the repeat compressed reference genome,
     // which was constructed with <flanking> number of bases up and downstream of the repeat
     let mut ref_pos = read.target_start;
@@ -1017,10 +1017,10 @@ fn parse_cs(
                 // we only care about insertions that are within +/-10 bases of the repeat locus that was excised from the reference
                 // this is the ref_pos
                 // the cs tag is of the form +aaa, where aaa is the inserted sequence
-                // if the insertion is longer than the minimum length, it is added to the result
-                if cap[0][1..].len() > minlen && interval_around_junction.contains(&ref_pos) {
+                // if the insertion is at least the minimum length, it is added to the result
+                if cap[0][1..].len() >= minlen && interval_around_junction.contains(&ref_pos) {
                     result.push_str(&cap[0][1..]);
-                } else if cap[0][1..].len() > minlen {
+                } else if cap[0][1..].len() >= minlen {
                     debug!(
                         "{repeat}: Insertion at {} is too far from the junction to be considered: {}",
                         ref_pos,
@@ -1125,6 +1125,36 @@ mod tests {
             30,
             &repeat,
         );
+    }
+
+    #[test]
+    fn test_parse_cs_minlen_is_inclusive() {
+        // a 3 bp and a 4 bp insertion at the junction (ref_pos == flanking): with minlen 4
+        // only the 4 bp one counts, with minlen 3 both do
+        let repeat = crate::repeats::RepeatInterval {
+            chrom: "chr1".into(),
+            start: 1000,
+            end: 1010,
+            created: None,
+            id: None,
+        };
+        let flanking = 100;
+        let mapping = |cs: &str| minimap2::Mapping {
+            target_start: 0,
+            alignment: Some(minimap2::Alignment {
+                nm: 0,
+                cigar: None,
+                cigar_str: None,
+                md: None,
+                cs: Some(cs.to_string()),
+                alignment_score: None,
+            }),
+            ..Default::default()
+        };
+        let cs = ":100+ccc+gggg:100";
+        assert_eq!(parse_cs(mapping(cs), 4, flanking, 30, &repeat).as_deref(), Some("gggg"));
+        assert_eq!(parse_cs(mapping(cs), 3, flanking, 30, &repeat).as_deref(), Some("cccgggg"));
+        assert_eq!(parse_cs(mapping(cs), 5, flanking, 30, &repeat), None);
     }
 
     #[test]

@@ -47,7 +47,7 @@ SPECIFY ONE OF:
         --pathogenic                   Genotype the pathogenic STRs from STRchive
 
 OPTIONS:
-    -m, --minlen <MINLEN>              minimal length of an insertion at the junction to count towards the allele [default: 3]
+    -m, --minlen <MINLEN>              minimal length of an insertion at the junction to count towards the allele [default: 4]
         --priority <PRIORITY>          'expanded', 'sensitive', 'balanced' or 'precise' [default: balanced]
     -s, --support <SUPPORT>            minimal number of supporting reads per haplotype [default: 3]
         --mapq <MAPQ>                  minimum mapping quality of a read to be used [default: 10]

@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
-use clap::{Parser, ValueEnum};
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser, ValueEnum};
 use log::{info, warn};
 use std::path::PathBuf;
 
@@ -82,10 +83,11 @@ pub struct Cli {
     pathogenic: bool,
 
     /// Minimal length of an insertion at the repeat junction for it to count towards the
-    /// allele. Insertions shorter than this are read noise far more often than sequence:
-    /// dropping to 1 in 02d9540 cost about 11 points of allele-length concordance against
-    /// the GIAB HG002 truth set, and restoring a threshold recovers it
-    #[arg(short, long, default_value_t = 3)]
+    /// allele (inclusive). Insertions shorter than this are read noise far more often than
+    /// sequence: dropping to 1 in 02d9540 cost about 11 points of allele-length concordance
+    /// against the GIAB HG002 truth set, and restoring a threshold recovers it. Only used
+    /// with --mode sensitive
+    #[arg(short, long, default_value_t = 4)]
     minlen: usize,
 
     /// minimal number of supporting reads per haplotype
@@ -356,7 +358,8 @@ fn is_file(pathname: &str) -> Result<String, String> {
 
 fn main() {
     env_logger::init();
-    let args = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let args = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     if args.find_outliers && !args.is_unphased() {
         warn!("--find-outliers is only effective with --unphased");
     }
@@ -369,7 +372,7 @@ fn main() {
              tools that assumed diploid genotypes may need updating."
         );
     }
-    if args.is_fast_mode() && args.minlen != 1 {
+    if args.is_fast_mode() && matches.value_source("minlen") == Some(ValueSource::CommandLine) {
         warn!(
             "--minlen has no effect with --mode fast: the allele is read off the alignment \
              rather than collected from insertion operations, so there is no indel length to \
